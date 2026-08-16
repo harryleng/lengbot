@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.lengbot</groupId>
+        <artifactId>lengbot</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>lengbot-tool</artifactId>
+    <name>LengBot Tool</name>
+    <description>工具扩展模块：内置工具、API 工具、MCP Server、Skill、SubAgent 管理</description>
+
+    <properties>
+        <graalvm.version>24.2.1</graalvm.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.lengbot</groupId>
+            <artifactId>lengbot-ai</artifactId>
+        </dependency>
+        <!-- 知识库模块：复用 RapidOCR 引擎 (com.lengbot.util.OcrUtil) -->
+        <dependency>
+            <groupId>com.lengbot</groupId>
+            <artifactId>lengbot-knowledge</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- Janino Java 编译器（轻量沙盒代码执行引擎） -->
+        <dependency>
+            <groupId>org.codehaus.janino</groupId>
+            <artifactId>janino</artifactId>
+            <version>3.1.12</version>
+        </dependency>
+        <!-- Groovy 脚本引擎（JSR-223 沙盒代码执行） -->
+        <dependency>
+            <groupId>org.apache.groovy</groupId>
+            <artifactId>groovy-jsr223</artifactId>
+            <version>4.0.26</version>
+        </dependency>
+        <!-- JSqlParser：SQL AST 解析，PgSqlTool 仅允许 SELECT 的权威校验 -->
+        <dependency>
+            <groupId>com.github.jsqlparser</groupId>
+            <artifactId>jsqlparser</artifactId>
+        </dependency>
+        <!-- GraalVM Polyglot 沙盒：支持 JS 脚本执行（LengBot tool 模块依赖） -->
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>polyglot</artifactId>
+            <version>${graalvm.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.js</groupId>
+            <artifactId>js-language</artifactId>
+            <version>${graalvm.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.js</groupId>
+            <artifactId>js-scriptengine</artifactId>
+            <version>${graalvm.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

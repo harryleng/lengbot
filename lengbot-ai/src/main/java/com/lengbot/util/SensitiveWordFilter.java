@@ -1,0 +1,217 @@
+package com.lengbot.util;
+
+import com.lengbot.constant.ConfigKeys;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 敏感词过滤：用户输入拦截 + AI 输出替换/拦截
+ * <p>底层基于 {@link SensitiveWordTrie} DFA 单次扫描，5000 词字典下耗时 &lt;1ms；
+ * 流式场景由 {@link StreamState} 持有累积文本跨 chunk 复用过滤结果</p>
+ *
+ * @author finch
+ * @since 2026-05-23
+ */
+@Slf4j
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
+public class SensitiveWordFilter {
+
+    public static final String STRATEGY_REPLACE = "replace";
+    public static final String STRATEGY_BLOCK = "block";
+
+    /** 用户输入命中敏感词时的提示（展示给用户） */
+    public static final String USER_BLOCK_MESSAGE = "【安全提示】您的消息包含敏感内容，请修改后重新发送。";
+
+    /** AI 输出命中拦截策略时的提示（展示给用户） */
+    public static final String AI_BLOCK_MESSAGE = "【安全提示】回复内容包含敏感信息，已停止输出。";
+
+    /**
+     * 流式 AI 输出过滤状态：累积全文并对每个 chunk 复算过滤结果
+     * <p>每个 chunk 到达后对累积文本做一次 DFA 扫描，与已下发长度比较得到本 chunk 应下发的增量；
+     * 单次扫描复杂度 O(n * L)（L 为最长敏感词长度），相比早期 Pattern.compile 循环已大幅降低</p>
+     */
+    public static final class StreamState {
+        private final Map<String, Object> configMap;
+        private final Long agentId;
+        private final Long sessionId;
+        private final StringBuilder raw = new StringBuilder();
+        private int filteredEmittedLength;
+        private boolean lastBlocked;
+
+        public StreamState(Map<String, Object> configMap, Long agentId, Long sessionId) {
+            this.configMap = configMap;
+            this.agentId = agentId;
+            this.sessionId = sessionId;
+        }
+
+        public String processChunk(String chunk) {
+            if (chunk == null || chunk.isEmpty()) {
+                return "";
+            }
+            raw.append(chunk);
+            FilterResult result = filterAiOutput(raw.toString(), configMap, agentId, sessionId);
+            lastBlocked = result.blocked();
+            String filtered = result.text();
+            if (filtered.length() <= filteredEmittedLength) {
+                return "";
+            }
+            String delta = filtered.substring(filteredEmittedLength);
+            filteredEmittedLength = filtered.length();
+            return delta;
+        }
+
+        /** 最近一次 processChunk 是否触发了 block 拦截 */
+        public boolean isBlocked() {
+            return lastBlocked;
+        }
+    }
+
+    /**
+     * 检测用户输入是否包含敏感词（命中则拦截，不继续对话）
+     */
+    public static FilterResult checkUserInput(String text, Map<String, Object> configMap,
+                                             Long agentId, Long sessionId) {
+        if (text == null || text.isEmpty() || configMap == null) {
+            return FilterResult.unchanged(text);
+        }
+        if (!isUserFilterEnabled(configMap)) {
+            return FilterResult.unchanged(text);
+        }
+        List<String> words = parseWords(configMap.get(ConfigKeys.Agent.USER_SENSITIVE_WORDS));
+        if (words.isEmpty()) {
+            return FilterResult.unchanged(text);
+        }
+        // DFA 单次扫描定位首个命中词，O(n*L) 替代早期逐词 Pattern.compile 的 O(n*m)
+        SensitiveWordTrie trie = new SensitiveWordTrie(words);
+        String matched = trie.findFirst(text);
+        if (matched != null) {
+            log.warn("[SensitiveWord] 用户输入拦截 agentId={}, sessionId={}, matchedWord={}",
+                    agentId, sessionId, matched);
+            return new FilterResult(USER_BLOCK_MESSAGE, true, true, matched, "user_input");
+        }
+        return FilterResult.unchanged(text);
+    }
+
+    /**
+     * 过滤 AI 输出（替换或拦截）
+     */
+    public static FilterResult filterAiOutput(String text, Map<String, Object> configMap) {
+        return filterAiOutput(text, configMap, null, null);
+    }
+
+    public static FilterResult filterAiOutput(String text, Map<String, Object> configMap,
+                                              Long agentId, Long sessionId) {
+        if (text == null || text.isEmpty() || configMap == null) {
+            return FilterResult.unchanged(text);
+        }
+        if (!isAiFilterEnabled(configMap)) {
+            return FilterResult.unchanged(text);
+        }
+        List<String> words = parseWords(configMap.get(ConfigKeys.Agent.SENSITIVE_WORDS));
+        if (words.isEmpty()) {
+            return FilterResult.unchanged(text);
+        }
+        String strategy = configMap.get(ConfigKeys.Agent.SENSITIVE_FILTER_STRATEGY) != null
+                ? configMap.get(ConfigKeys.Agent.SENSITIVE_FILTER_STRATEGY).toString() : STRATEGY_REPLACE;
+        String replaceText = configMap.get(ConfigKeys.Agent.SENSITIVE_FILTER_REPLACE_TEXT) != null
+                ? configMap.get(ConfigKeys.Agent.SENSITIVE_FILTER_REPLACE_TEXT).toString() : "***";
+
+        // DFA 单次扫描可同时支持 block/replace 两种策略：findFirst 定位、replaceAll 全量替换
+        SensitiveWordTrie trie = new SensitiveWordTrie(words);
+        if (STRATEGY_BLOCK.equalsIgnoreCase(strategy)) {
+            String matched = trie.findFirst(text);
+            if (matched != null) {
+                log.warn("[SensitiveWord] AI输出拦截 agentId={}, sessionId={}, matchedWord={}, strategy=block",
+                        agentId, sessionId, matched);
+                return new FilterResult(AI_BLOCK_MESSAGE, true, true, matched, "ai_output_block");
+            }
+            return FilterResult.unchanged(text);
+        }
+
+        String replaced = trie.replaceAll(text, replaceText);
+        if (!replaced.equals(text)) {
+            String firstMatched = trie.findFirst(text);
+            log.info("[SensitiveWord] AI输出替换 agentId={}, sessionId={}, matchedWord={}, strategy=replace",
+                    agentId, sessionId, firstMatched);
+            return new FilterResult(replaced, true, false, firstMatched, "ai_output_replace");
+        }
+        return FilterResult.unchanged(text);
+    }
+
+    /** @deprecated 使用 {@link #filterAiOutput} */
+    @Deprecated
+    public static FilterResult filter(String text, Map<String, Object> configMap) {
+        return filterAiOutput(text, configMap);
+    }
+
+    public static boolean isUserFilterEnabled(Map<String, Object> configMap) {
+        return parseBooleanFlag(configMap, ConfigKeys.Agent.USER_SENSITIVE_FILTER_ENABLED);
+    }
+
+    public static boolean isAiFilterEnabled(Map<String, Object> configMap) {
+        return parseBooleanFlag(configMap, ConfigKeys.Agent.SENSITIVE_FILTER_ENABLED);
+    }
+
+    private static boolean parseBooleanFlag(Map<String, Object> configMap, String key) {
+        if (configMap == null) {
+            return false;
+        }
+        Object v = configMap.get(key);
+        if (v == null) {
+            return false;
+        }
+        if (v instanceof Boolean b) {
+            return b;
+        }
+        if (v instanceof Number n) {
+            return n.intValue() != 0;
+        }
+        String s = v.toString().trim();
+        return "true".equalsIgnoreCase(s) || "1".equals(s) || "yes".equalsIgnoreCase(s);
+    }
+
+    private static List<String> parseWords(Object raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        if (raw instanceof List<?> list) {
+            List<String> words = new ArrayList<>();
+            for (Object item : list) {
+                if (item != null && !item.toString().isBlank()) {
+                    words.add(item.toString().trim());
+                }
+            }
+            return words;
+        }
+        if (raw instanceof String str && !str.isBlank()) {
+            String[] parts = str.split("[,，\\n;；]+");
+            List<String> words = new ArrayList<>();
+            for (String part : parts) {
+                if (!part.isBlank()) {
+                    words.add(part.trim());
+                }
+            }
+            return words;
+        }
+        return List.of();
+    }
+
+    public record FilterResult(String text, boolean filtered, boolean blocked, String matchedWord, String scope) {
+        public static FilterResult unchanged(String text) {
+            return new FilterResult(text, false, false, null, null);
+        }
+
+        public FilterResult(String text, boolean filtered, boolean blocked, String matchedWord, String scope) {
+            this.text = text;
+            this.filtered = filtered;
+            this.blocked = blocked;
+            this.matchedWord = matchedWord;
+            this.scope = scope;
+        }
+    }
+}

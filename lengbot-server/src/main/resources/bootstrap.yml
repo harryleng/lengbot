@@ -1,0 +1,35 @@
+# ============================================
+# LengBot Server — Bootstrap 配置
+# 启动时最先加载，用于连接 Nacos 注册中心和配置中心
+# ============================================
+spring:
+  application:
+    name: lengbot-server
+  config:
+    # 显式关闭 Nacos 配置导入校验：本地无 Nacos 时必需，否则 nacos-config starter
+    # 会自动注入 spring.config.import=nacos: 并尝试连接，导致启动报错
+    import: optional:nacos:
+  cloud:
+    nacos:
+      # Nacos 服务注册与发现
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:dev}
+        group: DEFAULT_GROUP
+        enabled: false
+      # Nacos 配置中心
+      config:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:dev}
+        group: DEFAULT_GROUP
+        file-extension: yaml
+        # 硬编码关死，不依赖占位符默认值，避免不同加载方式下未生效
+        enabled: false
+        # 关闭 spring.config.import=nacos: 强制校验（本地无 Nacos 时必需）
+        import-check:
+          enabled: false
+        # 共享配置：所有微服务共用的基础配置
+        shared-configs:
+          - data-id: lengbot-common.yaml
+            group: DEFAULT_GROUP
+            refresh: true

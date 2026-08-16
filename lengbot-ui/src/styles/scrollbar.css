@@ -1,0 +1,156 @@
+/**
+ * 全局滚动条统一样式（v4）
+ *
+ * 设计规范：
+ * - 尺寸：8px（足够点击，不过于粗壮）
+ * - 颜色：浅色 #d4d4d8 / 深色 #3f3f46，hover 各自亮一档
+ * - 圆角：与尺寸等宽（胶囊形），无边框包裹
+ * - 轨道：透明，不抢视觉焦点
+ * - 与内容间距：滚动容器加 .scroll-area-y / .modal-scroll-body 等语义类，
+ *   统一 scrollbar-gutter: stable + padding-right: var(--scroll-content-gap)
+ *
+ * 禁止在组件局部写 ::-webkit-scrollbar，统一在此文件维护。
+ * Firefox 通过 scrollbar-width / scrollbar-color 适配（* 选择器全局生效）。
+ */
+
+/* Firefox：全局细滚动条 + 主题色 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+/* Chromium / WebKit：全局尺寸 + 轨道 */
+::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--scrollbar-size);
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ============ 语义滚动容器：内容与滚动条保持固定间距 ============ */
+/* 这些类的作用是标记"这是一个滚动容器"，继承全局滚动条样式，
+   同时通过 scrollbar-gutter: stable 预留滚动条位置防止内容抖动，
+   padding-right 让内容与滚动条之间留出呼吸空间。 */
+
+.scroll-area-y,
+.modal-scroll-body,
+.detail-scroll-body,
+.code-block-scroll,
+.debug-registry-modal-body,
+.advisor-scroll-body,
+.tab-content,
+.guide,
+.log-table-body,
+.fetch-model-list,
+.model-list,
+.config-list-scroll,
+.chunk-list,
+.chat-messages,
+.bar-chart-scroll,
+.provider-form-scroll,
+.preset-list,
+.skill-list,
+.panel-body {
+  scrollbar-gutter: stable;
+  padding-right: var(--scroll-content-gap);
+}
+
+/* 弹窗 / 抽屉内的滚动容器：同样预留滚动条空间
+   注意：.dialog-scroll-body 已移至 modal-scroll.css 的动态规则（配合 JS 监听
+   .ant-modal-body.has-overflow），无滚动条时 padding-right: 0，有滚动条时才加 8px */
+.ant-modal-body .scroll-area-y,
+.ant-modal-body .modal-scroll-body,
+.ant-drawer-body .scroll-area-y,
+.ant-drawer-body .modal-scroll-body {
+  padding-right: var(--scroll-content-gap);
+}
+
+/* 代码块 / JSON / 表格常需要横向滚动：底部同样留间距 */
+.code-block-scroll {
+  padding-bottom: var(--scroll-content-gap);
+}
+
+/* ============ 特例 1：侧栏（始终深色背景） ============ */
+/* 侧栏 --sidebar-bg: #171717，在浅色模式下也不能用浅色 thumb（看不见）。
+   固定使用 sidebar 专属变量。 */
+.sidebar,
+.sidebar * {
+  scrollbar-color: var(--sidebar-border) transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb,
+.sidebar ::-webkit-scrollbar-thumb {
+  background: var(--sidebar-border);
+  border-radius: var(--scrollbar-size);
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover,
+.sidebar ::-webkit-scrollbar-thumb:hover {
+  background: var(--sidebar-text);
+}
+
+/* 侧栏"最近对话"列表：隐藏垂直滚动条但保留滚动能力
+   - 对话条目多时可正常滚轮滚动 / 触摸板滑动
+   - 视觉上侧栏更干净，避免与侧栏深色背景上的细滚动条共存
+   覆盖范围：仅 .session-section（对话历史区），其他侧栏滚动区域不受影响 */
+.session-section {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.session-section::-webkit-scrollbar {
+  width: 0;
+  display: none;
+}
+
+/* ============ 特例 2：消息中的代码块（背景始终深色） ============ */
+/* ChatMessageBody 内的 pre:not(.shiki) 永远是 #1e1e1e 深色背景，
+   浅色主题下用 --scrollbar-thumb (#d4d4d8) 虽可见但对比偏弱，
+   固定使用白色半透明，跨主题一致。 */
+.message-content pre:not(.shiki)::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.message-content pre:not(.shiki)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.message-content pre:not(.shiki)::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.message-content pre:not(.shiki)::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.message-content pre:not(.shiki) {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+/* ============ 弹窗内滚动容器：预留滚动条空间 + 横向隐藏 ============ */
+/* antd Modal body 默认加 max-height + overflow-y: auto（见 modal-scroll.css），
+   此处只补充水平方向约束，避免 a-slider marks、负 margin 几像素溢出触发横向滚动条。 */
+.ant-modal-body {
+  overflow-x: hidden;
+  overflow-y: auto;
+}

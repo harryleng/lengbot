@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.lengbot</groupId>
+        <artifactId>lengbot</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>lengbot-ai</artifactId>
+    <name>LengBot AI</name>
+    <description>AI 模型层：基于 AgentScope Java 的模型供应商管理、ModelRegistry 集成、Prompt 版本管理、LLM Trace</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.lengbot</groupId>
+            <artifactId>lengbot-platform</artifactId>
+        </dependency>
+
+        <!-- AgentScope Java 核心库 -->
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-harness</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-model-openai</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-model-dashscope</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-model-ollama</artifactId>
+        </dependency>
+
+        <!-- AgentScope RAG Simple（提供文本嵌入模型：DashScope/OpenAI/Ollama Embedding） -->
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-rag-simple</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+</project>

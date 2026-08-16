@@ -1,0 +1,71 @@
+package com.lengbot.dto;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import lombok.Data;
+
+import java.util.List;
+
+/**
+ * Skill 请求 DTO
+ *
+ * @author finch
+ * @since 2026-05-20
+ */
+@Data
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class SkillRequestDTO {
+
+    private Long id;
+
+    /** 全局唯一标识（英文-小写-短横线）；新建 global Skill 必填 */
+    @Size(max = 30, message = "标识不超过30字")
+    private String slug;
+
+    /** 兼容字段：旧的按 Agent 私有 Skill 使用 */
+    private Long agentId;
+
+    /** 依赖的 Tool ID 列表（字符串避免精度丢失） */
+    private List<String> toolIds;
+
+    /** 依赖的 MCP Server ID 列表 */
+    private List<String> mcpServerIds;
+
+    /** 可选模型覆盖（保留字段） */
+    private Long modelId;
+
+    @NotBlank(message = "Skill 名称不能为空")
+    @Size(max = 30, message = "技能名称不超过30字")
+    private String name;
+
+    @Size(max = 30, message = "显示名称不超过30字")
+    private String displayName;
+
+    /** 图标标识（Ant Design 图标组件名，如 ExperimentOutlined） */
+    @Size(max = 64, message = "图标标识不超过64字")
+    private String icon;
+
+    @Size(max = 50, message = "技能描述不超过50字")
+    private String description;
+
+    /** 提示词模板（注入主 Agent 系统提示） */
+    @Size(max = 5000, message = "提示词模板不超过5000字")
+    private String promptTemplate;
+
+    private String config;
+
+    private Integer sortOrder;
+
+    /** 作用域：global / agent，默认 global */
+    private String scope;
+
+    /** 语义版本号 */
+    private String version;
+
+    /** 依赖其他 Skill 的 slug 列表 */
+    private List<String> skillDependencies;
+
+    /** 来源类型: builtin/upload/remote */
+    private String sourceType;
+}

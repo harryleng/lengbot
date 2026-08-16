@@ -1,0 +1,1065 @@
+package com.lengbot.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lengbot.common.BizException;
+import com.lengbot.dto.*;
+import com.lengbot.vo.*;
+import com.lengbot.entity.Document;
+import com.lengbot.entity.GraphDocument;
+import com.lengbot.entity.Knowledge;
+import com.lengbot.entity.KnowledgeGraph;
+import com.lengbot.entity.Task;
+import com.lengbot.enums.DocumentStatus;
+import com.lengbot.enums.ErrorCode;
+import com.lengbot.enums.GraphTaskStatus;
+import com.lengbot.enums.TaskStatus;
+import com.lengbot.mapper.DocumentMapper;
+import com.lengbot.mapper.GraphDocumentMapper;
+import com.lengbot.mapper.KnowledgeGraphMapper;
+import com.lengbot.model.graph.GraphExtractor;
+import com.lengbot.enums.KnowledgeRole;
+import com.lengbot.entity.ModelProvider;
+import com.lengbot.service.TextEmbeddingService;
+import com.lengbot.service.GraphService;
+import com.lengbot.service.KnowledgeMemberService;
+import com.lengbot.service.KnowledgeService;
+import com.lengbot.service.ModelProviderService;
+import com.lengbot.service.TaskService;
+import com.lengbot.util.MilvusUtil;
+import com.lengbot.util.Neo4jUtil;
+import lombok.extern.slf4j.Slf4j;
+import org.neo4j.driver.types.Node;
+import org.neo4j.driver.types.Relationship;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+/**
+ * 知识图谱服务实现类
+ *
+ * @author finch
+ * @since 2026-05-29
+ */
+@Slf4j
+@Service
+public class GraphServiceImpl implements GraphService {
+
+    private static final double DEFAULT_MIN_SIMILARITY_SCORE = 0.5;
+
+    private final Neo4jUtil neo4jUtil;
+    private final MilvusUtil milvusUtil;
+    /** 文本向量生成服务（AgentScope 引擎） */
+    private final TextEmbeddingService textEmbeddingService;
+    private final KnowledgeMemberService permissionHelper;
+    private final GraphExtractor graphExtractor;
+    private final TaskService taskService;
+    private final ModelProviderService modelProviderService;
+    private final KnowledgeGraphMapper knowledgeGraphMapper;
+    private final GraphDocumentMapper graphDocumentMapper;
+    private final DocumentMapper documentMapper;
+    private final ObjectMapper objectMapper;
+
+    /** 延迟解析：KnowledgeServiceImpl 反向依赖 GraphService，ObjectProvider 取 bean 时打破构造期循环 */
+    private final ObjectProvider<KnowledgeService> knowledgeServiceProvider;
+
+    public GraphServiceImpl(Neo4jUtil neo4jUtil, MilvusUtil milvusUtil, TextEmbeddingService textEmbeddingService,
+                            KnowledgeMemberService permissionHelper, GraphExtractor graphExtractor,
+                            TaskService taskService, ModelProviderService modelProviderService,
+                            KnowledgeGraphMapper knowledgeGraphMapper, GraphDocumentMapper graphDocumentMapper,
+                            DocumentMapper documentMapper, ObjectMapper objectMapper,
+                            ObjectProvider<KnowledgeService> knowledgeServiceProvider) {
+        this.neo4jUtil = neo4jUtil;
+        this.milvusUtil = milvusUtil;
+        this.textEmbeddingService = textEmbeddingService;
+        this.permissionHelper = permissionHelper;
+        this.graphExtractor = graphExtractor;
+        this.taskService = taskService;
+        this.modelProviderService = modelProviderService;
+        this.knowledgeGraphMapper = knowledgeGraphMapper;
+        this.graphDocumentMapper = graphDocumentMapper;
+        this.documentMapper = documentMapper;
+        this.objectMapper = objectMapper;
+        this.knowledgeServiceProvider = knowledgeServiceProvider;
+    }
+
+    private void checkNeo4jAvailable() {
+        if (!neo4jUtil.isAvailable()) {
+            throw new BizException(ErrorCode.GRAPH_NEO4J_UNAVAILABLE);
+        }
+    }
+
+    /** 解析 KnowledgeService（构造期循环依赖通过 ObjectProvider 延迟到首调） */
+    private KnowledgeService knowledgeService() {
+        return knowledgeServiceProvider.getObject();
+    }
+
+    // ==================== 抽取 ====================
+
+    @Override
+    public Long extractFromDocument(Long knowledgeId, GraphExtractDTO request) {
+        checkNeo4jAvailable();
+        permissionHelper.checkPermission(knowledgeId, KnowledgeRole.DEVELOPER);
+        return doExtract(knowledgeId, request);
+    }
+
+    @Override
+    public Long autoExtractFromDocument(Long knowledgeId, Long documentId) {
+        if (!neo4jUtil.isAvailable()) {
+            return null;
+        }
+        Knowledge knowledge = knowledgeService().getById(knowledgeId);
+        if (knowledge == null) {
+            return null;
+        }
+        GraphExtractDTO request = new GraphExtractDTO();
+        request.setDocumentIds(List.of(documentId));
+        return doExtract(knowledgeId, request);
+    }
+
+    private Long doExtract(Long knowledgeId, GraphExtractDTO request) {
+        Knowledge knowledge = knowledgeService().getById(knowledgeId);
+        if (knowledge == null) {
+            throw new BizException(ErrorCode.KNOWLEDGE_NOT_FOUND);
+        }
+
+        List<Long> documentIds = request.getDocumentIds();
+        Long providerId = request.getProviderId();
+        String modelId = request.getModelId();
+
+        // 1. 获取或创建 KnowledgeGraph 记录
+        KnowledgeGraph kg = getOrCreateKnowledgeGraph(knowledgeId);
+
+        boolean isPartial = documentIds != null && !documentIds.isEmpty();
+        boolean isSingleDoc = isPartial && documentIds.size() == 1;
+
+        // 2. 幂等检查：清理无效状态 + 验证 taskId 真实有效
+        List<Long> targetDocIds;
+        List<Long> graphDocIds = new ArrayList<>();
+
+        cleanStaleStatus(kg);
+
+        if (isSingleDoc) {
+            // 单文档抽取：创建/更新 GraphDocument 记录用于状态跟踪
+            targetDocIds = filterRunningDocs(kg.getId(), documentIds);
+            if (targetDocIds.isEmpty()) {
+                log.info("[图谱] 所有文档均已有运行中的任务, 复用: knowledgeId={}", knowledgeId);
+                return resolveReturnId(kg);
+            }
+            // 查询已有的 GraphDocument 记录（包括已完成/失败的）
+            List<GraphDocument> existingGds = graphDocumentMapper.selectList(
+                    new LambdaQueryWrapper<GraphDocument>()
+                            .eq(GraphDocument::getGraphId, kg.getId())
+                            .in(GraphDocument::getDocumentId, targetDocIds));
+            Map<Long, GraphDocument> existingMap = existingGds.stream()
+                    .collect(Collectors.toMap(GraphDocument::getDocumentId, gd -> gd));
+
+            for (Long docId : targetDocIds) {
+                GraphDocument existing = existingMap.get(docId);
+                if (existing != null) {
+                    // 已有记录：重置状态为 PENDING
+                    existing.setStatus(GraphTaskStatus.PENDING);
+                    existing.setEntityCount(0);
+                    existing.setRelationCount(0);
+                    existing.setErrorMessage(null);
+                    graphDocumentMapper.updateById(existing);
+                    graphDocIds.add(existing.getId());
+                } else {
+                    // 新记录：插入
+                    GraphDocument gd = new GraphDocument();
+                    gd.setGraphId(kg.getId());
+                    gd.setDocumentId(docId);
+                    gd.setStatus(GraphTaskStatus.PENDING);
+                    gd.setEntityCount(0);
+                    gd.setRelationCount(0);
+                    graphDocumentMapper.insert(gd);
+                    graphDocIds.add(gd.getId());
+                }
+            }
+        } else if (isPartial) {
+            // 多文档合并抽取：不创建 GraphDocument 记录，只做幂等检查
+            if (kg.getStatus() == GraphTaskStatus.PENDING || kg.getStatus() == GraphTaskStatus.RUNNING) {
+                return resolveReturnId(kg);
+            }
+            targetDocIds = documentIds;
+        } else {
+            // 全量抽取：检查是否已有全量任务在运行
+            if (kg.getStatus() == GraphTaskStatus.PENDING || kg.getStatus() == GraphTaskStatus.RUNNING) {
+                return resolveReturnId(kg);
+            }
+            targetDocIds = null;
+        }
+
+        // 3. 更新 KnowledgeGraph 状态
+        kg.setStatus(GraphTaskStatus.PENDING);
+        kg.setErrorMessage(null);
+        knowledgeGraphMapper.updateById(kg);
+
+        // 4. 构建异步任务 payload
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("knowledgeGraphId", kg.getId());
+            payload.put("knowledgeId", knowledgeId);
+            if (targetDocIds != null) {
+                payload.put("documentIds", targetDocIds);
+                if (!graphDocIds.isEmpty()) {
+                    payload.put("graphDocIds", graphDocIds);
+                }
+            }
+            if (providerId != null) {
+                payload.put("providerId", providerId);
+                ModelProvider provider = modelProviderService.getById(providerId);
+                if (provider != null) {
+                    payload.put("providerName", provider.getName());
+                }
+            }
+            if (modelId != null && !modelId.isBlank()) {
+                payload.put("modelId", modelId);
+            }
+            if (request.getSchema() != null && !request.getSchema().isBlank()) {
+                payload.put("schema", request.getSchema().trim());
+            }
+            if (request.getConcurrency() != null) {
+                payload.put("concurrency", Math.max(1, Math.min(request.getConcurrency(), 1000)));
+            }
+            if (request.getModelParams() != null && !request.getModelParams().isEmpty()) {
+                payload.put("modelParams", request.getModelParams());
+            }
+            var task = taskService.createTask(com.lengbot.enums.TaskType.GRAPH_EXTRACTION,
+                    "图谱抽取", knowledge.getUserId(), knowledgeId,
+                    objectMapper.writeValueAsString(payload));
+
+            // 记录 taskId 到 KnowledgeGraph
+            kg.setTaskId(task.getId());
+            knowledgeGraphMapper.updateById(kg);
+
+            log.info("[图谱] 抽取任务已提交: knowledgeId={}, documentIds={}, taskId={}", knowledgeId, documentIds, task.getId());
+            return task.getId();
+        } catch (Exception e) {
+            throw new BizException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    // ==================== 导入 ====================
+
+    @Override
+    public GraphStatsVO importTriples(Long knowledgeId, List<GraphTripleDTO> triples, Long providerId) {
+        checkNeo4jAvailable();
+        permissionHelper.checkPermission(knowledgeId, KnowledgeRole.DEVELOPER);
+
+        Knowledge knowledge = knowledgeService().getById(knowledgeId);
+        if (knowledge == null) {
+            throw new BizException(ErrorCode.KNOWLEDGE_NOT_FOUND);
+        }
+
+        String label = Neo4jUtil.kbLabel(knowledgeId);
+        int[] counts = writeTriplesToNeo4j(label, triples, null, knowledgeId, "import");
+        updateKnowledgeGraphStats(knowledgeId, label);
+
+        log.info("[图谱] 导入完成: knowledgeId={}, nodes={}, edges={}", knowledgeId, counts[0], counts[1]);
+        return new GraphStatsVO(counts[0], counts[1], Map.of());
+    }
+
+    // ==================== 查询 ====================
+
+    @Override
+    public GraphSubgraphVO getSubgraph(Long knowledgeId, Long documentId, String keyword, int maxDepth, int maxNodes) {
+        permissionHelper.checkMember(knowledgeId);
+        if (!neo4jUtil.isAvailable()) {
+            return emptySubgraph();
+        }
+        String label = Neo4jUtil.kbLabel(knowledgeId);
+        if (maxDepth <= 0) maxDepth = 2;
+        if (maxNodes <= 0) maxNodes = 50;
+
+        List<org.neo4j.driver.Record> records;
+        if (documentId != null) {
+            records = querySubgraphByDocument(label, String.valueOf(documentId), maxNodes);
+        } else if (keyword != null && !keyword.isBlank()) {
+            records = queryByKeyword(label, keyword, maxNodes);
+        } else {
+            records = querySampleSubgraph(label, maxNodes);
+        }
+
+        return buildSubgraphFromRecords(records);
+    }
+
+    private GraphSubgraphVO emptySubgraph() {
+        GraphSubgraphVO empty = new GraphSubgraphVO();
+        empty.setNodes(List.of());
+        empty.setEdges(List.of());
+        empty.setNodeCount(0);
+        empty.setEdgeCount(0);
+        return empty;
+    }
+
+    @Override
+    public List<String> searchForRag(Long knowledgeId, String question, Long providerId) {
+        if (!neo4jUtil.isAvailable()) {
+            return Collections.emptyList();
+        }
+        String label = Neo4jUtil.kbLabel(knowledgeId);
+
+        List<String> entityNames = graphExtractor.extractEntitiesFromQuestion(question, providerId);
+        if (entityNames.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 合并为单条 Cypher 查询（WHERE n.name IN $names），避免 N 次往返
+        String cypher = """
+            MATCH (n:Entity:`%s`)
+            WHERE n.name IN $names AND (n.graph_source = 'merged' OR n.graph_source IS NULL)
+            OPTIONAL MATCH (n)-[r1]-(m1:Entity:`%s`)
+            WHERE r1 IS NOT NULL AND (r1.graph_source = 'merged' OR r1.graph_source IS NULL)
+            WITH n, r1, m1
+            WHERE r1 IS NOT NULL
+            OPTIONAL MATCH (m1)-[r2]-(m2:Entity:`%s`)
+            WHERE m2 <> n AND m2 IS NOT NULL AND (r2.graph_source = 'merged' OR r2.graph_source IS NULL)
+            RETURN n.name AS h1, type(r1) AS r1Type, r1.relation_type AS r1Rel, m1.name AS t1,
+                   m1.name AS h2, type(r2) AS r2Type, r2.relation_type AS r2Rel, m2.name AS t2
+            """.formatted(label, label, label);
+
+        List<org.neo4j.driver.Record> records = neo4jUtil.query(cypher, Map.of("names", entityNames));
+        List<String> results = new ArrayList<>();
+        for (org.neo4j.driver.Record record : records) {
+            String r1Rel = record.get("r1Rel").isNull() ? null : record.get("r1Rel").asString();
+            String h1 = record.get("h1").isNull() ? null : record.get("h1").asString();
+            String t1 = record.get("t1").isNull() ? null : record.get("t1").asString();
+            if (r1Rel != null && h1 != null && t1 != null) {
+                results.add("%s %s %s".formatted(h1, r1Rel, t1));
+            }
+
+            String r2Rel = record.get("r2Rel").isNull() ? null : record.get("r2Rel").asString();
+            String h2 = record.get("h2").isNull() ? null : record.get("h2").asString();
+            String t2 = record.get("t2").isNull() ? null : record.get("t2").asString();
+            if (r2Rel != null && h2 != null && t2 != null) {
+                results.add("%s %s %s".formatted(h2, r2Rel, t2));
+            }
+        }
+
+        return results.stream().distinct().limit(10).collect(Collectors.toList());
+    }
+
+    // ==================== 统计 ====================
+
+    @Override
+    public GraphStatsVO getStats(Long knowledgeId, Long documentId) {
+        permissionHelper.checkMember(knowledgeId);
+        if (!neo4jUtil.isAvailable()) {
+            return new GraphStatsVO(0, 0, Map.of());
+        }
+        String label = Neo4jUtil.kbLabel(knowledgeId);
+        GraphStatsVO stats;
+        if (documentId != null) {
+            stats = getStatsFromNeo4jForDoc(label, String.valueOf(documentId));
+            // 检查该文档是否有正在运行的图谱抽取任务
+            KnowledgeGraph kg = getKnowledgeGraph(knowledgeId);
+            if (kg != null) {
+                long runningCount = graphDocumentMapper.selectCount(
+                        new LambdaQueryWrapper<GraphDocument>()
+                                .eq(GraphDocument::getGraphId, kg.getId())
+                                .eq(GraphDocument::getDocumentId, documentId)
+                                .in(GraphDocument::getStatus, List.of(GraphTaskStatus.PENDING, GraphTaskStatus.RUNNING)));
+                stats.setHasRunningTask(runningCount > 0);
+            }
+            // 文档正在入库且开启了图谱自动抽取，视为即将触发图谱任务
+            if (!Boolean.TRUE.equals(stats.getHasRunningTask())) {
+                Knowledge knowledge = knowledgeService().getById(knowledgeId);
+                if (knowledge != null && Boolean.TRUE.equals(knowledge.getGraphEnabled())) {
+                    Document doc = documentMapper.selectById(documentId);
+                    if (doc != null && doc.getStatus() == DocumentStatus.PROCESSING) {
+                        stats.setHasRunningTask(true);
+                    }
+                }
+            }
+        } else {
+            stats = getStatsFromNeo4j(label);
+            // 知识库级别：检查 KnowledgeGraph 整体状态
+            KnowledgeGraph kg = getKnowledgeGraph(knowledgeId);
+            if (kg != null) {
+                stats.setHasRunningTask(kg.getStatus() == GraphTaskStatus.PENDING || kg.getStatus() == GraphTaskStatus.RUNNING);
+            }
+            // 若无运行中图谱任务，检查是否有文档正在入库且开启了自动抽取
+            if (!Boolean.TRUE.equals(stats.getHasRunningTask())) {
+                Knowledge knowledge = knowledgeService().getById(knowledgeId);
+                if (knowledge != null && Boolean.TRUE.equals(knowledge.getGraphEnabled())) {
+                    long processingCount = documentMapper.selectCount(
+                            new LambdaQueryWrapper<Document>()
+                                    .eq(Document::getKnowledgeId, knowledgeId)
+                                    .eq(Document::getStatus, DocumentStatus.PROCESSING));
+                    stats.setHasRunningTask(processingCount > 0);
+                }
+            }
+        }
+        return stats;
+    }
+
+    // ==================== 批量检查 ====================
+
+    @Override
+    public List<Long> getExistingDocIds(Long knowledgeId, List<Long> documentIds) {
+        permissionHelper.checkMember(knowledgeId);
+        if (documentIds == null || documentIds.isEmpty()) {
+            return List.of();
+        }
+        KnowledgeGraph kg = getKnowledgeGraph(knowledgeId);
+        if (kg == null) {
+            return List.of();
+        }
+        // 查询状态为 SUCCESS 且有实体的 GraphDocument 记录
+        List<GraphDocument> existing = graphDocumentMapper.selectList(
+                new LambdaQueryWrapper<GraphDocument>()
+                        .eq(GraphDocument::getGraphId, kg.getId())
+                        .in(GraphDocument::getDocumentId, documentIds)
+                        .eq(GraphDocument::getStatus, GraphTaskStatus.COMPLETED)
+                        .gt(GraphDocument::getEntityCount, 0));
+        return existing.stream()
+                .map(GraphDocument::getDocumentId)
+                .collect(Collectors.toList());
+    }
+
+    // ==================== 删除 ====================
+
+    @Override
+    public void deleteByKnowledgeId(Long knowledgeId) {
+        permissionHelper.checkPermission(knowledgeId, KnowledgeRole.MANAGER);
+        checkNeo4jAvailable();
+        String label = Neo4jUtil.kbLabel(knowledgeId);
+        String cypher = "MATCH (n:Entity:`%s`) DETACH DELETE n".formatted(label);
+        neo4jUtil.run(cypher, Map.of());
+
+        // 重置知识库图谱统计
+        Knowledge knowledge = knowledgeService().getById(knowledgeId);
+        if (knowledge != null) {
+            knowledge.setNodeCount(0);
+            knowledge.setEdgeCount(0);
+            knowledgeService().updateById(knowledge);
+        }
+
+        // 重置 KnowledgeGraph 状态
+        KnowledgeGraph kg = getKnowledgeGraph(knowledgeId);
+        if (kg != null) {
+            kg.setNodeCount(0);
+            kg.setEdgeCount(0);
+            kg.setStatus(GraphTaskStatus.COMPLETED);
+            kg.setTaskId(null);
+            kg.setErrorMessage(null);
+            knowledgeGraphMapper.updateById(kg);
+            // 删除关联的 GraphDocument 记录
+            graphDocumentMapper.delete(new LambdaQueryWrapper<GraphDocument>()
+                    .eq(GraphDocument::getGraphId, kg.getId()));
+        }
+
+        log.info("[图谱] 已清空知识库图谱: knowledgeId={}", knowledgeId);
+    }
+
+    @Override
+    public void deleteByDocumentId(Long knowledgeId, Long documentId) {
+        permissionHelper.checkPermission(knowledgeId, KnowledgeRole.DEVELOPER);
+        checkNeo4jAvailable();
+        String label = Neo4jUtil.kbLabel(knowledgeId);
+        String cypher = "MATCH (n:Entity:`%s` {document_id: $docId}) WHERE n.graph_source = 'single_doc' DETACH DELETE n".formatted(label);
+        neo4jUtil.run(cypher, Map.of("docId", String.valueOf(documentId)));
+        updateKnowledgeGraphStats(knowledgeId, label);
+
+        // 删除 GraphDocument 记录
+        KnowledgeGraph kg = getKnowledgeGraph(knowledgeId);
+        if (kg != null) {
+            graphDocumentMapper.delete(new LambdaQueryWrapper<GraphDocument>()
+                    .eq(GraphDocument::getGraphId, kg.getId())
+                    .eq(GraphDocument::getDocumentId, documentId));
+        }
+
+        log.info("[图谱] 已删除文档关联图谱: knowledgeId={}, documentId={}", knowledgeId, documentId);
+    }
+
+    @Override
+    public void deleteByKnowledgeIdInternal(Long knowledgeId) {
+        try {
+            checkNeo4jAvailable();
+            String label = Neo4jUtil.kbLabel(knowledgeId);
+            String cypher = "MATCH (n:Entity:`%s`) DETACH DELETE n".formatted(label);
+            neo4jUtil.run(cypher, Map.of());
+
+            Knowledge knowledge = knowledgeService().getById(knowledgeId);
+            if (knowledge != null) {
+                knowledge.setNodeCount(0);
+                knowledge.setEdgeCount(0);
+                knowledgeService().updateById(knowledge);
+            }
+
+            KnowledgeGraph kg = getKnowledgeGraph(knowledgeId);
+            if (kg != null) {
+                kg.setNodeCount(0);
+                kg.setEdgeCount(0);
+                kg.setStatus(GraphTaskStatus.COMPLETED);
+                kg.setTaskId(null);
+                kg.setErrorMessage(null);
+                knowledgeGraphMapper.updateById(kg);
+                graphDocumentMapper.delete(new LambdaQueryWrapper<GraphDocument>()
+                        .eq(GraphDocument::getGraphId, kg.getId()));
+            }
+            log.info("[图谱] 已清空知识库图谱(内部): knowledgeId={}", knowledgeId);
+        } catch (Exception e) {
+            log.warn("[图谱] 清空知识库图谱失败, knowledgeId={}, error={}", knowledgeId, e.getMessage());
+        }
+    }
+
+    @Override
+    public void deleteByDocumentIdInternal(Long knowledgeId, Long documentId) {
+        try {
+            checkNeo4jAvailable();
+            String label = Neo4jUtil.kbLabel(knowledgeId);
+            String cypher = "MATCH (n:Entity:`%s` {document_id: $docId}) WHERE n.graph_source = 'single_doc' DETACH DELETE n".formatted(label);
+            neo4jUtil.run(cypher, Map.of("docId", String.valueOf(documentId)));
+            updateKnowledgeGraphStats(knowledgeId, label);
+
+            KnowledgeGraph kg = getKnowledgeGraph(knowledgeId);
+            if (kg != null) {
+                graphDocumentMapper.delete(new LambdaQueryWrapper<GraphDocument>()
+                        .eq(GraphDocument::getGraphId, kg.getId())
+                        .eq(GraphDocument::getDocumentId, documentId));
+            }
+            log.info("[图谱] 已删除文档关联图谱(内部): knowledgeId={}, documentId={}", knowledgeId, documentId);
+        } catch (Exception e) {
+            log.warn("[图谱] 删除文档关联图谱失败, knowledgeId={}, documentId={}, error={}", knowledgeId, documentId, e.getMessage());
+        }
+    }
+
+    // ==================== 手动编辑 ====================
+
+    @Override
+    public GraphNodeVO createNode(Long knowledgeId, String name, String entityType, String description) {
+        permissionHelper.checkPermission(knowledgeId, KnowledgeRole.DEVELOPER);
+        checkNeo4jAvailable();
+        String label = Neo4jUtil.kbLabel(knowledgeId);
+        String nodeId = String.valueOf(snowflakeId());
+
+        String cypher = """
+            MERGE (n:Entity:`%s` {name: $name})
+            ON CREATE SET n.id = $nodeId, n.entity_type = $entityType, n.description = $description,
+                          n.source = 'manual', n.knowledge_id = $knowledgeId,
+                          n.graph_source = 'merged',
+                          n.created_at = datetime(), n.updated_at = datetime()
+            ON MATCH SET n.entity_type = $entityType, n.description = $description,
+                         n.updated_at = datetime()
+            RETURN n
+            """.formatted(label);
+
+        List<org.neo4j.driver.Record> records = neo4jUtil.queryWrite(cypher, Map.of(
+                "name", name, "nodeId", nodeId, "entityType", entityType,
+                "description", description != null ? description : "",
+                "knowledgeId", String.valueOf(knowledgeId)));
+
+        updateKnowledgeGraphStats(knowledgeId, label);
+
+        if (!records.isEmpty()) {
+            return toNodeVO(records.get(0).get("n").asNode());
+        }
+        throw new BizException(ErrorCode.INTERNAL_ERROR);
+    }
+
+    @Override
+    public GraphEdgeVO createEdge(Long knowledgeId, String headName, String relationType, String tailName, String description) {
+        permissionHelper.checkPermission(knowledgeId, KnowledgeRole.DEVELOPER);
+        checkNeo4jAvailable();
+        String label = Neo4jUtil.kbLabel(knowledgeId);
+        String edgeId = String.valueOf(snowflakeId());
+
+        String cypher = """
+            MATCH (h:Entity:`%s` {name: $headName})
+            MATCH (t:Entity:`%s` {name: $tailName})
+            MERGE (h)-[r:RELATION {relation_type: $relationType}]->(t)
+            ON CREATE SET r.id = $edgeId, r.description = $description, r.weight = 1.0,
+                          r.source = 'manual', r.knowledge_id = $knowledgeId,
+                          r.graph_source = 'merged',
+                          r.created_at = datetime(), r.updated_at = datetime()
+            ON MATCH SET r.description = $description, r.updated_at = datetime()
+            RETURN r, elementId(h) AS startId, elementId(t) AS endId
+            """.formatted(label, label);
+
+        List<org.neo4j.driver.Record> records = neo4jUtil.queryWrite(cypher, Map.of(
+                "headName", headName, "tailName", tailName, "relationType", relationType,
+                "edgeId", edgeId, "description", description != null ? description : ""));
+
+        updateKnowledgeGraphStats(knowledgeId, label);
+
+        if (!records.isEmpty()) {
+            org.neo4j.driver.Record record = records.get(0);
+            GraphEdgeVO vo = toEdgeVO(record.get("r").asRelationship());
+            vo.setStartNodeElementId(record.get("startId").asString());
+            vo.setEndNodeElementId(record.get("endId").asString());
+            return vo;
+        }
+        throw new BizException(ErrorCode.GRAPH_NODE_NOT_FOUND);
+    }
+
+    @Override
+    public void deleteNode(Long knowledgeId, String elementId) {
+        permissionHelper.checkPermission(knowledgeId, KnowledgeRole.DEVELOPER);
+        checkNeo4jAvailable();
+        String label = Neo4jUtil.kbLabel(knowledgeId);
+        String cypher = "MATCH (n:Entity:`%s`) WHERE elementId(n) = $elementId DETACH DELETE n".formatted(label);
+        neo4jUtil.run(cypher, Map.of("elementId", elementId));
+        updateKnowledgeGraphStats(knowledgeId, label);
+    }
+
+    @Override
+    public void deleteEdge(Long knowledgeId, String elementId) {
+        permissionHelper.checkPermission(knowledgeId, KnowledgeRole.DEVELOPER);
+        checkNeo4jAvailable();
+        String label = Neo4jUtil.kbLabel(knowledgeId);
+        String cypher = "MATCH ()-[r:RELATION]->() WHERE elementId(r) = $elementId DELETE r".formatted(label);
+        neo4jUtil.run(cypher, Map.of("elementId", elementId));
+        updateKnowledgeGraphStats(knowledgeId, label);
+    }
+
+    // ==================== 内部方法 ====================
+
+    /**
+     * 获取或创建知识库的 KnowledgeGraph 记录
+     */
+    private KnowledgeGraph getOrCreateKnowledgeGraph(Long knowledgeId) {
+        KnowledgeGraph kg = getKnowledgeGraph(knowledgeId);
+        if (kg != null) {
+            return kg;
+        }
+        kg = new KnowledgeGraph();
+        kg.setKnowledgeId(knowledgeId);
+        kg.setStatus(GraphTaskStatus.PENDING);
+        kg.setNodeCount(0);
+        kg.setEdgeCount(0);
+        knowledgeGraphMapper.insert(kg);
+        return kg;
+    }
+
+    /**
+     * 获取知识库的 KnowledgeGraph 记录
+     */
+    private KnowledgeGraph getKnowledgeGraph(Long knowledgeId) {
+        return knowledgeGraphMapper.selectOne(
+                new LambdaQueryWrapper<KnowledgeGraph>()
+                        .eq(KnowledgeGraph::getKnowledgeId, knowledgeId));
+    }
+
+    /**
+     * 清理无效状态：状态为 PENDING/RUNNING 但对应 Task 已完成/失败/取消/不存在，重置状态允许重新提交。
+     * 返回 true 表示执行了清理（kg.status 已变为 COMPLETED），调用方应跳过幂等检查直接创建新任务。
+     */
+    private boolean cleanStaleStatus(KnowledgeGraph kg) {
+        if (kg.getStatus() != GraphTaskStatus.PENDING && kg.getStatus() != GraphTaskStatus.RUNNING) {
+            return false;
+        }
+        Task task = kg.getTaskId() != null ? taskService.getById(kg.getTaskId()) : null;
+        // taskId 为空 / Task 已删除 / Task 已完成或失败 → 状态不同步，重置
+        if (task == null || task.getStatus() == TaskStatus.SUCCESS
+                || task.getStatus() == TaskStatus.FAILED || task.getStatus() == TaskStatus.CANCELLED) {
+            log.warn("[图谱] 状态不同步(kg.status={}, taskStatus={}, taskId={}), 重置状态: knowledgeId={}",
+                    kg.getStatus(), task != null ? task.getStatus() : "null", kg.getTaskId(), kg.getKnowledgeId());
+            kg.setStatus(GraphTaskStatus.COMPLETED);
+            kg.setTaskId(null);
+            kg.setErrorMessage(null);
+            knowledgeGraphMapper.updateById(kg);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 幂等返回：验证 taskId 对应的 Task 真实存在且仍在运行，否则清理并返回 kg.getId()
+     */
+    private Long resolveReturnId(KnowledgeGraph kg) {
+        Task task = kg.getTaskId() != null ? taskService.getById(kg.getTaskId()) : null;
+        if (task != null && (task.getStatus() == TaskStatus.PENDING || task.getStatus() == TaskStatus.RUNNING)) {
+            log.info("[图谱] 已有抽取任务在运行, 复用: knowledgeId={}, taskId={}", kg.getKnowledgeId(), kg.getTaskId());
+            return kg.getTaskId();
+        }
+        log.warn("[图谱] 引用的Task无效(taskId={}, status={}), 清理状态: knowledgeId={}",
+                kg.getTaskId(), task != null ? task.getStatus() : "null", kg.getKnowledgeId());
+        kg.setStatus(GraphTaskStatus.COMPLETED);
+        kg.setTaskId(null);
+        kg.setErrorMessage(null);
+        knowledgeGraphMapper.updateById(kg);
+        return kg.getId();
+    }
+
+    /**
+     * 过滤掉已有运行中任务的文档，返回仍需处理的文档ID列表
+     */
+    private List<Long> filterRunningDocs(Long graphId, List<Long> documentIds) {
+        List<GraphDocument> running = graphDocumentMapper.selectList(
+                new LambdaQueryWrapper<GraphDocument>()
+                        .eq(GraphDocument::getGraphId, graphId)
+                        .in(GraphDocument::getDocumentId, documentIds)
+                        .in(GraphDocument::getStatus, List.of(GraphTaskStatus.PENDING, GraphTaskStatus.RUNNING)));
+        Set<Long> runningDocIds = running.stream()
+                .map(GraphDocument::getDocumentId)
+                .collect(Collectors.toSet());
+        return documentIds.stream()
+                .filter(id -> !runningDocIds.contains(id))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 将三元组列表写入 Neo4j（MERGE 幂等）
+     *
+     * @return int[]{nodeCount, edgeCount}
+     */
+    private static final int NEO4J_BATCH_SIZE = 50;
+
+    int[] writeTriplesToNeo4j(String label, List<GraphTripleDTO> triples, Long documentId, Long knowledgeId, String source) {
+        // 1. 过滤无效三元组
+        List<GraphTripleDTO> valid = triples.stream()
+                .filter(t -> t.getHead() != null && t.getTail() != null && t.getRelation() != null)
+                .toList();
+        if (valid.isEmpty()) {
+            return new int[]{0, 0};
+        }
+
+        Set<String> nodes = new HashSet<>();
+        String docIdStr = documentId != null ? String.valueOf(documentId) : "";
+        String knoIdStr = String.valueOf(knowledgeId);
+
+        // 2. 预计算 Cypher 模板（label 和 documentId 条件在循环外确定）
+        String hasDocField = documentId != null ? " n.document_id = item.documentId," : "";
+        String nodeCypher = """
+            UNWIND $items AS item
+            MERGE (n:Entity:`%s` {name: item.name})
+            ON CREATE SET n.id = item.nodeId, n.entity_type = item.entityType, n.description = item.description,
+                          n.source = item.source, n.knowledge_id = item.knowledgeId,%s
+                          n.graph_source = 'merged',
+                          n.created_at = datetime(), n.updated_at = datetime()
+            ON MATCH SET n.updated_at = datetime()
+            """.formatted(label, hasDocField);
+
+        String relCypher = """
+            UNWIND $items AS item
+            MATCH (h:Entity:`%s` {name: item.head})
+            MATCH (t:Entity:`%s` {name: item.tail})
+            MERGE (h)-[r:RELATION {relation_type: item.relation}]->(t)
+            ON CREATE SET r.id = item.relId, r.description = item.relDesc, r.weight = 1.0,
+                          r.source = item.source, r.knowledge_id = item.knowledgeId,
+                          r.graph_source = 'merged',
+                          r.created_at = datetime(), r.updated_at = datetime()
+            ON MATCH SET r.weight = r.weight + 0.1, r.updated_at = datetime()
+            """.formatted(label, label);
+
+        // 3. 分批写入（每批 NEO4J_BATCH_SIZE 个三元组）
+        for (int i = 0; i < valid.size(); i += NEO4J_BATCH_SIZE) {
+            List<GraphTripleDTO> batch = valid.subList(i, Math.min(i + NEO4J_BATCH_SIZE, valid.size()));
+
+            // 3.1 构建节点批量参数（每个三元组产生 head + tail 两个节点）
+            List<Map<String, Object>> nodeItems = new ArrayList<>(batch.size() * 2);
+            for (GraphTripleDTO triple : batch) {
+                nodes.add(triple.getHead());
+                nodes.add(triple.getTail());
+                nodeItems.add(Map.of(
+                        "name", triple.getHead(), "nodeId", String.valueOf(snowflakeId()),
+                        "entityType", triple.getHeadType() != null ? triple.getHeadType() : "其他",
+                        "description", triple.getHeadDesc() != null ? triple.getHeadDesc() : "",
+                        "source", source, "knowledgeId", knoIdStr, "documentId", docIdStr));
+                nodeItems.add(Map.of(
+                        "name", triple.getTail(), "nodeId", String.valueOf(snowflakeId()),
+                        "entityType", triple.getTailType() != null ? triple.getTailType() : "其他",
+                        "description", triple.getTailDesc() != null ? triple.getTailDesc() : "",
+                        "source", source, "knowledgeId", knoIdStr, "documentId", docIdStr));
+            }
+            neo4jUtil.run(nodeCypher, Map.of("items", nodeItems));
+
+            // 3.2 构建关系批量参数
+            List<Map<String, Object>> relItems = new ArrayList<>(batch.size());
+            for (GraphTripleDTO triple : batch) {
+                relItems.add(Map.of(
+                        "head", triple.getHead(), "tail", triple.getTail(),
+                        "relation", triple.getRelation(),
+                        "relId", String.valueOf(snowflakeId()),
+                        "relDesc", triple.getRelationDesc() != null ? triple.getRelationDesc() : "",
+                        "source", source, "knowledgeId", knoIdStr));
+            }
+            neo4jUtil.run(relCypher, Map.of("items", relItems));
+        }
+
+        return new int[]{nodes.size(), valid.size()};
+    }
+
+    private List<org.neo4j.driver.Record> queryByKeyword(String label, String keyword, int maxNodes) {
+        String cypher = """
+            MATCH (n:Entity:`%s`)
+            WHERE toLower(n.name) CONTAINS toLower($keyword)
+              AND (n.graph_source = 'merged' OR n.graph_source IS NULL)
+            WITH n LIMIT $maxNodes
+            OPTIONAL MATCH (n)-[r]-(m:Entity:`%s`)
+            WHERE r.graph_source = 'merged' OR r.graph_source IS NULL
+            RETURN n, r, m
+            """.formatted(label, label);
+
+        return neo4jUtil.query(cypher, Map.of("keyword", keyword, "maxNodes", maxNodes));
+    }
+
+    private List<org.neo4j.driver.Record> querySampleSubgraph(String label, int maxNodes) {
+        String cypher = """
+            MATCH (n:Entity:`%s`)-[r:RELATION]-(m:Entity:`%s`)
+            WHERE n.graph_source = 'merged' OR n.graph_source IS NULL
+            RETURN n, r, m
+            LIMIT $maxNodes
+            """.formatted(label, label);
+
+        return neo4jUtil.query(cypher, Map.of("maxNodes", maxNodes));
+    }
+
+    private List<org.neo4j.driver.Record> querySubgraphByDocument(String label, String documentId, int maxNodes) {
+        String cypher = """
+            MATCH (n:Entity:`%s`)-[r:RELATION]-(m:Entity:`%s`)
+            WHERE n.document_id = $docId AND n.graph_source = 'single_doc'
+            RETURN n, r, m
+            LIMIT $maxNodes
+            """.formatted(label, label);
+
+        return neo4jUtil.query(cypher, Map.of("docId", documentId, "maxNodes", maxNodes));
+    }
+
+    private GraphStatsVO getStatsFromNeo4jForDoc(String label, String documentId) {
+        String cypher = """
+            MATCH (n:Entity:`%s`)
+            WHERE n.document_id = $docId AND n.graph_source = 'single_doc'
+            WITH count(n) AS nodeCount
+            OPTIONAL MATCH (a:Entity:`%s`)-[r:RELATION]-(b:Entity:`%s`)
+            WHERE a.document_id = $docId AND a.graph_source = 'single_doc'
+            RETURN nodeCount, count(DISTINCT r) AS edgeCount
+            """.formatted(label, label, label);
+
+        List<org.neo4j.driver.Record> records = neo4jUtil.query(cypher, Map.of("docId", documentId));
+        int nodeCount = 0, edgeCount = 0;
+        if (!records.isEmpty()) {
+            org.neo4j.driver.Record r = records.get(0);
+            nodeCount = r.get("nodeCount").asInt();
+            edgeCount = r.get("edgeCount").asInt();
+        }
+        return new GraphStatsVO(nodeCount, edgeCount, Map.of());
+    }
+
+    private GraphSubgraphVO buildSubgraphFromRecords(List<org.neo4j.driver.Record> records) {
+        Map<String, GraphNodeVO> nodeMap = new LinkedHashMap<>();
+        Map<String, GraphEdgeVO> edgeMap = new LinkedHashMap<>();
+
+        for (org.neo4j.driver.Record record : records) {
+            if (!record.get("n").isNull()) {
+                Node n = record.get("n").asNode();
+                nodeMap.putIfAbsent(n.elementId(), toNodeVO(n));
+            }
+            if (!record.get("m").isNull()) {
+                Node m = record.get("m").asNode();
+                nodeMap.putIfAbsent(m.elementId(), toNodeVO(m));
+            }
+            if (!record.get("r").isNull()) {
+                Relationship r = record.get("r").asRelationship();
+                edgeMap.putIfAbsent(r.elementId(), toEdgeVO(r));
+            }
+        }
+
+        GraphSubgraphVO vo = new GraphSubgraphVO();
+        vo.setNodes(new ArrayList<>(nodeMap.values()));
+        vo.setEdges(new ArrayList<>(edgeMap.values()));
+        vo.setNodeCount(nodeMap.size());
+        vo.setEdgeCount(edgeMap.size());
+        return vo;
+    }
+
+    private GraphNodeVO toNodeVO(Node node) {
+        GraphNodeVO vo = new GraphNodeVO();
+        vo.setElementId(node.elementId());
+        vo.setId(node.containsKey("id") ? node.get("id").asString() : null);
+        vo.setName(node.containsKey("name") ? node.get("name").asString() : null);
+        vo.setEntityType(node.containsKey("entity_type") ? node.get("entity_type").asString() : null);
+        vo.setDescription(node.containsKey("description") ? node.get("description").asString() : null);
+        vo.setSource(node.containsKey("source") ? node.get("source").asString() : null);
+        vo.setDocumentId(node.containsKey("document_id") ? Long.parseLong(node.get("document_id").asString()) : null);
+        List<String> labels = new ArrayList<>();
+        node.labels().forEach(label -> labels.add(label.toString()));
+        vo.setLabels(labels);
+        return vo;
+    }
+
+    private GraphEdgeVO toEdgeVO(Relationship rel) {
+        GraphEdgeVO vo = new GraphEdgeVO();
+        vo.setElementId(rel.elementId());
+        vo.setId(rel.containsKey("id") ? rel.get("id").asString() : null);
+        vo.setRelationType(rel.containsKey("relation_type") ? rel.get("relation_type").asString() : rel.type());
+        vo.setDescription(rel.containsKey("description") ? rel.get("description").asString() : null);
+        vo.setWeight(rel.containsKey("weight") ? rel.get("weight").asDouble() : 1.0);
+        vo.setSource(rel.containsKey("source") ? rel.get("source").asString() : null);
+        vo.setStartNodeElementId(rel.startNodeElementId());
+        vo.setEndNodeElementId(rel.endNodeElementId());
+        return vo;
+    }
+
+    private GraphStatsVO getStatsFromNeo4j(String label) {
+        String cypher = """
+            MATCH (n:Entity:`%s`)
+            WHERE n.graph_source = 'merged' OR n.graph_source IS NULL
+            WITH count(n) AS nodeCount
+            OPTIONAL MATCH (:Entity:`%s`)-[r:RELATION]->(:Entity:`%s`)
+            WHERE r.graph_source = 'merged' OR r.graph_source IS NULL
+            RETURN nodeCount, count(r) AS edgeCount
+            """.formatted(label, label, label);
+
+        List<org.neo4j.driver.Record> records = neo4jUtil.query(cypher, Map.of());
+        int nodeCount = 0, edgeCount = 0;
+        if (!records.isEmpty()) {
+            org.neo4j.driver.Record r = records.get(0);
+            nodeCount = r.get("nodeCount").asInt();
+            edgeCount = r.get("edgeCount").asInt();
+        }
+
+        String distCypher = """
+            MATCH (n:Entity:`%s`)
+            WHERE n.graph_source = 'merged' OR n.graph_source IS NULL
+            RETURN n.entity_type AS type, count(*) AS cnt
+            ORDER BY cnt DESC
+            """.formatted(label);
+
+        Map<String, Integer> typeDist = new LinkedHashMap<>();
+        List<org.neo4j.driver.Record> distRecords = neo4jUtil.query(distCypher, Map.of());
+        for (org.neo4j.driver.Record r : distRecords) {
+            String type = r.get("type").isNull() ? "其他" : r.get("type").asString();
+            typeDist.put(type, r.get("cnt").asInt());
+        }
+
+        return new GraphStatsVO(nodeCount, edgeCount, typeDist);
+    }
+
+    private void updateKnowledgeGraphStats(Long knowledgeId, String label) {
+        GraphStatsVO stats = getStatsFromNeo4j(label);
+        Knowledge knowledge = knowledgeService().getById(knowledgeId);
+        if (knowledge != null) {
+            knowledge.setNodeCount(stats.getNodeCount());
+            knowledge.setEdgeCount(stats.getEdgeCount());
+            knowledgeService().updateById(knowledge);
+        }
+
+        // 同步更新 KnowledgeGraph 记录
+        KnowledgeGraph kg = getKnowledgeGraph(knowledgeId);
+        if (kg != null) {
+            kg.setNodeCount(stats.getNodeCount());
+            kg.setEdgeCount(stats.getEdgeCount());
+            knowledgeGraphMapper.updateById(kg);
+        }
+    }
+
+    private long snowflakeId() {
+        return com.baomidou.mybatisplus.core.toolkit.IdWorker.getId();
+    }
+
+    // ==================== 语义搜索 ====================
+
+    @Override
+    public List<GraphNodeVO> semanticSearch(Long knowledgeId, Long documentId, String query, int topK, Double minScore, Long providerId) {
+        checkNeo4jAvailable();
+        permissionHelper.checkMember(knowledgeId);
+
+        double threshold = (minScore != null && minScore >= 0) ? minScore : DEFAULT_MIN_SIMILARITY_SCORE;
+        float[] queryEmbedding = embedText(query);
+        if (queryEmbedding == null) {
+            return Collections.emptyList();
+        }
+
+        if (!milvusUtil.isAvailable() || !milvusUtil.hasEntityCollection(knowledgeId)) {
+            return Collections.emptyList();
+        }
+
+        List<Map<String, Object>> hits = milvusUtil.searchEntities(knowledgeId, queryEmbedding, topK);
+        if (hits.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        String label = Neo4jUtil.kbLabel(knowledgeId);
+        List<GraphNodeVO> results = new ArrayList<>();
+        Set<String> seenNames = new HashSet<>();
+
+        for (Map<String, Object> hit : hits) {
+            double score = ((Number) hit.get("score")).doubleValue();
+            if (score < threshold) {
+                break;
+            }
+            long entityId = (Long) hit.get("id");
+            String content = hit.get("content") != null ? hit.get("content").toString() : "";
+            String entityName = extractEntityName(content);
+            if (entityName.isBlank()) {
+                continue;
+            }
+
+            GraphNodeVO node = lookupEntityForSemanticSearch(label, entityId, entityName, documentId);
+            if (node != null && seenNames.add(node.getName())) {
+                node.setScore(score);
+                results.add(node);
+            }
+        }
+        return results;
+    }
+
+    /**
+     * 将 Milvus 检索命中映射到 Neo4j 节点（全库按 id，单文档按名称）
+     */
+    private GraphNodeVO lookupEntityForSemanticSearch(String label, long entityId, String entityName, Long documentId) {
+        String cypher;
+        Map<String, Object> params = new HashMap<>();
+        if (documentId != null) {
+            cypher = """
+                MATCH (n:Entity:`%s`)
+                WHERE n.name = $name AND n.document_id = $docId AND n.graph_source = 'single_doc'
+                RETURN n
+                LIMIT 1
+                """.formatted(label);
+            params.put("name", entityName);
+            params.put("docId", String.valueOf(documentId));
+        } else {
+            cypher = """
+                MATCH (n:Entity:`%s`)
+                WHERE n.id = $entityId AND (n.graph_source = 'merged' OR n.graph_source IS NULL)
+                RETURN n
+                LIMIT 1
+                """.formatted(label);
+            params.put("entityId", String.valueOf(entityId));
+        }
+
+        List<org.neo4j.driver.Record> records = neo4jUtil.query(cypher, params);
+        if (records.isEmpty() && documentId == null) {
+            // 全库模式下 id 未命中时，回退按名称匹配 merged 节点
+            String fallbackCypher = """
+                MATCH (n:Entity:`%s`)
+                WHERE n.name = $name AND (n.graph_source = 'merged' OR n.graph_source IS NULL)
+                RETURN n
+                LIMIT 1
+                """.formatted(label);
+            records = neo4jUtil.query(fallbackCypher, Map.of("name", entityName));
+        }
+        if (records.isEmpty()) {
+            return null;
+        }
+        return toNodeVO(records.get(0).get("n").asNode());
+    }
+
+    private String extractEntityName(String content) {
+        if (content == null || content.isBlank()) {
+            return "";
+        }
+        int idx = content.indexOf(": ");
+        return idx > 0 ? content.substring(0, idx) : content;
+    }
+
+    private float[] embedText(String text) {
+        try {
+            double[] dVec = textEmbeddingService.embed(text);
+            float[] fVec = new float[dVec.length];
+            for (int i = 0; i < dVec.length; i++) {
+                fVec[i] = (float) dVec[i];
+            }
+            return fVec;
+        } catch (Exception e) {
+            log.warn("[知识图谱] embedding 生成失败: {}", e.getMessage());
+            return null;
+        }
+    }
+}

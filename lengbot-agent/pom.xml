@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.lengbot</groupId>
+        <artifactId>lengbot</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>lengbot-agent</artifactId>
+    <name>LengBot Agent</name>
+    <description>Agent 运行时模块：基于 AgentScope ReActAgent 的对话管理、SSE 事件流、Hook 中间件链、会话与记忆管理</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.lengbot</groupId>
+            <artifactId>lengbot-workflow</artifactId>
+        </dependency>
+
+        <!-- AgentScope Java 核心库 -->
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-harness</artifactId>
+        </dependency>
+
+        <!-- 本地缓存（QueryKnowledgeTool / SseEventBuffer） -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+            <version>3.1.8</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

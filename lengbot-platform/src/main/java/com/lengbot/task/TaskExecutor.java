@@ -1,0 +1,20 @@
+package com.lengbot.task;
+
+import com.lengbot.entity.Task;
+
+/**
+ * 任务执行器接口，每个 TaskType 对应一个 @Component 实现
+ *
+ * @author finch
+ * @since 2026-05-21
+ */
+public interface TaskExecutor {
+
+    /**
+     * 执行任务
+     *
+     * @param task 任务记录
+     * @return 执行结果描述
+     */
+    String execute(Task task) throws Exception;
+}

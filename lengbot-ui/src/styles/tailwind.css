@@ -1,0 +1,202 @@
+/**
+ * Tailwind v4 入口（迁移 Phase 0）
+ *
+ * ⚠️ 关键：本项目已引入 antd 的 reset.css（见 main.js），
+ * 因此这里【刻意跳过 preflight】，只引入 theme + utilities 两层，
+ * 避免 Tailwind 的基础重置把 antd 组件样式冲掉。
+ *
+ * 仅补充一条 preflight 删掉后必须自己给的盒模型规则。
+ */
+
+@layer theme, base, components;
+
+/* theme（CSS 变量）放进 layer，优先级低即可 */
+@import "tailwindcss/theme.css" layer(theme);
+
+/**
+ * ⚠️ utilities 【不放进 @layer】——这是本项目的关键适配。
+ *
+ * 原因：项目 App.vue 里有一条全局重置 `* { margin:0; padding:0 }`，
+ * 它不在任何 layer 中。按 CSS Cascade Layers 规则，
+ * 无 layer 的规则永远胜过 @layer 内的规则（与选择器权重无关），
+ * 会导致 .px-4 / .py-2 等工具类被通配符压掉。
+ *
+ * 把 utilities 也放在 layer 之外后，两者同级，
+ * 再按选择器权重比较：.px-4（类选择器 0,1,0）> *（通配符 0,0,0），
+ * 工具类正常获胜，同时不需要改动 App.vue 的既有全局样式。
+ */
+@import "tailwindcss/utilities.css";
+
+/**
+ * 扫描范围：Tailwind v4 按需生成工具类，必须显式声明扫描哪些源文件。
+ * 不写的话只会扫到极少数类名，shadcn 组件用到的 px-4 / rounded-lg / bg-primary 等都不会生成。
+ */
+@source "../**/*.{vue,js,ts,jsx,tsx}";
+
+/* preflight 被移除，自己补回必要的盒模型重置（不影响 antd 的组件级样式）*/
+*,
+::before,
+::after {
+  box-sizing: border-box;
+}
+
+/**
+ * ⚠️ 关键补丁：让 Tailwind 工具类能覆盖表单元素样式
+ *
+ * 背景：antd 的 reset.css 里有一条【不在任何 @layer 中】的规则：
+ *   input, button, select, optgroup, textarea { font-size/color/line-height: inherit }
+ * 按 CSS Cascade Layers 规则，无 layer 的规则永远胜过 @layer utilities，
+ * 导致 shadcn 组件上的 text-sm / text-primary-foreground 等类被压制失效。
+ *
+ * 解法：对【显式声明了 tw- 作用域的元素】重置这些继承属性，使工具类重新生效。
+ * 这里用 :where() 保持权重为 0，且只作用于带 .tw 标记或 shadcn 组件根节点，
+ * 完全不触碰 antd 自身的 .ant-* 组件。
+ */
+/**
+ * 说明：本补丁【不能】放进 @layer base。
+ * 因为 Tailwind 编译时会把 utilities 内联展开，此处再写 @layer base
+ * 会被浏览器视为「新声明的层」而排到最末（优先级最高），
+ * 反而把 px-4 / bg-primary 等工具类压掉。所以保持无 layer + :where() 零权重。
+ *
+ * 同时【只重置必需项】：
+ * - border / font-family / font-weight：抵消浏览器 UA 按钮默认外观
+ * - font-size / color / line-height：抵消 antd reset 的 inherit 压制
+ * 不碰 padding 和 background —— 交给 px-4 / bg-primary 等工具类自由发挥。
+ */
+button:where([data-tw]),
+input:where([data-tw]),
+textarea:where([data-tw]),
+select:where([data-tw]) {
+  border: 0 solid transparent;
+  font-family: inherit;
+  font-weight: inherit;
+  font-size: revert-layer;
+  color: revert-layer;
+  line-height: revert-layer;
+}
+
+/* 清掉浏览器 UA 给 button 的灰色默认底色。
+   用 :where() 保持零权重，任何 bg-* 工具类（权重 0,1,0）都能盖过它，
+   因此 Ghost/Link 变透明的同时，bg-primary 等仍正常生效。 */
+:where(button[data-tw]) {
+  background-color: transparent;
+}
+
+/**
+ * ===== Phase 1：shadcn 语义 token 定义 =====
+ *
+ * 设计决策 1(b)：主色维持近黑（与现有 --color-primary: #171717 一致），
+ * 蓝色仅用于链接/聚焦点缀 —— 最克制、与现有视觉零冲突。
+ *
+ * 关键手法：这些 token 全部【桥接】到项目已有的 --color-* 变量上，
+ * 因此项目切换 [data-theme="dark"] 时，shadcn 组件会自动跟随变暗，
+ * 无需改动 useTheme.js，也不会与 antd 的 darkAlgorithm 打架。
+ */
+:root {
+  --background: var(--color-canvas);
+  --foreground: var(--color-ink);
+  --card: var(--color-canvas);
+  --card-foreground: var(--color-ink);
+  --popover: var(--color-canvas);
+  --popover-foreground: var(--color-ink);
+
+  /* 主色 = 近黑（决策 1b），不用钢蓝当按钮底色 */
+  --primary: var(--color-primary);
+  --primary-foreground: var(--color-on-primary);
+
+  --secondary: var(--color-canvas-soft-2);
+  --secondary-foreground: var(--color-ink);
+  --muted: var(--color-canvas-soft);
+  --muted-foreground: var(--color-mute);
+  --accent: var(--color-canvas-soft-2);
+  --accent-foreground: var(--color-ink);
+
+  /* 语义状态色：同样桥接到项目已有变量，深色模式自动跟随。
+     ⚠️ --destructive-foreground 之前只在 @theme inline 里引用却没定义，
+     导致 text-destructive-foreground 解析为空值，这里补齐。 */
+  --destructive: var(--color-error);
+  --destructive-foreground: #ffffff;
+
+  /* ⚠️ 注意不要用 --color-success：项目里它在浅色模式下是 #0070f3（蓝色，
+     与 link 同色），只有深色模式才是绿色，用作「成功」语义会在浅色下看着像链接。
+     这里改用项目色板中确实存在的 --green-600（浅色）/--green-500（深色），
+     与 ToolCallsGroupComponent 等处的成功态视觉保持一致。 */
+  --success: var(--green-600);
+  --success-foreground: #ffffff;
+
+  --warning: var(--color-warning);
+  --warning-foreground: #ffffff;
+
+  --border: var(--color-hairline);
+  --input: var(--color-hairline);
+
+  /* 骨架屏专用底色：不能直接用 --muted(#fafafa)，
+     它与白色画布几乎无差别，骨架屏会「隐形」。 */
+  --skeleton: var(--color-canvas-soft-3);
+
+  /* 蓝色点缀：仅体现在聚焦环上（决策 1b 的「蓝点缀」） */
+  --ring: var(--color-link);
+
+  --radius: 0.5rem;
+}
+
+/**
+ * 深色模式微调。
+ *
+ * 绝大多数 token 靠桥接自动跟随，无需在此重复声明；
+ * 只有「色阶在深浅两套里语义翻转」的情况才需要单独覆盖：
+ * 项目深色色板中 --green-600 是 #86efac（浅绿），配白字对比度不足，
+ * 因此深色下改用 --green-400（#22c55e）并把前景换成深绿底色。
+ */
+[data-theme='dark'] {
+  /**
+   * ⚠️ 主色反转：项目的 --color-primary 恒为 #171717（深色模式下没有覆盖），
+   * 而深色画布是 #111111，两者仅差 6 个灰阶——近黑按钮/徽章会糊在背景里。
+   *
+   * 决策 1(b) 的「主色近黑」在浅色模式成立，深色模式必须反转成近白，
+   * 这也是 shadcn 官方深色主题的做法（primary 与 background 互为反色）。
+   * 只影响 shadcn 组件，不动 antd 既有行为。
+   */
+  --primary: var(--color-ink);
+  --primary-foreground: var(--color-canvas);
+
+  --success: var(--green-400);
+  --success-foreground: #052e16;
+
+  /* 同理，深色下 warning 用深色文字更清晰 */
+  --warning-foreground: #3b2f0a;
+
+  /* 骨架屏：深色下 --color-canvas-soft 与背景过于接近，抬高一档 */
+  --skeleton: var(--color-canvas-soft-2);
+}
+
+/* ===== shadcn token 映射：让 bg-background / text-foreground / bg-primary 等可用 ===== */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-skeleton: var(--skeleton);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}

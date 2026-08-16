@@ -1,0 +1,234 @@
+server:
+  port: 8082
+
+spring:
+  main:
+    allow-circular-references: true
+  application:
+    name: lengbot-server
+  # ========================================
+  # 关闭 Nacos（本地无 Nacos 服务时必需）
+  # 注意：本工程未引入 spring-cloud-starter-bootstrap，
+  # 因此 bootstrap.yml 在 Spring Boot 3 下不会被加载。
+  # Nacos 开关必须写在这里（application.yml）才会生效。
+  # ========================================
+  config:
+    # 显式声明可选 Nacos 导入，关闭 import 校验（避免 "No spring.config.import" 报错）
+    # 注意值含冒号必须加引号，否则 YAML 把冒号当嵌套映射分隔符
+    import: "optional:nacos:"
+  cloud:
+    nacos:
+      discovery:
+        enabled: false
+      config:
+        enabled: false
+        import-check:
+          enabled: false
+  # 文件上传大小限制
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+  # ========================================
+  # PostgreSQL 数据库配置
+  # 驱动：org.postgresql.Driver
+  # 需要安装 pgvector 扩展用于向量存储
+  # ========================================
+  datasource:
+    url: jdbc:postgresql://localhost:5432/${LENGBOT_DB_NAME:lengbot}
+    username: 'postgres'
+    password: 'postgres'
+    driver-class-name: org.postgresql.Driver
+
+  # ========================================
+  # 只读数据源（供 PgSqlTool 等执行用户 SQL 的工具使用）
+  # 限定权限：仅 SELECT，无 DML/DDL
+  # ========================================
+  datasource-readonly:
+    url: jdbc:postgresql://localhost:5432/${LENGBOT_DB_NAME:lengbot}
+    username: 'postgres'
+    password: 'postgres'
+    driver-class-name: org.postgresql.Driver
+
+  # ========================================
+  # Redis 配置（缓存、会话、任务队列）
+  # ========================================
+  data:
+    redis:
+      host: 'localhost'
+      port: '6379'
+      password: '123456'
+      database: '9'
+
+# ========================================
+# MyBatis-Plus 配置
+# ========================================
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  type-enums-package: com.lengbot.enums
+  configuration:
+    map-underscore-to-camel-case: true
+    default-enum-type-handler: com.baomidou.mybatisplus.core.handlers.MybatisEnumTypeHandler
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+# ========================================
+# Sa-Token 认证配置
+# ========================================
+sa-token:
+  token-name: Authorization
+  timeout: 604800
+  active-timeout: 86400
+  active-timeout-check: true
+  is-concurrent: true
+  is-share: true
+  token-style: uuid
+  is-log: false
+  is-read-param: true
+  redis:
+    key-prefix: 'sa-token:'
+    database: 0
+
+# ========================================
+# MinIO 对象存储配置
+# ========================================
+minio:
+  endpoint: 'http://localhost:9000'
+  access-key: 'minioadmin'
+  secret-key: 'minioadmin'
+  bucket: 'lengbot'
+
+# ========================================
+# Neo4j 图数据库配置（知识图谱）
+# ========================================
+neo4j:
+  uri: 'bolt://localhost:7687'
+  username: 'neo4j'
+  password: 'neo4j123'
+
+# ========================================
+# LengBot 系统配置
+# ========================================
+lengbot:
+  # 对话内核：harness（AgentScope HarnessAgent，默认）/ legacy（手搓工具循环，回滚用）
+  chat:
+    engine: 'harness'
+  # AgentScope AI 引擎配置（替代原 Spring AI 配置）
+  agentscope:
+    # 默认模型（AgentScope ModelRegistry 中的模型名称）
+    default-model: 'dashscope:qwen-plus'
+    # OpenAI 兼容 API 配置
+    openai:
+      api-key: ${OPENAI_API_KEY:sk-placeholder}
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+    # 阿里云 DashScope 配置
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY:sk-placeholder}
+    # Ollama 本地模型配置
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+
+  # Dify 集成加密配置
+  dify:
+    encryption-key: ${LENGBOT_DIFY_ENCRYPTION_KEY:}
+    encryption-key-version: v1
+    connect-timeout-seconds: 3
+    read-timeout-seconds: 15
+
+  # OCR 配置（RapidOCR）
+  ocr:
+    enabled: false
+    model-path: ${OCR_MODEL_PATH:models/RapidOCR/PP-OCRv4}
+    auto-download: true
+
+  # 任务队列配置
+  task:
+    consumer:
+      pool-size: 2
+      heavy-pool-size: 1
+    reclaim:
+      interval-seconds: 30
+      stale-threshold-minutes: 5
+      batch-size: 100
+    delay:
+      interval-seconds: 1
+      batch-size: 100
+    retry:
+      default-policy:
+        max-attempts: 3
+        backoff-base-ms: 5000
+        backoff-multiplier: 2.0
+        backoff-max-ms: 600000
+      overrides:
+        GRAPH_EXTRACTION:
+          max-attempts: 2
+          backoff-base-ms: 30000
+          backoff-multiplier: 2.0
+          backoff-max-ms: 600000
+        QA_PAIR_GENERATE:
+          max-attempts: 2
+          backoff-base-ms: 10000
+        RAG_EVALUATION:
+          max-attempts: 1
+    zombie:
+      interval-seconds: 60
+      default-timeout-minutes: 10
+      batch-size: 100
+      overrides:
+        GRAPH_EXTRACTION: 60
+        QA_PAIR_GENERATE: 30
+        RAG_EVALUATION: 20
+
+  # Milvus 向量数据库配置
+  milvus:
+    enabled: 'true'
+    uri: 'http://localhost:19530'
+    token: ''
+    connect-timeout-ms: 10000
+    wait-timeout-ms: 30000
+
+  # 日志 TTL 清理配置
+  log-cleanup:
+    retention-days: 30
+
+  # CORS 配置
+  # 前端 dev 端口映射：
+  #   8082=lengbot 后端 → 前端 vite 默认跑在 5174（lengbot-ui）
+  #   8081=旧 LengBot 后端 → 前端 5173
+  # 注意：allowed-origins 必须写成【逗号分隔的 CSV 字符串】。
+  # 消费方 CorsConfig 是用 @Value("${lengbot.cors.allowed-origins:...}") 注入 String 后
+  # 自行 split(",")，不是 @ConfigurationProperties 绑 List<String>。
+  # 若写成 YAML 列表（缩进 "-"），Spring 会拍平成 allowed-origins[0]/[1]/[2]，
+  # ${lengbot.cors.allowed-origins} 这个 key 解析不到 → 静默回退到 @Value 的默认值，
+  # 这里改什么都不生效（历史踩坑：日志打印的白名单永远等于默认值）。
+  #
+  # 局域网 IP 访问 dev server（如 http://10.10.13.163:5174）时也需加进白名单，
+  # 否则 CorsFilter 返回 403 "Invalid CORS request"，前端登录提示"无权访问"。
+  cors:
+    allowed-origins: http://localhost:5173,http://localhost:5174,http://localhost:3000,http://10.10.13.163:5173,http://10.10.13.163:5174
+    allowed-methods: GET,POST,PUT,DELETE,OPTIONS
+    allow-credentials: true
+    max-age: 3600
+
+  # GitHub API Token（可选）
+  github:
+    token: ${GITHUB_TOKEN:}
+
+  # Tavily 联网搜索 API Key
+  tavily:
+    api-key: ${TAVILY_API_KEY:}
+
+  # SiliconFlow AI 生图 API Key
+  siliconflow:
+    api-key: ${SILICONFLOW_API_KEY:}
+
+# ========================================
+# SpringDoc / Swagger 配置
+# ========================================
+springdoc:
+  enabled: 'true'
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs

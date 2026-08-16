@@ -1,0 +1,183 @@
+package com.lengbot.service;
+
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.IService;
+import com.lengbot.dto.IngestDTO;
+import com.lengbot.dto.DifyKnowledgeConfigDTO;
+import com.lengbot.dto.KnowledgeSaveDTO;
+import com.lengbot.entity.Knowledge;
+import com.lengbot.vo.DifyConnectionTestVO;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 知识库服务接口
+ *
+ * @author finch
+ * @since 2026-05-19
+ */
+public interface KnowledgeService extends IService<Knowledge> {
+
+    /**
+     * 创建知识库
+     *
+     * @param request 知识库创建请求
+     * @return 知识库
+     */
+    Knowledge create(KnowledgeSaveDTO request);
+
+    /**
+     * 更新知识库
+     *
+     * @param request 知识库更新请求
+     * @return 知识库
+     */
+    Knowledge update(KnowledgeSaveDTO request);
+
+    /**
+     * 分页查询当前用户有权限的知识库
+     *
+     * @param pageNum  页码
+     * @param pageSize 每页数量
+     * @return 分页结果
+     */
+    Page<Knowledge> listMyKnowledge(int pageNum, int pageSize, String name);
+
+    /**
+     * 删除知识库（逻辑删除）
+     *
+     * @param id 主键ID
+     */
+    void deleteById(Long id);
+
+    /**
+     * 获取知识库详情（需要成员权限）
+     *
+     * @param id 知识库ID
+     * @return 知识库
+     */
+    Knowledge getByIdWithPermission(Long id);
+
+    /**
+     * 更新知识库统计信息
+     *
+     * @param knowledgeId 知识库ID
+     * @param docDelta    文档增量
+     * @param chunkDelta  分块增量
+     * @param tokenDelta  Token增量
+     */
+    void updateStats(Long knowledgeId, int docDelta, int chunkDelta, long tokenDelta);
+
+    /**
+     * 全量重算知识库统计信息（从所有文档记录重新汇总）
+     *
+     * @param knowledgeId 知识库ID
+     */
+    void refreshStats(Long knowledgeId);
+
+    /**
+     * AI生成思维导图
+     *
+     * @param knowledgeId 知识库ID
+     * @param providerId  模型提供商ID
+     * @return 思维导图JSON对象
+     */
+    Object generateMindmap(Long knowledgeId, Long providerId);
+
+    /**
+     * 获取已有思维导图数据
+     *
+     * @param knowledgeId 知识库ID
+     * @return 思维导图JSON对象，未生成返回null
+     */
+    Object getMindmap(Long knowledgeId);
+
+    /**
+     * 获取已有思维导图数据（工具调用专用，跳过用户权限校验）
+     * <p>工具层已通过 Agent 绑定关系校验权限，此处不再重复校验</p>
+     *
+     * @param knowledgeId 知识库ID
+     * @return 思维导图JSON对象，未生成返回null
+     */
+    Object getMindmapForTool(Long knowledgeId);
+
+    /**
+     * 获取知识库默认入库配置
+     *
+     * @param knowledgeId 知识库ID
+     * @return 默认入库配置
+     */
+    IngestDTO getDefaultIngestConfig(Long knowledgeId);
+
+    /**
+     * 为指定文档生成示例问题并追加到知识库
+     *
+     * @param knowledgeId 知识库ID
+     * @param documentId  文档ID
+     */
+    void generateExampleQuestions(Long knowledgeId, Long documentId);
+
+    /**
+     * 获取示例问题列表
+     *
+     * @param knowledgeId 知识库ID
+     * @return 问题列表
+     */
+    List<String> getExampleQuestions(Long knowledgeId);
+
+    /**
+     * 更新示例问题列表（全量替换，最多10个）
+     *
+     * @param knowledgeId    知识库ID
+     * @param questions      新的问题列表
+     */
+    void updateExampleQuestions(Long knowledgeId, List<String> questions);
+
+    /**
+     * AI生成一个示例问题并追加到列表
+     *
+     * @param knowledgeId 知识库ID
+     * @return 生成的问题
+     */
+    String generateOneExampleQuestion(Long knowledgeId);
+
+    /**
+     * 获取知识库检索配置
+     *
+     * @param knowledgeId 知识库ID
+     * @return 检索配置Map
+     */
+    Map<String, Object> getQueryParams(Long knowledgeId);
+
+    /**
+     * 更新知识库检索配置
+     *
+     * @param knowledgeId 知识库ID
+     * @param params      检索配置
+     */
+    void updateQueryParams(Long knowledgeId, Map<String, Object> params);
+
+    /**
+     * 测试 Dify Dataset 连接（需要知识库成员权限）。
+     *
+     * @param knowledgeId 知识库ID
+     * @return 连通性结果
+     */
+    DifyConnectionTestVO testDifyConnection(Long knowledgeId);
+
+    /**
+     * 测试尚未保存的 Dify Dataset 连接配置，不写入数据库。
+     *
+     * @param config Dify 连接配置
+     * @return 连通性结果
+     */
+    DifyConnectionTestVO testDifyConnection(DifyKnowledgeConfigDTO config);
+
+    /**
+     * 检查 Milvus 向量数据库连接状态
+     *
+     * @return 是否可用
+     */
+    boolean isMilvusAvailable();
+}

@@ -1,0 +1,79 @@
+package com.lengbot.tool.builtin;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lengbot.tool.annotation.SystemTool;
+import com.lengbot.tool.annotation.ToolParamMeta;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import io.agentscope.core.tool.Tool;
+import io.agentscope.core.tool.ToolParam;
+import org.springframework.stereotype.Component;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * 内置工具 — 数学计算器
+ * <p>由 {@link com.lengbot.tool.registrar.BuiltinToolRegistrar} 注册，用户可选绑定</p>
+ *
+ * @author finch
+ * @since 2026-05-22
+ */
+@Slf4j
+@Component("calculatorTool")
+@SystemTool(displayName = "数学计算器", icon = "CalculatorOutlined", description = "执行基本数学运算，包括加减乘除", tags = {"计算"},
+        outputExample = "{\"expression\":\"10 + 5\",\"operation\":\"add\",\"operands\":[10.0,5.0],\"result\":\"15\"}",
+        outputSchema = "{\"type\":\"object\",\"properties\":{\"expression\":{\"type\":\"string\",\"description\":\"数学表达式\"},\"operation\":{\"type\":\"string\",\"description\":\"运算类型：add/subtract/multiply/divide\"},\"operands\":{\"type\":\"array\",\"description\":\"操作数\",\"items\":{\"type\":\"number\"}},\"result\":{\"type\":\"string\",\"description\":\"计算结果\"}}}")
+@RequiredArgsConstructor
+public class CalculatorTool {
+
+    private final ObjectMapper objectMapper;
+
+    @Tool(name = "calculator",
+          description = "执行基本数学运算，包括加减乘除。当用户需要精确数学计算时调用此工具。")
+    public String calculate(
+            @ToolParam(name = "a", description = "第一个操作数")
+            @ToolParamMeta(example = "10") double a,
+            @ToolParam(name = "b", description = "第二个操作数")
+            @ToolParamMeta(example = "5") double b,
+            @ToolParam(name = "operation", description = "运算类型：add（加）、subtract（减）、multiply（乘）、divide（除）")
+            @ToolParamMeta(example = "add") String operation) {
+        log.info("[Tool:calculator] 计算: a={}, b={}, op={}", a, b, operation);
+
+        double result = switch (operation.toLowerCase()) {
+            case "add" -> a + b;
+            case "subtract" -> a - b;
+            case "multiply" -> a * b;
+            case "divide" -> {
+                if (b == 0) throw new ArithmeticException("除数不能为零");
+                yield a / b;
+            }
+            default -> throw new IllegalArgumentException("不支持的运算类型: " + operation + "，仅支持 add/subtract/multiply/divide");
+        };
+
+        String formatted = result == Math.floor(result) && !Double.isInfinite(result)
+                ? String.valueOf((long) result)
+                : String.format("%.6g", result);
+
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("expression", a + " " + operationSymbol(operation) + " " + b);
+        output.put("operation", operation.toLowerCase());
+        output.put("operands", new double[]{a, b});
+        output.put("result", formatted);
+        try {
+            return objectMapper.writeValueAsString(output);
+        } catch (Exception e) {
+            return formatted;
+        }
+    }
+
+    private String operationSymbol(String operation) {
+        return switch (operation.toLowerCase()) {
+            case "add" -> "+";
+            case "subtract" -> "-";
+            case "multiply" -> "×";
+            case "divide" -> "÷";
+            default -> operation;
+        };
+    }
+}

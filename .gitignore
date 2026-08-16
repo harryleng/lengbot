@@ -1,0 +1,62 @@
+# ===== Java / Maven =====
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+
+# ===== Node.js / Frontend =====
+node_modules/
+dist/
+dist-ssr/
+*.local
+.pnpm-store/
+
+# ===== IDE =====
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+*.swo
+*~
+
+# ===== Build tools =====
+.gradle/
+build/
+
+# ===== Logs =====
+*.log
+*.err
+
+# ===== Temp / Cache =====
+javatmp/
+javap_dump/
+*.tmp
+*.stackdump
+_tmp_*
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ===== Env / Secrets =====
+.env
+.env.*
+!.env.example
+
+# ===== AI Tools =====
+.claude/
+.agentscope/
+.agentscope-restore/
+CLAUDE.md
+
+# ===== Backups =====
+*.bak
+*.bak-*
+*.tar.gz

@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.lengbot</groupId>
+    <artifactId>lengbot</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+    <name>LengBot</name>
+    <description>基于 Spring Cloud Alibaba + AgentScope Java 的企业级 AI Agent 平台</description>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.6</version>
+        <relativePath/>
+    </parent>
+
+    <modules>
+        <module>lengbot-common</module>
+        <module>lengbot-framework</module>
+        <module>lengbot-platform</module>
+        <module>lengbot-ai</module>
+        <module>lengbot-knowledge</module>
+        <module>lengbot-tool</module>
+        <module>lengbot-workflow</module>
+        <module>lengbot-agent</module>
+        <module>lengbot-server</module>
+    </modules>
+
+    <properties>
+        <!-- Java 版本 -->
+        <java.version>17</java.version>
+
+        <!-- Spring Cloud Alibaba -->
+        <spring-cloud.version>2023.0.3</spring-cloud.version>
+        <spring-cloud-alibaba.version>2023.0.1.0</spring-cloud-alibaba.version>
+
+        <!-- AgentScope Java（直接使用核心库，不使用 Spring Boot Starter 以避免版本冲突） -->
+        <agentscope.version>2.0.1-SNAPSHOT</agentscope.version>
+
+        <!-- 数据库 & ORM -->
+        <mybatis-plus.version>3.5.9</mybatis-plus.version>
+        <pgvector.version>0.1.6</pgvector.version>
+        <neo4j.version>5.26.0</neo4j.version>
+        <milvus.version>2.6.13</milvus.version>
+
+        <!-- 工具库 -->
+        <sa-token.version>1.39.0</sa-token.version>
+        <springdoc.version>2.6.0</springdoc.version>
+        <minio.version>8.5.7</minio.version>
+        <jsqlparser.version>5.0</jsqlparser.version>
+        <tika.version>3.1.0</tika.version>
+        <pdfbox.version>3.0.4</pdfbox.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- ============================================ -->
+            <!-- Spring Cloud BOM -->
+            <!-- ============================================ -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- ============================================ -->
+            <!-- Spring Cloud Alibaba BOM（Nacos 等） -->
+            <!-- ============================================ -->
+            <dependency>
+                <groupId>com.alibaba.cloud</groupId>
+                <artifactId>spring-cloud-alibaba-dependencies</artifactId>
+                <version>${spring-cloud-alibaba.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- ============================================ -->
+            <!-- AgentScope Java BOM（AI 引擎核心库，非 Spring Boot Starter） -->
+            <!-- ============================================ -->
+            <dependency>
+                <groupId>io.agentscope</groupId>
+                <artifactId>agentscope-bom</artifactId>
+                <version>${agentscope.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- ============================================ -->
+            <!-- 内部模块版本统一管理 -->
+            <!-- ============================================ -->
+            <dependency>
+                <groupId>com.lengbot</groupId>
+                <artifactId>lengbot-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.lengbot</groupId>
+                <artifactId>lengbot-framework</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.lengbot</groupId>
+                <artifactId>lengbot-platform</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.lengbot</groupId>
+                <artifactId>lengbot-ai</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.lengbot</groupId>
+                <artifactId>lengbot-knowledge</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.lengbot</groupId>
+                <artifactId>lengbot-tool</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.lengbot</groupId>
+                <artifactId>lengbot-workflow</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.lengbot</groupId>
+                <artifactId>lengbot-agent</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- ============================================ -->
+            <!-- MyBatis-Plus -->
+            <!-- ============================================ -->
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+                <version>${mybatis-plus.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-core</artifactId>
+                <version>${mybatis-plus.version}</version>
+            </dependency>
+
+            <!-- ============================================ -->
+            <!-- Sa-Token 认证框架 -->
+            <!-- ============================================ -->
+            <dependency>
+                <groupId>cn.dev33</groupId>
+                <artifactId>sa-token-spring-boot3-starter</artifactId>
+                <version>${sa-token.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.dev33</groupId>
+                <artifactId>sa-token-redis-jackson</artifactId>
+                <version>${sa-token.version}</version>
+            </dependency>
+
+            <!-- ============================================ -->
+            <!-- SpringDoc OpenAPI -->
+            <!-- ============================================ -->
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+                <version>${springdoc.version}</version>
+            </dependency>
+
+            <!-- ============================================ -->
+            <!-- 对象存储 & 向量数据库 -->
+            <!-- ============================================ -->
+            <dependency>
+                <groupId>io.minio</groupId>
+                <artifactId>minio</artifactId>
+                <version>${minio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.pgvector</groupId>
+                <artifactId>pgvector</artifactId>
+                <version>${pgvector.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.neo4j.driver</groupId>
+                <artifactId>neo4j-java-driver</artifactId>
+                <version>${neo4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.milvus</groupId>
+                <artifactId>milvus-sdk-java</artifactId>
+                <version>${milvus.version}</version>
+            </dependency>
+
+            <!-- ============================================ -->
+            <!-- 文档解析（直接依赖，替代 Spring AI Document Reader） -->
+            <!-- ============================================ -->
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-core</artifactId>
+                <version>${tika.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-parsers-standard-package</artifactId>
+                <version>${tika.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.pdfbox</groupId>
+                <artifactId>pdfbox</artifactId>
+                <version>${pdfbox.version}</version>
+            </dependency>
+
+            <!-- ============================================ -->
+            <!-- SQL 解析器（MyBatis-Plus 分页插件依赖） -->
+            <!-- ============================================ -->
+            <dependency>
+                <groupId>com.github.jsqlparser</groupId>
+                <artifactId>jsqlparser</artifactId>
+                <version>${jsqlparser.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>

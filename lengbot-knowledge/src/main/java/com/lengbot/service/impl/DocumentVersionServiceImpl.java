@@ -1,0 +1,251 @@
+package com.lengbot.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.lengbot.common.BizException;
+import com.lengbot.vo.DocumentVersionVO;
+import com.lengbot.entity.Document;
+import com.lengbot.entity.DocumentVersion;
+import com.lengbot.enums.ErrorCode;
+import com.lengbot.enums.KnowledgeRole;
+import com.lengbot.mapper.DocumentVersionMapper;
+import com.lengbot.service.DocumentService;
+import com.lengbot.service.DocumentVersionService;
+import com.lengbot.service.KnowledgeMemberService;
+import com.lengbot.util.MinioUtil;
+import cn.dev33.satoken.stp.StpUtil;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.List;
+
+/**
+ * 文档版本服务实现
+ *
+ * @author finch
+ * @since 2026-06-17
+ */
+@Slf4j
+@Service
+public class DocumentVersionServiceImpl extends ServiceImpl<DocumentVersionMapper, DocumentVersion>
+        implements DocumentVersionService {
+
+    @Autowired
+    private MinioUtil minioUtil;
+
+    @Autowired
+    private DocumentService documentService;
+
+    @Autowired
+    private KnowledgeMemberService permissionHelper;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void saveVersion(Long documentId, Integer version, String contentHash, String content) {
+        // 1. 存储内容到 MinIO
+        String storagePath = "doc-versions/" + documentId + "/v" + version + ".txt";
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        try (InputStream is = new ByteArrayInputStream(bytes)) {
+            minioUtil.upload(is, storagePath, bytes.length, "text/plain");
+        } catch (Exception e) {
+            log.error("[文档版本] 存储版本内容失败: documentId={}, version={}", documentId, version, e);
+            throw new BizException(ErrorCode.FILE_UPLOAD_FAILED);
+        }
+
+        // 2. 插入版本记录
+        DocumentVersion record = new DocumentVersion();
+        record.setDocumentId(documentId);
+        record.setVersion(version);
+        record.setContentHash(contentHash);
+        record.setStoragePath(storagePath);
+        record.setCreatedBy(StpUtil.getLoginIdAsLong());
+        save(record);
+        log.info("[文档版本] 保存版本快照: documentId={}, version={}", documentId, version);
+    }
+
+    @Override
+    public List<DocumentVersionVO> listVersions(Long documentId) {
+        Document doc = documentService.getById(documentId);
+        if (doc == null) {
+            throw new BizException(ErrorCode.DOCUMENT_NOT_FOUND);
+        }
+        permissionHelper.checkMember(doc.getKnowledgeId());
+
+        List<DocumentVersion> versions = list(new LambdaQueryWrapper<DocumentVersion>()
+                .eq(DocumentVersion::getDocumentId, documentId)
+                .orderByDesc(DocumentVersion::getVersion));
+
+        return versions.stream().map(v -> {
+            DocumentVersionVO vo = new DocumentVersionVO();
+            vo.setId(v.getId().toString());
+            vo.setVersion(v.getVersion());
+            vo.setContentHash(v.getContentHash());
+            vo.setCreateTime(v.getCreateTime());
+            return vo;
+        }).toList();
+    }
+
+    @Override
+    public String getVersionContent(Long versionId) {
+        DocumentVersion version = getById(versionId);
+        if (version == null) {
+            throw new BizException(ErrorCode.NOT_FOUND);
+        }
+        // 权限校验
+        Document doc = documentService.getById(version.getDocumentId());
+        if (doc == null) {
+            throw new BizException(ErrorCode.DOCUMENT_NOT_FOUND);
+        }
+        permissionHelper.checkMember(doc.getKnowledgeId());
+
+        try (InputStream is = minioUtil.download(version.getStoragePath())) {
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.error("[文档版本] 读取版本内容失败: versionId={}", versionId, e);
+            throw new BizException(ErrorCode.FILE_DOWNLOAD_FAILED);
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void rollback(Long documentId, Long versionId) {
+        // 1. 校验版本记录
+        DocumentVersion version = getById(versionId);
+        if (version == null || !version.getDocumentId().equals(documentId)) {
+            throw new BizException(ErrorCode.NOT_FOUND);
+        }
+
+        // 2. 校验文档 + 权限
+        Document doc = documentService.getById(documentId);
+        if (doc == null) {
+            throw new BizException(ErrorCode.DOCUMENT_NOT_FOUND);
+        }
+        permissionHelper.checkPermission(doc.getKnowledgeId(), KnowledgeRole.DEVELOPER);
+
+        // 3. 读取版本内容
+        String content;
+        try (InputStream is = minioUtil.download(version.getStoragePath())) {
+            content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.error("[文档版本] 读取版本内容失败: versionId={}", versionId, e);
+            throw new BizException(ErrorCode.FILE_DOWNLOAD_FAILED);
+        }
+
+        // 4. 保存当前版本为快照（回滚前先备份）
+        int nextVersion = doc.getVersion() != null ? doc.getVersion() + 1 : 2;
+        saveVersion(documentId, doc.getVersion(), doc.getFileHash(), readCurrentContent(doc));
+
+        // 5. 覆盖当前文档内容
+        String targetPath = (doc.getMarkdownPath() != null && !doc.getMarkdownPath().isBlank())
+                ? doc.getMarkdownPath() : doc.getFilePath();
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        try (InputStream is = new ByteArrayInputStream(bytes)) {
+            minioUtil.upload(is, targetPath, bytes.length, "text/plain");
+        } catch (Exception e) {
+            log.error("[文档版本] 回滚写入MinIO失败: documentId={}", documentId, e);
+            throw new BizException(ErrorCode.FILE_UPLOAD_FAILED);
+        }
+
+        // 6. 更新文档元数据
+        String newHash = calculateContentHash(content);
+        doc.setFileHash(newHash);
+        doc.setVersion(nextVersion);
+        doc.setLastEditTime(java.time.LocalDateTime.now());
+        documentService.updateById(doc);
+
+        // 7. 触发重建
+        try {
+            documentService.ingestDocument(documentId, doc.getEmbeddingJson());
+        } catch (Exception e) {
+            log.warn("[文档版本] 回滚后触发重建失败（文档已回滚）: documentId={}: {}", documentId, e.getMessage());
+        }
+
+        log.info("[文档版本] 回滚成功: documentId={}, rollbackToVersion={}, newVersion={}",
+                documentId, version.getVersion(), nextVersion);
+    }
+
+    /**
+     * 读取当前文档内容（用于回滚前备份）
+     */
+    private String readCurrentContent(Document doc) {
+        String path = (doc.getMarkdownPath() != null && !doc.getMarkdownPath().isBlank())
+                ? doc.getMarkdownPath() : doc.getFilePath();
+        try (InputStream is = minioUtil.download(path)) {
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.warn("[文档版本] 读取当前文档内容失败，跳过备份: documentId={}", doc.getId());
+            return "";
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteByDocumentId(Long documentId) {
+        // 1. 查询所有版本记录
+        List<DocumentVersion> versions = list(new LambdaQueryWrapper<DocumentVersion>()
+                .eq(DocumentVersion::getDocumentId, documentId));
+        if (versions.isEmpty()) {
+            return;
+        }
+        // 2. 删除 MinIO 中的版本文件
+        for (DocumentVersion v : versions) {
+            if (v.getStoragePath() != null) {
+                try {
+                    minioUtil.delete(v.getStoragePath());
+                } catch (Exception e) {
+                    log.warn("[文档版本] 删除版本文件失败: path={}, error={}", v.getStoragePath(), e.getMessage());
+                }
+            }
+        }
+        // 3. 删除 DB 记录
+        remove(new LambdaQueryWrapper<DocumentVersion>().eq(DocumentVersion::getDocumentId, documentId));
+        log.info("[文档版本] 已清理文档所有版本: documentId={}, count={}", documentId, versions.size());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteByDocumentIds(java.util.Collection<Long> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return;
+        }
+        // 1. 一次 IN 查询所有文档的版本记录
+        List<DocumentVersion> versions = list(new LambdaQueryWrapper<DocumentVersion>()
+                .in(DocumentVersion::getDocumentId, documentIds));
+        if (versions.isEmpty()) {
+            return;
+        }
+        // 2. 删 MinIO 文件（IO 异步，逐条 safe delete）
+        for (DocumentVersion v : versions) {
+            if (v.getStoragePath() != null) {
+                try {
+                    minioUtil.delete(v.getStoragePath());
+                } catch (Exception e) {
+                    log.warn("[文档版本] 删除版本文件失败: path={}, error={}", v.getStoragePath(), e.getMessage());
+                }
+            }
+        }
+        // 3. 一次 IN 删 DB 记录
+        remove(new LambdaQueryWrapper<DocumentVersion>().in(DocumentVersion::getDocumentId, documentIds));
+        log.info("[文档版本] 批量清理版本: documentCount={}, versionCount={}", documentIds.size(), versions.size());
+    }
+
+    private String calculateContentHash(String content) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] hash = md.digest(content.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return String.valueOf(System.currentTimeMillis());
+        }
+    }
+}

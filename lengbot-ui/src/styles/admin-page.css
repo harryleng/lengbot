@@ -1,0 +1,102 @@
+/* 管理页面共享样式 */
+.page {
+  padding: var(--space-xl);
+  padding-right: calc(var(--space-xl) + var(--scroll-content-gap, 8px));
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--color-canvas-soft);
+  scrollbar-gutter: stable;
+}
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 32px;
+}
+.page-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-bottom: 4px;
+}
+.page-desc {
+  font-size: 14px;
+  color: var(--color-mute);
+}
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 按钮
+   注意：新代码请使用 lb-components.css 的 .lb-btn 系列，或直接用 <a-button>；
+   useTheme.js 已统一 Button.borderRadius=100（pill）。历史 .btn-* 类保留兼容，
+   圆角/视觉以现有调用的 39 个文件为准，不批量替换避免视觉退化。 */
+.btn-primary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border: none;
+  border-radius: 100px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-primary:hover {
+  background: #27272a;
+}
+[data-theme="dark"] .btn-primary {
+  border: 1px solid #444;
+}
+[data-theme="dark"] .btn-primary:hover {
+  background: #3f3f46;
+  border-color: #555;
+}
+.btn-outline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  background: transparent;
+  border: 1px solid var(--color-hairline);
+  border-radius: 100px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-outline:hover {
+  border-color: var(--color-link);
+  color: var(--color-link);
+}
+.btn-cancel {
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid var(--color-hairline);
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.btn-primary-sm {
+  padding: 6px 14px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-primary-sm:hover {
+  background: #27272a;
+}
+[data-theme="dark"] .btn-primary-sm {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+[data-theme="dark"] .btn-primary-sm:hover {
+  background: #3f3f46;
+  border-color: rgba(255, 255, 255, 0.25);
+}

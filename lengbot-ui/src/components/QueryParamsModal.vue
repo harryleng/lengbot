@@ -1,0 +1,650 @@
+<template>
+  <a-modal
+    v-model:open="visible"
+    :width="480"
+    :mask-closable="false"
+    :body-style="{ padding: 0 }"
+    @cancel="handleCancel"
+  >
+    <template #title>
+      <span class="query-modal-title">
+        检索配置
+        <a-tooltip :title="knowledgeTypeTooltip">
+          <QuestionCircleOutlined class="title-tip-icon" />
+        </a-tooltip>
+      </span>
+    </template>
+
+    <div class="scroll-body dialog-scroll-body">
+      <a-form :model="form" :label-col="{ flex: '0 0 110px' }" class="config-form">
+        <!-- 预设模式 -->
+        <div class="preset-bar">
+          <span class="preset-label">快捷预设</span>
+          <div class="preset-btns">
+            <button
+              v-for="p in presetOptions"
+              :key="p.key"
+              class="preset-btn"
+              :class="{ active: activePreset === p.key }"
+              @click="applyPreset(p.key)"
+            >
+              {{ p.label }}
+            </button>
+          </div>
+          <a-tooltip title="选择预设模式可快速填充推荐参数，也可手动微调">
+            <QuestionCircleOutlined class="field-tip-icon" />
+          </a-tooltip>
+        </div>
+
+        <!-- 检索模式 -->
+        <a-form-item>
+          <template #label>
+            <span>检索模式</span>
+            <a-tooltip
+              :title="
+                isMilvus
+                  ? 'vector=纯向量语义检索；keyword=BM25关键词检索；hybrid=两者加权融合'
+                  : 'vector=向量语义检索；keyword=全文检索；hybrid=两者RRF融合'
+              "
+            >
+              <QuestionCircleOutlined class="field-tip-icon" />
+            </a-tooltip>
+          </template>
+          <a-select v-model:value="form.search_mode">
+            <a-select-option value="vector">向量检索</a-select-option>
+            <a-select-option value="keyword">{{ isMilvus ? '关键词检索' : '全文检索' }}</a-select-option>
+            <a-select-option value="hybrid">混合检索</a-select-option>
+          </a-select>
+        </a-form-item>
+
+        <a-form-item>
+          <template #label>
+            <span>返回数量</span>
+            <a-tooltip title="检索返回的最大文档块数量。值越大召回越全，但噪声也可能增加，建议 3-10">
+              <QuestionCircleOutlined class="field-tip-icon" />
+            </a-tooltip>
+          </template>
+          <a-input-number v-model:value="form.final_top_k" :min="1" :max="100" style="width: 100%" />
+        </a-form-item>
+
+        <a-form-item>
+          <template #label>
+            <span>相似度阈值</span>
+            <a-tooltip title="仅返回相似度分数 ≥ 该阈值的文档块。值越高结果越精准但可能漏召回，建议 0.3-0.7">
+              <QuestionCircleOutlined class="field-tip-icon" />
+            </a-tooltip>
+          </template>
+          <a-input-number
+            v-model:value="form.similarity_threshold"
+            :min="0"
+            :max="1"
+            :step="0.05"
+            style="width: 100%"
+          />
+        </a-form-item>
+
+        <!-- 查询改写 -->
+        <a-form-item>
+          <template #label>
+            <span>查询改写</span>
+            <a-tooltip
+              title="启用后，检索前会用大模型将用户问题改写为更适合向量检索的查询。对短查询、模糊查询、代词引用等场景有明显提升，但会增加约 200-500ms 延迟"
+            >
+              <QuestionCircleOutlined class="field-tip-icon" />
+            </a-tooltip>
+          </template>
+          <a-switch v-model:checked="form.query_rewrite" />
+        </a-form-item>
+
+        <!-- Milvus hybrid 模式专属参数 -->
+        <template v-if="isMilvus && form.search_mode === 'hybrid'">
+          <a-form-item>
+            <template #label>
+              <span>向量权重</span>
+              <a-tooltip title="混合检索中向量语义的权重占比。值越大越偏向语义理解，建议 0.5-0.8">
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <a-input-number v-model:value="form.vector_weight" :min="0" :max="1" :step="0.1" style="width: 100%" />
+          </a-form-item>
+
+          <a-form-item>
+            <template #label>
+              <span>BM25权重</span>
+              <a-tooltip title="混合检索中BM25关键词的权重占比。值越大越偏向精确关键词匹配，建议 0.2-0.5">
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <a-input-number v-model:value="form.bm25_weight" :min="0" :max="1" :step="0.1" style="width: 100%" />
+          </a-form-item>
+        </template>
+
+        <!-- Milvus BM25 专属参数 -->
+        <template v-if="isMilvus && (form.search_mode === 'keyword' || form.search_mode === 'hybrid')">
+          <a-form-item>
+            <template #label>
+              <span>BM25候选数</span>
+              <a-tooltip
+                title="BM25检索阶段的候选文档数量，不等于最终返回数量。越大召回越全但耗时越长，建议为返回数量的2-3倍"
+              >
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <a-input-number v-model:value="form.bm25_top_k" :min="1" :max="200" style="width: 100%" />
+          </a-form-item>
+
+          <a-form-item>
+            <template #label>
+              <span>稀疏项丢弃</span>
+              <a-tooltip title="Milvus BM25 检索时丢弃低分稀疏项的比例。数值越大检索越快，但可能降低召回，通常保持 0">
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <a-input-number
+              v-model:value="form.bm25_drop_ratio_search"
+              :min="0"
+              :max="1"
+              :step="0.1"
+              style="width: 100%"
+            />
+          </a-form-item>
+        </template>
+
+        <!-- pgvector hybrid 模式专属参数 -->
+        <template v-if="!isMilvus && form.search_mode === 'hybrid'">
+          <a-form-item>
+            <template #label>
+              <span>向量权重</span>
+              <a-tooltip title="RRF融合中向量检索的权重。值越大越偏向语义理解，建议 0.5-0.8">
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <a-input-number v-model:value="form.vector_weight" :min="0" :max="1" :step="0.1" style="width: 100%" />
+          </a-form-item>
+
+          <a-form-item>
+            <template #label>
+              <span>关键词权重</span>
+              <a-tooltip title="RRF融合中全文检索的权重。值越大越偏向精确关键词匹配，建议 0.2-0.5">
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <a-input-number v-model:value="form.keyword_weight" :min="0" :max="1" :step="0.1" style="width: 100%" />
+          </a-form-item>
+        </template>
+
+        <!-- Reranker（通用） -->
+        <a-divider style="margin: 12px 0" />
+        <a-form-item>
+          <template #label>
+            <span>启用重排序</span>
+            <a-tooltip title="使用 Reranker 模型对检索结果进行精排，提升相关性">
+              <QuestionCircleOutlined class="field-tip-icon" />
+            </a-tooltip>
+          </template>
+          <a-switch v-model:checked="form.use_reranker" />
+        </a-form-item>
+
+        <template v-if="form.use_reranker">
+          <a-form-item>
+            <template #label>
+              <span>重排序模型</span>
+              <a-tooltip title="指定重排序模型，不选择时使用系统默认配置的重排序模型">
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <ModelSelect v-model="form.reranker_model" model-type="rerank" placeholder="系统默认" />
+          </a-form-item>
+
+          <a-form-item>
+            <template #label>
+              <span>召回候选数</span>
+              <a-tooltip title="重排序前的候选文档数量，需 ≥ 返回数量。越大重排序效果越好但耗时越长">
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <a-input-number v-model:value="form.recall_top_k" :min="1" :max="200" style="width: 100%" />
+          </a-form-item>
+        </template>
+
+        <!-- 问答对检索 -->
+        <a-divider style="margin: 12px 0" />
+        <a-form-item>
+          <template #label>
+            <span>启用问答对</span>
+            <a-tooltip title="开启后检索时同时搜索问答对，高匹配度的问答对可直接返回标准答案，不经过大模型合成">
+              <QuestionCircleOutlined class="field-tip-icon" />
+            </a-tooltip>
+          </template>
+          <a-switch v-model:checked="form.qa_enabled" />
+        </a-form-item>
+
+        <template v-if="form.qa_enabled">
+          <a-form-item>
+            <template #label>
+              <span>QA 返回数量</span>
+              <a-tooltip title="问答对检索返回的最大条数。不需要太多，命中 1-2 条即可，建议 1-5">
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <a-input-number v-model:value="form.qa_top_k" :min="1" :max="20" style="width: 100%" />
+          </a-form-item>
+
+          <a-form-item>
+            <template #label>
+              <span>QA 命中阈值</span>
+              <a-tooltip title="问答对相似度高于此阈值时才算命中。值越高要求匹配越精确，建议 0.7-0.95">
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <a-input-number v-model:value="form.qa_threshold" :min="0" :max="1" :step="0.05" style="width: 100%" />
+          </a-form-item>
+
+          <a-form-item>
+            <template #label>
+              <span>QA 优先返回</span>
+              <a-tooltip
+                title="开启后，当问答对相似度超过阈值时直接返回标准答案，跳过大模型合成。关闭则问答对仅作为参考资料辅助大模型回答"
+              >
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <a-switch v-model:checked="form.qa_priority" />
+          </a-form-item>
+        </template>
+
+        <!-- 图检索（仅 Milvus 知识库） -->
+        <template v-if="isMilvus">
+          <a-divider style="margin: 12px 0" />
+          <a-form-item>
+            <template #label>
+              <span>启用图检索</span>
+              <a-tooltip title="基于 Milvus 向量检索 + Neo4j 图遍历的检索增强，通过 PPR 算法排序，与常规检索结果融合">
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <a-switch v-model:checked="form.use_graph_retrieval" />
+          </a-form-item>
+
+          <template v-if="form.use_graph_retrieval">
+            <a-form-item>
+              <template #label>
+                <span>实体候选数</span>
+                <a-tooltip title="Milvus Entity 向量检索的候选数量，作为 PPR 种子节点">
+                  <QuestionCircleOutlined class="field-tip-icon" />
+                </a-tooltip>
+              </template>
+              <a-input-number v-model:value="form.graph_entity_top_k" :min="1" :max="100" style="width: 100%" />
+            </a-form-item>
+
+            <a-form-item>
+              <template #label>
+                <span>三元组候选数</span>
+                <a-tooltip title="Milvus Triple 向量检索的候选数量，用于补充种子节点">
+                  <QuestionCircleOutlined class="field-tip-icon" />
+                </a-tooltip>
+              </template>
+              <a-input-number v-model:value="form.graph_triple_top_k" :min="1" :max="100" style="width: 100%" />
+            </a-form-item>
+
+            <a-form-item>
+              <template #label>
+                <span>子图最大节点</span>
+                <a-tooltip title="Neo4j 2-hop 子图遍历的最大节点数，越大越全面但耗时越长">
+                  <QuestionCircleOutlined class="field-tip-icon" />
+                </a-tooltip>
+              </template>
+              <a-input-number v-model:value="form.graph_max_nodes" :min="10" :max="500" style="width: 100%" />
+            </a-form-item>
+
+            <a-form-item>
+              <template #label>
+                <span>图检索返回数</span>
+                <a-tooltip title="图检索最终返回的结果数量（实体描述+三元组描述）">
+                  <QuestionCircleOutlined class="field-tip-icon" />
+                </a-tooltip>
+              </template>
+              <a-input-number v-model:value="form.graph_top_k" :min="1" :max="50" style="width: 100%" />
+            </a-form-item>
+
+            <a-form-item>
+              <template #label>
+                <span>图检索权重</span>
+                <a-tooltip title="RRF 融合中图检索结果的权重。值越大越偏向图谱语义，建议 0.2-0.5">
+                  <QuestionCircleOutlined class="field-tip-icon" />
+                </a-tooltip>
+              </template>
+              <a-input-number v-model:value="form.graph_weight" :min="0" :max="1" :step="0.1" style="width: 100%" />
+            </a-form-item>
+
+            <a-form-item>
+              <template #label>
+                <span>
+                  PPR 阻尼系数
+                  <a-popover trigger="click" placement="right" :overlay-style="{ maxWidth: '360px' }">
+                    <template #content>
+                      <div style="font-size: 13px; line-height: 1.6">
+                        <p style="font-weight: 600; margin-bottom: 8px">Personalized PageRank (PPR)</p>
+                        <p>PPR 是一种图排序算法，用于衡量节点相对于种子节点的"重要性"。</p>
+                        <p style="margin-top: 8px"><b>核心思想：</b></p>
+                        <p>
+                          从种子节点出发，每一步以概率
+                          <b>d</b>
+                          沿边随机游走，以概率
+                          <b>1-d</b>
+                          跳回种子节点。经过多轮迭代后，节点被访问的概率即为其 PPR 分数。
+                        </p>
+                        <p style="margin-top: 8px"><b>参数含义：</b></p>
+                        <ul style="padding-left: 16px; margin: 4px 0">
+                          <li>
+                            <b>d = 0.85</b>
+                            （默认）：更依赖图结构，结果更全面
+                          </li>
+                          <li>
+                            <b>d = 0.5</b>
+                            ：更聚焦种子节点附近，结果更精准
+                          </li>
+                          <li>
+                            <b>d → 1</b>
+                            ：纯随机游走，可能偏离种子
+                          </li>
+                        </ul>
+                        <p style="margin-top: 8px"><b>实现策略：</b></p>
+                        <ol style="padding-left: 16px; margin: 4px 0">
+                          <li>Milvus 向量检索获取种子实体</li>
+                          <li>Neo4j 查询种子的 2-hop 子图</li>
+                          <li>迭代 15 轮 PPR 计算节点分数</li>
+                          <li>按分数排序，取 top 实体和三元组</li>
+                        </ol>
+                      </div>
+                    </template>
+                    <QuestionCircleOutlined class="field-tip-icon" style="cursor: pointer" />
+                  </a-popover>
+                </span>
+              </template>
+              <a-input-number v-model:value="form.ppr_damping" :min="0" :max="1" :step="0.05" style="width: 100%" />
+            </a-form-item>
+          </template>
+        </template>
+      </a-form>
+    </div>
+
+    <template #footer>
+      <div style="display: flex; justify-content: space-between">
+        <button class="btn-outline-sm" @click="handleReset">恢复默认</button>
+        <div style="display: flex; gap: 8px">
+          <button class="btn-outline-sm" @click="handleCancel">取消</button>
+          <button class="btn-outline-sm" @click="handleApply">仅应用测试（不保存）</button>
+          <button class="btn-primary-sm" :disabled="saving" @click="handleSave">
+            {{ saving ? '保存中...' : '保存为默认' }}
+          </button>
+        </div>
+      </div>
+    </template>
+  </a-modal>
+</template>
+
+<script setup>
+import { ref, reactive, computed } from 'vue'
+import { message } from 'ant-design-vue'
+import { QuestionCircleOutlined } from '@ant-design/icons-vue'
+import { getQueryParams, updateQueryParams } from '../api/knowledge'
+import ModelSelect from './ModelSelect.vue'
+
+const props = defineProps({
+  knowledgeId: { type: String, required: true },
+  knowledgeType: { type: String, default: 'pg' },
+})
+
+const emit = defineEmits(['apply', 'qaChange'])
+
+const visible = ref(false)
+const saving = ref(false)
+
+const isMilvus = computed(() => props.knowledgeType === 'milvus')
+const knowledgeTypeTooltip = computed(() =>
+  isMilvus.value
+    ? 'Milvus 知识库使用 dense vector 向量检索与内置 BM25 sparse 全文检索；混合模式通过向量权重、BM25 权重和 BM25 候选数融合；图检索仅 Milvus 可用。'
+    : 'PG 知识库使用 pgvector 做语义向量检索，关键词模式使用 PostgreSQL 全文检索，混合模式使用向量结果和全文结果做 RRF 融合；PG 不展示 Milvus BM25 sparse 专属参数。'
+)
+
+const pgDefaults = {
+  search_mode: 'vector',
+  final_top_k: 5,
+  similarity_threshold: 0.5,
+  query_rewrite: false,
+  vector_weight: 0.7,
+  keyword_weight: 0.3,
+  use_reranker: false,
+  reranker_model: '',
+  recall_top_k: 50,
+  qa_enabled: true,
+  qa_top_k: 3,
+  qa_threshold: 0.85,
+  qa_priority: true,
+  use_graph_retrieval: false,
+  graph_entity_top_k: 10,
+  graph_triple_top_k: 10,
+  graph_max_nodes: 100,
+  graph_top_k: 5,
+  graph_weight: 0.3,
+  ppr_damping: 0.85,
+}
+
+const milvusDefaults = {
+  search_mode: 'vector',
+  final_top_k: 10,
+  similarity_threshold: 0.0,
+  query_rewrite: false,
+  vector_weight: 0.7,
+  bm25_weight: 0.3,
+  bm25_top_k: 30,
+  bm25_drop_ratio_search: 0.0,
+  use_reranker: false,
+  reranker_model: '',
+  recall_top_k: 50,
+  qa_enabled: true,
+  qa_top_k: 3,
+  qa_threshold: 0.85,
+  qa_priority: true,
+  use_graph_retrieval: false,
+  graph_entity_top_k: 10,
+  graph_triple_top_k: 10,
+  graph_max_nodes: 100,
+  graph_top_k: 5,
+  graph_weight: 0.3,
+  ppr_damping: 0.85,
+}
+
+const form = reactive({ ...pgDefaults })
+
+function getDefaults() {
+  return props.knowledgeType === 'milvus' ? { ...milvusDefaults } : { ...pgDefaults }
+}
+
+// 预设模式
+const activePreset = ref('balanced')
+
+const presetOptions = [
+  { key: 'precise', label: '精确模式' },
+  { key: 'balanced', label: '平衡模式' },
+  { key: 'broad', label: '广泛模式' },
+]
+
+const presetConfigs = {
+  precise: {
+    final_top_k: 3,
+    similarity_threshold: 0.7,
+    search_mode: 'hybrid',
+    use_reranker: true,
+    recall_top_k: 20,
+  },
+  balanced: null,
+  broad: {
+    final_top_k: 10,
+    similarity_threshold: 0.2,
+    search_mode: 'vector',
+    use_reranker: false,
+  },
+}
+
+function applyPreset(key) {
+  activePreset.value = key
+  const cfg = presetConfigs[key]
+  if (cfg) {
+    Object.assign(form, cfg)
+  } else {
+    Object.assign(form, getDefaults())
+  }
+}
+
+function detectPreset(data) {
+  if (data.final_top_k <= 3 && data.similarity_threshold >= 0.65 && data.use_reranker) return 'precise'
+  if (data.final_top_k >= 8 && data.similarity_threshold <= 0.25 && !data.use_reranker) return 'broad'
+  return 'balanced'
+}
+
+async function open() {
+  try {
+    const res = await getQueryParams(props.knowledgeId)
+    const saved = res.data || {}
+    const defaults = getDefaults()
+    Object.assign(form, { ...defaults, ...saved })
+    activePreset.value = detectPreset(form)
+  } catch {
+    Object.assign(form, getDefaults())
+    activePreset.value = 'balanced'
+  }
+  visible.value = true
+}
+
+function handleReset() {
+  Object.assign(form, getDefaults())
+  activePreset.value = 'balanced'
+}
+
+function handleCancel() {
+  visible.value = false
+}
+
+function handleApply() {
+  emit('apply', { ...form })
+  message.success('已应用到本次检索测试')
+}
+
+async function handleSave() {
+  saving.value = true
+  try {
+    await updateQueryParams(props.knowledgeId, { ...form })
+    emit('apply', { ...form })
+    emit('qaChange', form.qa_enabled)
+    message.success('检索配置已保存')
+    visible.value = false
+  } catch {
+    // interceptor handled
+  } finally {
+    saving.value = false
+  }
+}
+
+defineExpose({ open, getQaEnabled: () => form.qa_enabled })
+</script>
+
+<style scoped>
+.scroll-body {
+  padding: 24px 24px 24px 16px;
+}
+.config-form {
+  padding-right: 8px;
+}
+.query-modal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.title-tip-icon {
+  font-size: 14px;
+  color: var(--color-mute);
+  cursor: help;
+}
+.preset-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 10px 12px;
+  background: var(--color-canvas-soft);
+  border-radius: 8px;
+}
+.preset-label {
+  font-size: 13px;
+  color: var(--color-body);
+  white-space: nowrap;
+}
+.preset-btns {
+  display: flex;
+  gap: 6px;
+}
+.preset-btn {
+  padding: 4px 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 100px;
+  background: var(--color-canvas);
+  font-size: 12px;
+  color: var(--color-body);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.preset-btn:hover {
+  border-color: var(--color-link);
+  color: var(--color-link);
+}
+.preset-btn.active {
+  background: #0070f3;
+  border-color: var(--color-link);
+  color: #fff;
+}
+.field-tip-icon {
+  font-size: 13px;
+  color: var(--color-mute);
+  cursor: help;
+  margin-left: 4px;
+}
+.btn-outline-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  border: 1px solid var(--color-hairline);
+  border-radius: 100px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.btn-outline-sm:hover {
+  border-color: var(--color-link);
+  color: var(--color-link);
+}
+.btn-primary-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: 100px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.btn-primary-sm:hover:not(:disabled) {
+  background: #27272a;
+}
+.btn-primary-sm:disabled {
+  background: #d4d4d8;
+  cursor: not-allowed;
+}
+</style>

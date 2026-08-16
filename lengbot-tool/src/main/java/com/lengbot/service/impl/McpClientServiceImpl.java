@@ -1,0 +1,637 @@
+package com.lengbot.service.impl;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lengbot.common.BizException;
+import com.lengbot.entity.McpServer;
+import com.lengbot.enums.CommonStatus;
+import com.lengbot.enums.ErrorCode;
+import com.lengbot.enums.McpTransportType;
+import com.lengbot.event.CacheInvalidationBroadcaster;
+import com.lengbot.service.McpClientService;
+import com.lengbot.service.McpServerService;
+import com.lengbot.util.RedisUtil;
+import io.modelcontextprotocol.client.McpClient;
+import io.modelcontextprotocol.client.McpSyncClient;
+import io.modelcontextprotocol.client.transport.HttpClientSseClientTransport;
+import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
+import io.modelcontextprotocol.client.transport.ServerParameters;
+import io.modelcontextprotocol.client.transport.StdioClientTransport;
+import io.modelcontextprotocol.json.jackson.JacksonMcpJsonMapper;
+import io.modelcontextprotocol.spec.McpClientTransport;
+import io.modelcontextprotocol.spec.McpSchema;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import io.agentscope.core.tool.ToolBase;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.stereotype.Service;
+
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+
+/**
+ * MCP 客户端服务实现：连接管理、工具发现、工具转回调
+ *
+ * @author finch
+ * @since 2026-05-23
+ */
+@Slf4j
+@Service
+@Lazy
+@RequiredArgsConstructor
+public class McpClientServiceImpl implements McpClientService {
+
+    private final McpServerService mcpServerService;
+    private final RedisUtil redisUtil;
+    private final ObjectMapper objectMapper;
+    private final CacheInvalidationBroadcaster cacheInvalidationBroadcaster;
+
+    /** Redis 缓存 key 前缀 */
+    private static final String MCP_TOOLS_CACHE_KEY = "lengbot:mcp:tools:";
+
+    /** 多实例广播的缓存域标识：mcpClient（按 serverId 索引） */
+    private static final String CACHE_TYPE_MCP_CLIENT = "mcpClient";
+
+    /** 客户端缓存：serverId → McpSyncClient */
+    private final ConcurrentHashMap<Long, McpSyncClient> clientCache = new ConcurrentHashMap<>();
+
+    /** ToolBase 缓存：serverId → List<ToolBase>（已过滤 disabled_tools） */
+    private final ConcurrentHashMap<Long, List<ToolBase>> callbackCache = new ConcurrentHashMap<>();
+
+    @PostConstruct
+    void registerCacheInvalidation() {
+        // 多实例失效：其他实例广播 mcpClient 失效时，本实例同步清理本地 client/callback 缓存（不触发 Redis 删除，避免循环）
+        cacheInvalidationBroadcaster.register(CACHE_TYPE_MCP_CLIENT, key -> {
+            if (key == null) {
+                callbackCache.clear();
+                clientCache.forEach((id, client) -> closeQuietly(client, id));
+                clientCache.clear();
+            } else {
+                Long serverId = Long.parseLong(key);
+                callbackCache.remove(serverId);
+                McpSyncClient client = clientCache.remove(serverId);
+                if (client != null) {
+                    closeQuietly(client, serverId);
+                }
+            }
+        });
+    }
+
+    /** 关闭 MCP 客户端连接，异常仅打日志不抛出 */
+    private void closeQuietly(McpSyncClient client, Long serverId) {
+        try {
+            client.close();
+        } catch (Exception e) {
+            log.warn("[MCP] 关闭客户端失败: serverId={}, error={}", serverId, e.getMessage());
+        }
+    }
+
+    @Override
+    public List<McpSchema.Tool> testConnection(Long mcpServerId) {
+        McpServer server = mcpServerService.getById(mcpServerId);
+        if (server == null) {
+            throw new BizException(ErrorCode.MCP_SERVER_NOT_FOUND);
+        }
+
+        // 测试连接：创建新客户端，发现工具，然后关闭
+        McpSyncClient client = null;
+        try {
+            client = createAndInitClient(server);
+            List<McpSchema.Tool> tools = client.listTools().tools();
+            log.info("[MCP] 测试连接成功: server={}, 工具数={}", server.getName(), tools.size());
+            return tools;
+        } finally {
+            if (client != null) {
+                try { client.close(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /**
+     * 获取工具列表（优先从Redis缓存读取）
+     *
+     * @param mcpServerId MCP Server ID
+     * @return 工具列表（从缓存或运行时获取）
+     */
+    @Override
+    public List<McpSchema.Tool> getToolsWithCache(Long mcpServerId) {
+        String cacheKey = MCP_TOOLS_CACHE_KEY + mcpServerId;
+
+        // 1. 先查 Redis 缓存
+        String cachedJson = redisUtil.get(cacheKey);
+        if (cachedJson != null && !cachedJson.isBlank()) {
+            try {
+                List<McpSchema.Tool> tools = parseToolsFromJson(cachedJson);
+                log.info("[MCP] 从Redis缓存读取工具: serverId={}, 工具数={}", mcpServerId, tools.size());
+                return tools;
+            } catch (Exception e) {
+                log.warn("[MCP] 解析缓存失败，重新获取: serverId={}, error={}", mcpServerId, e.getMessage());
+            }
+        }
+
+        // 2. 缓存不存在，从运行时获取
+        McpServer server = mcpServerService.getById(mcpServerId);
+        if (server == null) {
+            throw new BizException(ErrorCode.MCP_SERVER_NOT_FOUND);
+        }
+
+        McpSyncClient client = null;
+        try {
+            client = createAndInitClient(server);
+            List<McpSchema.Tool> tools;
+            try {
+                tools = client.listTools().tools();
+            } catch (Exception e) {
+                log.error("[MCP] 获取工具失败: serverId={}, name={}", mcpServerId, server.getName(), e);
+                throw new BizException(ErrorCode.MCP_TOOLS_FETCH_FAILED);
+            }
+
+            // 3. 写入 Redis 缓存（不过期，手动刷新才清除）
+            try {
+                String json = serializeToolsToJson(tools);
+                redisUtil.set(cacheKey, json);
+                log.info("[MCP] 工具列表已缓存到Redis: serverId={}, 工具数={}", mcpServerId, tools.size());
+            } catch (Exception e) {
+                log.warn("[MCP] 写入Redis缓存失败: serverId={}, error={}", mcpServerId, e.getMessage());
+            }
+
+            return tools;
+        } catch (BizException e) {
+            if (e.getCode() == ErrorCode.MCP_SERVER_NOT_FOUND.getCode()
+                    || e.getCode() == ErrorCode.MCP_TOOLS_FETCH_FAILED.getCode()) {
+                throw e;
+            }
+            log.warn("[MCP] 获取工具失败: serverId={}, name={}, error={}",
+                    mcpServerId, server.getName(), e.getMessage());
+            throw new BizException(ErrorCode.MCP_TOOLS_FETCH_FAILED);
+        } catch (Exception e) {
+            log.error("[MCP] 获取工具失败: serverId={}, name={}", mcpServerId, server.getName(), e);
+            throw new BizException(ErrorCode.MCP_TOOLS_FETCH_FAILED);
+        } finally {
+            if (client != null) {
+                try { client.close(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    @Override
+    public List<ToolBase> getToolCallbacks(Long mcpServerId) {
+        return callbackCache.computeIfAbsent(mcpServerId, id -> {
+            McpServer server = mcpServerService.getById(id);
+            if (server == null) {
+                return List.of();
+            }
+            if (server.getStatus() != CommonStatus.ACTIVE) {
+                log.info("[MCP] 跳过未启用的 MCP Server: serverId={}, name={}", id, server.getName());
+                return List.of();
+            }
+
+            McpSyncClient client = getOrCreateClient(server);
+            // 工具定义优先复用 Redis 缓存；仅缓存失效或管理员刷新后才调用 listTools()。
+            List<McpSchema.Tool> mcpTools = getToolsWithCache(id);
+
+            // 解析 disabled_tools
+            Set<String> disabledTools = parseDisabledTools(server.getDisabledTools());
+
+            // 将 MCP 工具包装为 AgentScope ToolBase
+            // TODO: 后续可用 Toolkit.registerMcpClient() 替代手动包装
+            List<ToolBase> callbacks = mcpTools.stream()
+                    .filter(tool -> !disabledTools.contains(tool.name()))
+                    .map(tool -> wrapMcpToolAsToolBase(client, tool))
+                    .collect(Collectors.toList());
+            log.info("[MCP] 缓存ToolBase: serverId={}, 工具数={}", id, callbacks.size());
+            return callbacks;
+        });
+    }
+
+    @Override
+    public List<ToolBase> getAllToolCallbacks(Long mcpServerId) {
+        McpServer server = mcpServerService.getById(mcpServerId);
+        if (server == null) {
+            return List.of();
+        }
+
+        McpSyncClient client = getOrCreateClient(server);
+        List<McpSchema.Tool> mcpTools = client.listTools().tools();
+
+        // 将 MCP 工具包装为 AgentScope ToolBase
+        return mcpTools.stream()
+                .map(tool -> wrapMcpToolAsToolBase(client, tool))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 将 MCP 工具包装为 AgentScope ToolBase
+     * <p>使用原生 MCP SDK 调用远程工具，替代 Spring AI SyncMcpToolCallback</p>
+     *
+     * @param client MCP 同步客户端
+     * @param mcpTool MCP 工具定义
+     * @return ToolBase 实例
+     */
+    @SuppressWarnings("unchecked")
+    private ToolBase wrapMcpToolAsToolBase(McpSyncClient client, McpSchema.Tool mcpTool) {
+        Map<String, Object> inputSchema = Map.of();
+        try {
+            if (mcpTool.inputSchema() != null) {
+                inputSchema = objectMapper.convertValue(mcpTool.inputSchema(), new TypeReference<>() {});
+            }
+        } catch (Exception e) {
+            log.warn("[MCP] 解析工具 inputSchema 失败: tool={}, error={}", mcpTool.name(), e.getMessage());
+        }
+
+        return com.lengbot.tool.LengBotToolAdapter.lengBotBuilder()
+                .name(mcpTool.name())
+                .description(mcpTool.description() != null ? mcpTool.description() : "")
+                .inputSchema(inputSchema)
+                .mcpName(mcpTool.name())
+                .executor(param -> {
+                    try {
+                        // 从 ToolCallParam 提取参数
+                        Object argsObj = param.getInput();
+                        Map<String, Object> argsMap;
+                        if (argsObj instanceof String s) {
+                            argsMap = objectMapper.readValue(s, new TypeReference<>() {});
+                        } else if (argsObj instanceof Map<?, ?> m) {
+                            argsMap = (Map<String, Object>) m;
+                        } else {
+                            argsMap = Map.of();
+                        }
+                        // 调用 MCP 工具
+                        var result = client.callTool(new McpSchema.CallToolRequest(mcpTool.name(), argsMap));
+                        // 提取结果文本
+                        StringBuilder sb = new StringBuilder();
+                        if (result.content() != null) {
+                            for (Object content : result.content()) {
+                                if (content instanceof McpSchema.TextContent tc) {
+                                    sb.append(tc.text());
+                                }
+                            }
+                        }
+                        return io.agentscope.core.message.ToolResultBlock.of(null, mcpTool.name(),
+                                io.agentscope.core.message.TextBlock.builder().text(sb.toString()).build());
+                    } catch (Exception e) {
+                        log.error("[MCP] 工具调用失败: tool={}, error={}", mcpTool.name(), e.getMessage(), e);
+                        return io.agentscope.core.message.ToolResultBlock.error("MCP 工具调用失败: " + e.getMessage());
+                    }
+                })
+                .build();
+    }
+
+    @Override
+    public void clearCache(Long mcpServerId) {
+        // 1. 清除本地缓存
+        callbackCache.remove(mcpServerId);
+        McpSyncClient client = clientCache.remove(mcpServerId);
+        if (client != null) {
+            try {
+                client.close();
+                log.info("[MCP] 已清除缓存并关闭客户端: serverId={}", mcpServerId);
+            } catch (Exception e) {
+                log.warn("[MCP] 关闭客户端失败: serverId={}, error={}", mcpServerId, e.getMessage());
+            }
+        }
+
+        // 2. 清除 Redis 缓存
+        String cacheKey = MCP_TOOLS_CACHE_KEY + mcpServerId;
+        redisUtil.delete(cacheKey);
+
+        // 3. 多实例广播：其他实例同步清理本地 client/callback 缓存
+        cacheInvalidationBroadcaster.broadcast(CACHE_TYPE_MCP_CLIENT, String.valueOf(mcpServerId));
+        log.info("[MCP] 已清除Redis缓存并广播失效: serverId={}", mcpServerId);
+    }
+
+    @Override
+    public int refreshServer(Long mcpServerId) {
+        try {
+            clearCache(mcpServerId);
+            List<McpSchema.Tool> tools = getToolsWithCache(mcpServerId);
+            log.info("[MCP] 刷新工具缓存成功: serverId={}, toolCount={}", mcpServerId, tools.size());
+            return tools.size();
+        } catch (Exception e) {
+            log.warn("[MCP] 刷新工具缓存失败: serverId={}, error={}", mcpServerId, e.getMessage());
+            return -1;
+        }
+    }
+
+    @PreDestroy
+    public void closeAll() {
+        callbackCache.clear();
+        clientCache.forEach((id, client) -> {
+            try {
+                client.close();
+            } catch (Exception e) {
+                log.warn("[MCP] 关闭客户端失败: serverId={}, error={}", id, e.getMessage());
+            }
+        });
+        clientCache.clear();
+        log.info("[MCP] 已关闭所有MCP客户端连接");
+    }
+
+    /**
+     * 获取或创建 McpSyncClient（懒初始化 + 缓存）
+     */
+    private McpSyncClient getOrCreateClient(McpServer server) {
+        return clientCache.computeIfAbsent(server.getId(), id -> {
+            try {
+                McpSyncClient client = createAndInitClient(server);
+                log.info("[MCP] 创建MCP客户端: serverId={}, name={}", id, server.getName());
+                return client;
+            } catch (Exception e) {
+                log.error("[MCP] 创建MCP客户端失败: serverId={}, name={}, error={}", id, server.getName(), e.getMessage(), e);
+                throw new BizException(ErrorCode.MCP_CONNECTION_FAILED, e);
+            }
+        });
+    }
+
+    /**
+     * 创建并初始化 McpSyncClient
+     */
+    private McpSyncClient createAndInitClient(McpServer server) {
+        McpClientTransport transport = createTransport(server);
+        McpSyncClient client = McpClient.sync(transport)
+                .clientInfo(new McpSchema.Implementation("lengbot", "1.0.0"))
+                .requestTimeout(Duration.ofSeconds(30))
+                .initializationTimeout(Duration.ofSeconds(60))
+                .build();
+        client.initialize();
+        return client;
+    }
+
+    /**
+     * 根据传输类型创建 Transport
+     */
+    private McpClientTransport createTransport(McpServer server) {
+        McpTransportType transportType = server.getTransport();
+        if (transportType == null) {
+            // 兼容旧数据：从 installType 推断
+            transportType = inferTransportType(server);
+        }
+
+        switch (transportType) {
+            case SSE:
+                return createSseTransport(server);
+            case STREAMABLE_HTTP:
+                return createStreamableHttpTransport(server);
+            case STDIO:
+                return createStdioTransport(server);
+            default:
+                throw new BizException(ErrorCode.MCP_CONFIG_ERROR);
+        }
+    }
+
+    /**
+     * 创建 SSE Transport
+     */
+    private McpClientTransport createSseTransport(McpServer server) {
+        String url = server.getHost();
+        if (url == null || url.isBlank()) {
+            throw new BizException(ErrorCode.MCP_CONFIG_ERROR);
+        }
+        HttpClientSseClientTransport.Builder builder = HttpClientSseClientTransport.builder(url);
+        addHeaders(builder, server.getHeaders());
+        return builder.build();
+    }
+
+    /**
+     * 创建 Streamable HTTP Transport
+     */
+    private McpClientTransport createStreamableHttpTransport(McpServer server) {
+        String url = server.getHost();
+        if (url == null || url.isBlank()) {
+            throw new BizException(ErrorCode.MCP_CONFIG_ERROR);
+        }
+        HttpClientStreamableHttpTransport.Builder builder = HttpClientStreamableHttpTransport.builder(url);
+        addHeaders(builder, server.getHeaders());
+        return builder.build();
+    }
+
+    /**
+     * 创建 stdio Transport
+     */
+    private McpClientTransport createStdioTransport(McpServer server) {
+        Map<String, Object> deployConfig = parseJson(server.getDeployConfig());
+        String command = resolveCommand(server, deployConfig);
+        List<String> args = resolveArgs(deployConfig);
+        Map<String, String> env = resolveEnv(deployConfig);
+
+        // 命令注入防护：校验命令和参数不包含 shell 元字符
+        validateCommandSafety(command, args);
+
+        // Windows: ProcessBuilder 不解析 .cmd/.bat，需通过 cmd /c 调用
+        if (System.getProperty("os.name").toLowerCase().contains("win")) {
+            List<String> fullArgs = new ArrayList<>();
+            fullArgs.add(command);
+            fullArgs.addAll(args);
+            command = "cmd";
+            args = new ArrayList<>();
+            args.add("/c");
+            args.addAll(fullArgs);
+        }
+
+        ServerParameters.Builder paramBuilder = ServerParameters.builder(command);
+        if (!args.isEmpty()) {
+            paramBuilder.args(args);
+        }
+        if (!env.isEmpty()) {
+            paramBuilder.env(env);
+        }
+        ServerParameters params = paramBuilder.build();
+
+        log.info("[MCP] 创建stdio传输: command={}, args={}", command, args);
+        return new StdioClientTransport(params, new JacksonMcpJsonMapper(new com.fasterxml.jackson.databind.ObjectMapper()));
+    }
+
+    /**
+     * 命令注入防护：校验命令和参数不包含 shell 元字符
+     */
+    private void validateCommandSafety(String command, List<String> args) {
+        // Windows shell 元字符：& | > < ^ ! 等可被利用执行任意命令
+        java.util.regex.Pattern shellMeta = java.util.regex.Pattern.compile("[&|><^!`$]");
+        if (shellMeta.matcher(command).find()) {
+            throw new BizException(ErrorCode.MCP_CONFIG_ERROR.getCode(),
+                    "MCP 命令包含非法字符: " + command);
+        }
+        for (String arg : args) {
+            if (shellMeta.matcher(arg).find()) {
+                throw new BizException(ErrorCode.MCP_CONFIG_ERROR.getCode(),
+                        "MCP 命令参数包含非法字符: " + arg);
+            }
+        }
+    }
+
+    /**
+     * 从 deployConfig 解析命令
+     */
+    private String resolveCommand(McpServer server, Map<String, Object> deployConfig) {
+        // 优先从 deployConfig.packageName 获取
+        Object packageName = deployConfig.get("packageName");
+        if (packageName != null && !packageName.toString().isBlank()) {
+            // 根据 installType 决定前缀
+            String prefix = server.getInstallType() != null && "uvx".equals(server.getInstallType().getCode())
+                    ? "uvx" : "npx";
+            return prefix;
+        }
+        throw new BizException(ErrorCode.MCP_CONFIG_ERROR);
+    }
+
+    /**
+     * 解析命令参数
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> resolveArgs(Map<String, Object> deployConfig) {
+        List<String> args = new ArrayList<>();
+        Object packageName = deployConfig.get("packageName");
+        if (packageName != null) {
+            args.add("-y");
+            args.add(packageName.toString());
+        }
+        Object extraArgs = deployConfig.get("args");
+        if (extraArgs instanceof List<?> list) {
+            for (Object item : list) {
+                args.add(item.toString());
+            }
+        }
+        return args;
+    }
+
+    /**
+     * 解析环境变量
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, String> resolveEnv(Map<String, Object> deployConfig) {
+        Object env = deployConfig.get("env");
+        if (env instanceof Map<?, ?> map) {
+            return map.entrySet().stream()
+                    .collect(Collectors.toMap(
+                            e -> e.getKey().toString(),
+                            e -> e.getValue().toString()));
+        }
+        return Map.of();
+    }
+
+    /**
+     * 给 SSE/StreamableHttp builder 添加请求头
+     */
+    private void addHeaders(HttpClientSseClientTransport.Builder builder, String headersJson) {
+        Map<String, String> headers = parseHeaders(headersJson);
+        if (!headers.isEmpty()) {
+            builder.customizeRequest(rb -> headers.forEach(rb::header));
+        }
+    }
+
+    private void addHeaders(HttpClientStreamableHttpTransport.Builder builder, String headersJson) {
+        Map<String, String> headers = parseHeaders(headersJson);
+        if (!headers.isEmpty()) {
+            builder.customizeRequest(rb -> headers.forEach(rb::header));
+        }
+    }
+
+    /**
+     * 解析 headers JSON
+     */
+    private Map<String, String> parseHeaders(String headersJson) {
+        if (headersJson == null || headersJson.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(headersJson, new TypeReference<>() {});
+        } catch (Exception e) {
+            log.warn("[MCP] 解析headers失败: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
+    /**
+     * 解析 disabled_tools JSON 数组
+     */
+    private Set<String> parseDisabledTools(String disabledToolsJson) {
+        if (disabledToolsJson == null || disabledToolsJson.isBlank()) {
+            return Set.of();
+        }
+        try {
+            List<String> list = objectMapper.readValue(disabledToolsJson, new TypeReference<>() {});
+            return Set.copyOf(list);
+        } catch (Exception e) {
+            log.warn("[MCP] 解析disabled_tools失败: {}", e.getMessage());
+            return Set.of();
+        }
+    }
+
+    /**
+     * 从 installType 推断 transport 类型（兼容旧数据）
+     */
+    private McpTransportType inferTransportType(McpServer server) {
+        if (server.getInstallType() == null) {
+            return McpTransportType.SSE;
+        }
+        return switch (server.getInstallType()) {
+            case NPX, UVX -> McpTransportType.STDIO;
+            case SSE -> McpTransportType.SSE;
+        };
+    }
+
+    /**
+     * 解析 JSON 字符串为 Map
+     */
+    private Map<String, Object> parseJson(String json) {
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<>() {});
+        } catch (Exception e) {
+            log.warn("[MCP] 解析JSON失败: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
+    /**
+     * 序列化工具列表为 JSON
+     */
+    private String serializeToolsToJson(List<McpSchema.Tool> tools) throws Exception {
+        List<Map<String, Object>> toolMaps = new ArrayList<>();
+        for (McpSchema.Tool tool : tools) {
+            Map<String, Object> map = new java.util.HashMap<>();
+            map.put("name", tool.name());
+            map.put("description", tool.description());
+            map.put("inputSchema", tool.inputSchema());
+            toolMaps.add(map);
+        }
+        return objectMapper.writeValueAsString(toolMaps);
+    }
+
+    /**
+     * 从 JSON 解析工具列表
+     */
+    private List<McpSchema.Tool> parseToolsFromJson(String json) throws Exception {
+        List<Map<String, Object>> toolMaps = objectMapper.readValue(json, new TypeReference<>() {});
+        List<McpSchema.Tool> tools = new ArrayList<>();
+        for (Map<String, Object> map : toolMaps) {
+            String name = (String) map.get("name");
+            String description = (String) map.get("description");
+            Object inputSchemaObj = map.get("inputSchema");
+            McpSchema.JsonSchema inputSchema = null;
+            if (inputSchemaObj != null) {
+                inputSchema = objectMapper.convertValue(inputSchemaObj, McpSchema.JsonSchema.class);
+            }
+            // 使用完整构造函数（MCP SDK 2025版本）
+            tools.add(new McpSchema.Tool(
+                    name,
+                    description,
+                    null,                   // title
+                    inputSchema,
+                    Map.of(),               // _annotations
+                    null,                   // annotations
+                    Map.of()                // _meta
+            ));
+        }
+        return tools;
+    }
+}

@@ -1,0 +1,105 @@
+package com.lengbot.entity;
+
+import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import com.lengbot.enums.AgentStatus;
+import com.lengbot.enums.AgentType;
+import com.lengbot.handler.JsonbTypeHandler;
+import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Size;
+import lombok.Data;
+import org.apache.ibatis.type.JdbcType;
+
+import java.time.LocalDateTime;
+
+/**
+ * Agent表
+ *
+ * @author finch
+ * @since 2026-05-19
+ */
+@Data
+@TableName("agent")
+@Schema(description = "Agent表")
+public class Agent {
+
+    @TableId(type = IdType.ASSIGN_ID)
+    @Schema(description = "主键ID")
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long id;
+
+    @TableField("user_id")
+    @Schema(description = "创建者ID")
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long userId;
+
+    @TableField("name")
+    @Schema(description = "Agent名称")
+    @Size(max = 50, message = "Agent名称不超过50字")
+    private String name;
+
+    @TableField("description")
+    @Schema(description = "Agent描述")
+    @Size(max = 500, message = "Agent描述不超过500字")
+    private String description;
+
+    @TableField("system_prompt")
+    @Schema(description = "系统提示词")
+    @Size(max = 2000, message = "系统提示词不超过2000字")
+    private String systemPrompt;
+
+    @TableField("welcome_message")
+    @Schema(description = "欢迎语")
+    @Size(max = 200, message = "欢迎语不超过200字")
+    private String welcomeMessage;
+
+    @TableField(value = "recommended_questions", typeHandler = JsonbTypeHandler.class, jdbcType = JdbcType.OTHER)
+    @Schema(description = "推荐问题列表")
+    private String recommendedQuestions;
+
+    @TableField("avatar")
+    @Schema(description = "头像存储路径（MinIO对象路径）")
+    private String avatar;
+
+    @TableField("icon")
+    @Schema(description = "Agent图标（emoji或图标标识）")
+    private String icon;
+
+    @TableField("agent_type")
+    @Schema(description = "类型")
+    private AgentType agentType;
+
+    @TableField(value = "config", typeHandler = JsonbTypeHandler.class, jdbcType = JdbcType.OTHER)
+    @Schema(description = "扩展配置")
+    private String config;
+
+    @TableField("status")
+    @Schema(description = "状态")
+    private AgentStatus status;
+
+    @TableField("is_default")
+    @Schema(description = "是否默认Agent")
+    private Boolean isDefault;
+
+    @TableField("publish_time")
+    @Schema(description = "发布时间")
+    private LocalDateTime publishTime;
+
+    @TableField("version")
+    @Schema(description = "版本号")
+    private Integer version;
+
+    @TableField(value = "create_time", fill = FieldFill.INSERT)
+    @Schema(description = "创建时间")
+    private LocalDateTime createTime;
+
+    @TableField(value = "update_time", fill = FieldFill.INSERT_UPDATE)
+    @Schema(description = "更新时间")
+    private LocalDateTime updateTime;
+
+    @TableField("deleted")
+    @TableLogic
+    @Schema(description = "逻辑删除标记")
+    private Integer deleted;
+}

@@ -1,0 +1,110 @@
+/**
+ * 工作流画板 Vue Flow 外壳样式（编辑 / 预览 / 可观测性链路回放共用）
+ * 覆盖 theme-default 对 input/output 等类型的白底方框，自定义节点由 .workflow-node 自绘
+ */
+
+/* —— 缩略图 —— */
+.workflow-minimap.vue-flow__minimap {
+  display: inline-block !important;
+  width: fit-content !important;
+  height: fit-content !important;
+  max-width: min(420px, 48vw);
+  max-height: 220px;
+  line-height: 0;
+  border-radius: 8px;
+  border: 1px solid var(--color-hairline);
+  background: var(--color-canvas);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.workflow-minimap.vue-flow__minimap > svg {
+  display: block !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: min(420px, 48vw);
+  max-height: 220px;
+}
+
+.workflow-minimap .vue-flow__minimap-mask {
+  fill: rgba(124, 58, 237, 0.08);
+}
+
+/* —— 自定义节点：去掉 Vue Flow 默认主题白底壳 —— */
+.vue-flow__node-start,
+.vue-flow__node-end,
+.vue-flow__node-llm,
+.vue-flow__node-condition,
+.vue-flow__node-retrieval,
+.vue-flow__node-tool,
+.vue-flow__node-classifier,
+.vue-flow__node-api,
+.vue-flow__node-loop,
+.vue-flow__node-batch,
+.vue-flow__node-variable,
+.vue-flow__node-script,
+.vue-flow__node-mcp,
+.vue-flow__node-input,
+.vue-flow__node-confirm,
+.vue-flow__node-output,
+.vue-flow__node-variable_handle,
+.vue-flow__node-parameter_extractor,
+.vue-flow__node-app_component,
+.vue-flow__node-loop_start,
+.vue-flow__node-loop_end,
+.vue-flow__node-batch_start,
+.vue-flow__node-batch_end {
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* 流程输入/输出与 GenericWorkflowNode 宽度对齐（theme-default 默认 150px 白框） */
+.vue-flow__node-input,
+.vue-flow__node-output {
+  width: 200px !important;
+  min-width: 200px !important;
+  max-width: 200px !important;
+}
+
+/* 容器内置节点置于子节点之上 */
+.vue-flow__node-loop_start,
+.vue-flow__node-loop_end,
+.vue-flow__node-batch_start,
+.vue-flow__node-batch_end {
+  z-index: 12 !important;
+}
+
+/* trace 快照可能带顶层 label，自定义节点已在内部展示标题 */
+.vue-flow__node-start .vue-flow__node-label,
+.vue-flow__node-end .vue-flow__node-label,
+.vue-flow__node-llm .vue-flow__node-label,
+.vue-flow__node-condition .vue-flow__node-label,
+.vue-flow__node-retrieval .vue-flow__node-label,
+.vue-flow__node-tool .vue-flow__node-label,
+.vue-flow__node-classifier .vue-flow__node-label,
+.vue-flow__node-api .vue-flow__node-label,
+.vue-flow__node-loop .vue-flow__node-label,
+.vue-flow__node-batch .vue-flow__node-label,
+.vue-flow__node-variable .vue-flow__node-label,
+.vue-flow__node-script .vue-flow__node-label,
+.vue-flow__node-mcp .vue-flow__node-label,
+.vue-flow__node-input .vue-flow__node-label,
+.vue-flow__node-confirm .vue-flow__node-label,
+.vue-flow__node-output .vue-flow__node-label,
+.vue-flow__node-variable_handle .vue-flow__node-label,
+.vue-flow__node-parameter_extractor .vue-flow__node-label,
+.vue-flow__node-app_component .vue-flow__node-label,
+.vue-flow__node-loop_start .vue-flow__node-label,
+.vue-flow__node-loop_end .vue-flow__node-label,
+.vue-flow__node-batch_start .vue-flow__node-label,
+.vue-flow__node-batch_end .vue-flow__node-label {
+  display: none;
+}
+
+/* 选中连线高亮 */
+.vue-flow__edge.selected .vue-flow__edge-path {
+  stroke: #7c3aed !important;
+  stroke-width: 3 !important;
+}

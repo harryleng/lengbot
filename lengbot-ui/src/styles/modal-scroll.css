@@ -1,0 +1,99 @@
+/**
+ * 弹窗滚动条统一规则
+ *
+ * 核心语义：滚动条与字段的间距由 .dialog-scroll-body wrapper + JS 动态控制。
+ * - 无滚动条：wrapper padding-right: 0，字段贴 modal body 内边
+ * - 有滚动条：JS 给 .ant-modal-body 加 .has-overflow class，wrapper padding-right 变 8px
+ *
+ * 为什么用 JS 而不是 scrollbar-gutter: stable:
+ * scrollbar-gutter 即便内容不溢出也始终预留 gutter，无滚动条的弹窗字段与右侧隔段距离，
+ * 违背"无滚动条时紧凑"的需求。JS 监听 scrollHeight > clientHeight 动态切换 class，
+ * 滚动条出现/消失时 padding 实时跟随，真正"灵活的滚动条出现和消失逻辑"。
+ *
+ * 为什么用 wrapper 而不是直接给 .ant-modal-body 加 padding-right:
+ * 直接给 .ant-modal-body 加 padding-right 会与 antd 默认 24px padding 冲突（CSS-in-JS
+ * 注入顺序问题，需升高 specificity 覆盖）。wrapper 在 modal body 内部加 padding，
+ * 不冲突 antd 默认值，且可精确控制仅作用于"表单内容区域"。
+ *
+ * max-height 预留 260px = modal 顶部偏移(48) + header(55) + footer(53) + 底部安全余量(104)，
+ * 确保小屏（如 1366×768 笔记本）下整个弹窗（含 footer 按钮）完全可见、底部留出呼吸空间。
+ *
+ * overflow-x: hidden 必须显式声明：CSS 规范下当 overflow-y 非 visible 时，
+ * overflow-x 的 visible 会被隐式计算为 auto，弹窗内的 a-slider marks 绝对定位
+ * 文字、a-row gutter 负 margin、a-input-number min-width 等几像素溢出都会触发
+ * 横向滚动条。需要横向滚动的弹窗（代码/JSON/SQL 结果）通过 :body-style 显式
+ * 设置 overflow: 'auto' 覆盖。
+ */
+.ant-modal-body {
+  min-height: 80px;
+  max-height: calc(100vh - 260px);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/**
+ * .dialog-scroll-body 动态 padding：
+ * 配合 src/utils/modalScroll.js 监听 .ant-modal-body 的 scrollHeight/clientHeight，
+ * 滚动条出现时加 .has-overflow class，wrapper 获得 padding-right 让字段与滚动条间
+ * 留出呼吸距离；滚动条消失时移除 class，padding 复位为 0，字段贴 modal body 内边。
+ *
+ * 选择器 specificity 高于 scrollbar.css 的全局 .dialog-scroll-body（0,0,1,0），
+ * 确保动态规则覆盖全局默认。
+ */
+.ant-modal-body .dialog-scroll-body {
+  padding-right: 0;
+}
+.ant-modal-body.has-overflow .dialog-scroll-body {
+  padding-right: var(--scroll-content-gap);
+}
+
+/**
+ * 弹窗垂直位置：固定 top: 48px（覆盖 antd 默认 100px），让弹窗在视窗中偏上。
+ * 满高度弹窗（max-height = 100vh - 260px）时，顶部 48px < 底部 ~104px，符合"中间偏上"语义。
+ * 小屏（768）和大屏（1080）视觉一致。
+ */
+.ant-modal {
+  top: 48px;
+}
+
+/**
+ * 带 marks 的 slider 在 modal 内：marks label 默认 transform: translateX(-50%)，
+ * "首/尾"两个 label 的中心对齐 slider 容器左右边缘，label 半个文字会溢出 slider 容器。
+ * slider 默认水平 margin 仅 4px，溢出后 label 紧贴 form-item-control 边缘，
+ * 配合 .ant-modal-body 的 overflow-x: hidden 视觉上像被切掉一截。
+ *
+ * 修复：给 modal 内带 marks 的 slider 加大左右 margin，让边缘 label 有完整的字宽空间。
+ * 仅作用于 .ant-slider-with-marks（无 marks 的 slider 不受影响）。
+ */
+.ant-modal-body .ant-slider-with-marks {
+  margin-inline: 14px;
+}
+
+/**
+ * Drawer footer 与 body 内容右边缘对齐（drawer 走自定义 .lb-dialog-footer 时同样需要对齐）。
+ * Modal footer 不加此规则：滚动条只占 body 区域，footer 按钮按 antd 默认 16px 靠右即可。
+ */
+.ant-drawer-footer {
+  padding-right: calc(var(--scrollbar-size) + 24px);
+}
+
+/**
+ * footer 居中弹窗（如纯提示型弹窗）。
+ * 这类弹窗按钮只有一个，居中更对称。
+ */
+.modal-footer-center .ant-modal-footer {
+  text-align: center;
+  padding-inline: 24px;
+}
+
+/**
+ * 预览类弹窗：内部已有自管滚动的视口（image-viewport / mpm-viewport），
+ * 外层 modal-body 不应再叠加 max-height + overflow，否则视口高度被压缩、
+ * 视口外的工具栏也会被算进滚动区域产生多余的垂直滚动条。
+ * 列出已知需要豁免的弹窗 class，按需追加。
+ */
+.chat-media-preview-modal .ant-modal-body,
+.mermaid-preview-modal .ant-modal-body {
+  max-height: none;
+  overflow: visible;
+}

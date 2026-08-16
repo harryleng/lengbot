@@ -1,0 +1,12 @@
+/**
+ * 代码块滚动区域：横向 + 纵向都需要滚动（JSON、代码、日志）
+ *
+ * 在元素上添加 class="code-block-scroll"。
+ * 滚动条本身的颜色 / 宽度 / 圆角 / hover 态由 src/styles/scrollbar.css 全局统一，
+ * 此处只保留"代码块需要的内容间距与横向 padding"。
+ */
+.code-block-scroll {
+  scrollbar-gutter: stable;
+  padding-right: var(--scroll-content-gap, 8px);
+  padding-bottom: var(--scroll-content-gap, 8px);
+}

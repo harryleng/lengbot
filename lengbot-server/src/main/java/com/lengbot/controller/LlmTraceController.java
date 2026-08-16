@@ -1,0 +1,65 @@
+package com.lengbot.controller;
+
+import com.lengbot.common.Result;
+import com.lengbot.vo.LlmTraceDetailVO;
+import com.lengbot.dto.LlmTraceRequestDTO;
+import com.lengbot.service.LlmTraceService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * LLM调用链追踪 Controller
+ *
+ * @author finch
+ * @since 2026-05-23
+ */
+@Tag(name = "可观测性", description = "AI调用链追踪查询")
+@RestController
+@RequestMapping("/api/observability")
+@RequiredArgsConstructor
+public class LlmTraceController {
+
+    private final LlmTraceService llmTraceService;
+
+    /**
+     * 分页查询调用链列表
+     */
+    @GetMapping("/traces")
+    @Operation(summary = "调用链列表")
+    public Result<Map<String, Object>> listTraces(LlmTraceRequestDTO request) {
+        return Result.ok(llmTraceService.pageList(request));
+    }
+
+    /**
+     * 查询调用链详情（spans解析为对象列表）
+     */
+    @GetMapping("/traces/{id}")
+    @Operation(summary = "调用链详情")
+    public Result<LlmTraceDetailVO> getTraceDetail(@PathVariable Long id) {
+        return Result.ok(llmTraceService.getDetail(id));
+    }
+
+    /**
+     * 汇总统计
+     */
+    @GetMapping("/overview")
+    @Operation(summary = "调用链汇总统计")
+    public Result<Map<String, Object>> getOverview(@RequestParam(required = false) String traceSource) {
+        return Result.ok(llmTraceService.getOverview(traceSource));
+    }
+
+    /**
+     * 批量删除调用链记录
+     */
+    @DeleteMapping("/traces")
+    @Operation(summary = "批量删除调用链")
+    public Result<Void> deleteTraces(@RequestBody List<Long> ids) {
+        llmTraceService.deleteByIds(ids);
+        return Result.ok();
+    }
+}

@@ -1,0 +1,77 @@
+package com.lengbot.service;
+
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.IService;
+import com.lengbot.entity.EvalRagBenchmark;
+import com.lengbot.entity.EvalRagBenchmarkItem;
+import com.lengbot.entity.Task;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
+
+/**
+ * RAG 评估基准服务接口
+ *
+ * @author finch
+ * @since 2026-05-28
+ */
+public interface EvalRagBenchmarkService extends IService<EvalRagBenchmark> {
+
+    /**
+     * 查询知识库的评估基准列表
+     */
+    List<EvalRagBenchmark> listByKnowledgeId(Long knowledgeId);
+
+    /**
+     * 获取基准详情（含分页题目）
+     */
+    Page<EvalRagBenchmarkItem> getBenchmarkDetail(Long benchmarkId, int pageNum, int pageSize);
+
+    /**
+     * 创建空基准记录（用于异步任务）
+     */
+    EvalRagBenchmark createEmptyBenchmark(Long knowledgeId, String name, String description);
+
+    /**
+     * AI 生成基准题目并填充到已有基准记录（异步任务调用）
+     */
+    void generateBenchmarkItems(Long benchmarkId, Long knowledgeId, Integer count,
+                                Long providerId, String modelId, Integer neighborCount,
+                                java.util.function.Consumer<Integer> progressCallback);
+
+    /**
+     * 上传 JSONL 评估基准（同步）
+     */
+    EvalRagBenchmark uploadBenchmark(Long knowledgeId, String name, String description, MultipartFile file);
+
+    /**
+     * 异步上传 JSONL 评估基准：创建空基准 + 保存临时文件 + 创建任务
+     *
+     * @return 创建的任务
+     */
+    Task uploadBenchmarkAsync(Long knowledgeId, String name, String description, MultipartFile file, Long userId);
+
+    /**
+     * 从临时文件导入基准题目（异步任务执行器调用）
+     *
+     * @param tempFilePath     临时文件绝对路径
+     * @param progressCallback 进度回调 (0-100)
+     */
+    void importBenchmarkItems(Long benchmarkId, String tempFilePath,
+                              java.util.function.Consumer<Integer> progressCallback);
+
+    /**
+     * 删除评估基准
+     */
+    void deleteBenchmark(Long knowledgeId, Long benchmarkId);
+
+    /**
+     * 下载基准为 JSONL
+     */
+    String downloadBenchmarkAsJsonl(Long benchmarkId);
+
+    /**
+     * 获取基准的所有题目
+     */
+    List<EvalRagBenchmarkItem> listItemsByBenchmarkId(Long benchmarkId);
+}

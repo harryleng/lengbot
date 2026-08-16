@@ -1,0 +1,25 @@
+/* 卡片共享样式 */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-mute);
+}
+.btn-icon:hover {
+  background: var(--color-canvas-soft-2);
+}
+.btn-icon.danger:hover {
+  color: var(--color-error);
+  background: var(--color-error-soft);
+}

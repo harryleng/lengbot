@@ -1,0 +1,111 @@
+package com.lengbot.entity;
+
+import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import com.lengbot.enums.CommonStatus;
+import com.lengbot.enums.KnowledgeType;
+import com.lengbot.handler.JsonbTypeHandler;
+import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Size;
+import lombok.Data;
+import org.apache.ibatis.type.JdbcType;
+
+import java.time.LocalDateTime;
+
+/**
+ * 知识库表
+ *
+ * @author finch
+ * @since 2026-05-19
+ */
+@Data
+@TableName("knowledge")
+@Schema(description = "知识库表")
+public class Knowledge {
+
+    @TableId(type = IdType.ASSIGN_ID)
+    @Schema(description = "主键ID")
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long id;
+
+    @TableField("user_id")
+    @Schema(description = "创建者ID")
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long userId;
+
+    @TableField("name")
+    @Size(max = 50, message = "知识库名称不超过50字")
+    @Schema(description = "知识库名称")
+    private String name;
+
+    @TableField("description")
+    @Size(max = 50, message = "知识库描述不超过50字")
+    @Schema(description = "知识库描述")
+    private String description;
+
+    @TableField("embedding_model")
+    @Schema(description = "向量化模型名称")
+    private String embeddingModel;
+
+    @TableField("type")
+    @Schema(description = "知识库类型：pg / milvus")
+    private KnowledgeType type;
+
+    @TableField(value = "config", typeHandler = JsonbTypeHandler.class, jdbcType = JdbcType.OTHER)
+    @Schema(description = "扩展配置")
+    private String config;
+
+    @TableField(value = "query_params", typeHandler = JsonbTypeHandler.class, jdbcType = JdbcType.OTHER)
+    @Schema(description = "检索配置")
+    private String queryParams;
+
+    @TableField(value = "mindmap_data", typeHandler = JsonbTypeHandler.class, jdbcType = JdbcType.OTHER)
+    @Schema(description = "思维导图数据（JSON格式树状结构）")
+    private String mindmapData;
+
+    @TableField(value = "example_questions", typeHandler = JsonbTypeHandler.class, jdbcType = JdbcType.OTHER)
+    @Schema(description = "示例问题列表（JSON数组）")
+    private String exampleQuestions;
+
+    @TableField("document_count")
+    @Schema(description = "文档总数")
+    private Integer documentCount;
+
+    @TableField("chunk_count")
+    @Schema(description = "分块总数")
+    private Integer chunkCount;
+
+    @TableField("total_tokens")
+    @Schema(description = "总Token数")
+    private Long totalTokens;
+
+    @TableField("graph_enabled")
+    @Schema(description = "是否启用知识图谱")
+    private Boolean graphEnabled;
+
+    @TableField("node_count")
+    @Schema(description = "图谱节点数")
+    private Integer nodeCount;
+
+    @TableField("edge_count")
+    @Schema(description = "图谱边数")
+    private Integer edgeCount;
+
+    @TableField("status")
+    @Schema(description = "状态")
+    private CommonStatus status;
+
+    @TableField(value = "create_time", fill = FieldFill.INSERT)
+    @Schema(description = "创建时间")
+    private LocalDateTime createTime;
+
+    @TableField(value = "update_time", fill = FieldFill.INSERT_UPDATE)
+    @Schema(description = "更新时间")
+    private LocalDateTime updateTime;
+
+    @TableField("deleted")
+    @TableLogic
+    @Schema(description = "逻辑删除标记")
+    private Integer deleted;
+}

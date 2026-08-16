@@ -1,0 +1,597 @@
+/**
+ * Lb* 通用组件共享样式
+ *
+ * 收纳所有 components/common/Lb*.vue 组件需要跨组件复用的样式：
+ * - .lb-btn 按钮系统（primary / default / outline / sm）
+ * - .lb-dialog-footer 弹窗底部
+ * - .lb-entity-grid 卡片网格容器
+ * - .lb-empty 空状态
+ * - .lb-route-* 路由切换动画
+ * - .lb-list-* TransitionGroup 列表动画
+ *
+ * 注意：组件自身的 scoped CSS 留在 .vue 文件内，本文件只放会被多个组件/页面
+ * 共享的 utility 样式，避免重复定义。
+ */
+
+/* ========== 按钮系统（与 admin-page.css .btn-* 并存，新代码用 .lb-btn） ========== */
+.lb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  color: var(--color-ink);
+  cursor: pointer;
+  transition: all var(--duration-fast, 0.15s) ease;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.lb-btn:hover:not(:disabled) {
+  border-color: var(--color-link);
+  color: var(--color-link);
+}
+.lb-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.lb-btn--primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
+  font-weight: 500;
+}
+.lb-btn--primary:hover:not(:disabled) {
+  background: #27272a;
+  border-color: #27272a;
+  color: var(--color-on-primary);
+}
+[data-theme="dark"] .lb-btn--primary {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+[data-theme="dark"] .lb-btn--primary:hover:not(:disabled) {
+  background: #3f3f46;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+.lb-btn--sm {
+  padding: 6px 14px;
+  font-size: 12px;
+}
+.lb-btn--block {
+  width: 100%;
+}
+
+/* ========== 强调按钮（特殊能力入口）==========
+   用于"知识图谱入口 / Playground / 自动注入工具 / 远程安装"等需要视觉锚点的按钮，
+   复用 variables.css 已定义的 --gradient-entity-* token（不引入新色板）。
+   - 普通主按钮继续用 .lb-btn--primary（默认黑）
+   - 强调按钮加 .lb-btn--accent + 颜色修饰类
+   - 渐变饱和色在浅/深背景下都用白色内描边 + 阴影做边界，hover 时上浮 + overlay 压暗（色相稳定） */
+.lb-btn--accent {
+  color: #fff;
+  border: none;
+  font-weight: 500;
+  /* 文字阴影：渐变底色含浅色区段（default 的青色 #00dfd8、skill 的亮橙 #f59e0b），
+     纯白文字在浅色区段对比度偏低；text-shadow 给文字加暗色投影，跨渐变色段保持可读 */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.32);
+  /* box-shadow 列表固定为 3 个 shadow，hover/active 只改各 shadow 的 rgba 值，
+     保证 transition 能逐 shadow 平滑插值（数量不一致会跳变）：
+     1. inset overlay（transparent → rgba(0,0,0,X)）：变暗背景的核心机制
+     2. inset 1px 白色内描边：浅/深背景下都让按钮边界清晰
+     3. 外阴影：浮起反馈 */
+  box-shadow: inset 0 0 0 9999px transparent,
+              inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+              0 1px 2px rgba(0, 0, 0, 0.08);
+  transition: transform var(--duration-fast, 0.15s) ease,
+              box-shadow var(--duration-fast, 0.15s) ease;
+}
+.lb-btn--accent:hover:not(:disabled) {
+  /* 修复 .lb-btn:hover 的 color 渗透：
+     .lb-btn:hover { color: var(--color-link) } 优先级 (0,3,0) 高于
+     .lb-btn--accent { color: #fff } 的 (0,1,0)，原代码没在 hover 显式覆盖，
+     导致强调按钮 hover 时白字被染成 #0070f3 深蓝——配在彩色渐变背景上刺眼。
+     直接改浅蓝会与 default 蓝青色按钮 #00dfd8 冲突（对比度仅 1.8 不可读），
+     故保持 color: #fff，蓝色反馈改用 text-shadow 第二层 glow 提供柔和提示 */
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.32),
+               0 0 10px rgba(190, 220, 255, 0.55);
+  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, 0.05),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+              0 2px 8px rgba(0, 0, 0, 0.14);
+}
+.lb-btn--accent:active:not(:disabled) {
+  /* 按下时 overlay 略深 + 移除外阴影做"凹陷"反馈；
+     color: #fff 同样为了防止 .lb-btn:hover 渗透（按下期间 :hover 仍生效）*/
+  color: #fff;
+  transform: translateY(0);
+  box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, 0.12),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+.lb-btn--accent:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.lb-btn--accent--default  { background: var(--gradient-entity-default); }
+.lb-btn--accent--tool     { background: var(--gradient-entity-tool); }
+.lb-btn--accent--knowledge{ background: var(--gradient-entity-knowledge); }
+.lb-btn--accent--mcp      { background: var(--gradient-entity-mcp); }
+.lb-btn--accent--skill    { background: var(--gradient-entity-skill); }
+.lb-btn--accent--subagent { background: var(--gradient-entity-subagent); }
+
+/* 深色模式：背景已暗，overlay 比例略低（0.16）避免颜色过暗；
+   外阴影加深以补偿深色背景对浮起反馈的视觉吸收 */
+[data-theme="dark"] .lb-btn--accent {
+  box-shadow: inset 0 0 0 9999px transparent,
+              inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+              0 1px 2px rgba(0, 0, 0, 0.4);
+}
+[data-theme="dark"] .lb-btn--accent:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, 0.08),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+              0 2px 10px rgba(0, 0, 0, 0.45);
+}
+
+/* ========== 骨架屏（shimmer 动画）==========
+   用于统计卡片、列表、详情等加载态。DashboardView / Observability 共用。
+   - 颜色用 canvas-soft-2 → hairline-strong 渐变 shimmer
+   - 动画周期 2.4s，与 DashboardView 历史动画一致 */
+.lb-skeleton-block {
+  background: linear-gradient(
+    90deg,
+    var(--color-canvas-soft-2) 0%,
+    var(--color-hairline-strong) 50%,
+    var(--color-canvas-soft-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: lb-skeleton-shimmer 2.4s ease-in-out infinite;
+  border-radius: 4px;
+}
+@keyframes lb-skeleton-shimmer {
+  0% { background-position: 150% 0; }
+  100% { background-position: -50% 0; }
+}
+
+/* ========== Tabs 视觉统一（新代码加 .lb-tabs 类即可复用，避免每个 view 复制 40 行 :deep） ========== */
+/* useTheme.js 的 components.Tabs 已统一 inkBarColor/itemSelectedColor；此处仅做轻量视觉调整。
+   历史 view 的 :deep(.ant-tabs-nav) 覆盖保留不动（避免视觉退化）。 */
+.lb-tabs :deep(.ant-tabs-nav) {
+  margin-bottom: 16px;
+}
+.lb-tabs :deep(.ant-tabs-tab) {
+  padding: 8px 0;
+  font-size: 14px;
+}
+.lb-tabs :deep(.ant-tabs-ink-bar) {
+  height: 2px;
+  border-radius: 2px;
+}
+
+/* ========== Pagination 视觉统一 ========== */
+/* useTheme.js 已配置 Pagination.itemActiveBg=#171717；此处仅微调尺寸 */
+.lb-pagination :deep(.ant-pagination-item),
+.lb-pagination :deep(.ant-pagination-prev .ant-pagination-item-link),
+.lb-pagination :deep(.ant-pagination-next .ant-pagination-item-link) {
+  border-radius: var(--radius-sm);
+}
+
+/* ========== 弹窗底部 ========== */
+.lb-dialog-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  gap: 8px;
+}
+/* LbDialogFooter 放在 a-modal 的 #footer slot 内时，antd 已提供 padding，
+   不再额外加 margin-top，否则按钮会偏下、视觉不对称。 */
+.ant-modal-footer .lb-dialog-footer {
+  margin-top: 0;
+}
+.lb-dialog-footer__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lb-dialog-footer__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ========== 卡片网格容器 ========== */
+.lb-entity-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--lb-grid-min, 280px), 1fr));
+  gap: var(--space-md);
+}
+
+/* ========== 空状态 ========== */
+.lb-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--color-mute);
+}
+.lb-empty__icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  display: block;
+  color: var(--color-mute);
+}
+.lb-empty__title {
+  font-size: 14px;
+  margin: 0 0 4px;
+  color: var(--color-body);
+}
+.lb-empty__desc {
+  font-size: 13px;
+  margin: 0;
+  color: var(--color-mute);
+}
+
+/* ========== 统计卡片 ========== */
+.lb-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+}
+.lb-stat-card__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #fff;
+  flex-shrink: 0;
+}
+.lb-stat-card__value {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-ink);
+}
+.lb-stat-card__label {
+  font-size: 12px;
+  color: var(--color-mute);
+  margin-top: 2px;
+}
+
+/* ========== JSON 展示 ========== */
+.lb-json-viewer {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--color-canvas);
+  color: var(--color-text-code);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-hairline);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+  margin: 0;
+}
+
+/* ========== 面包屑导航（LbBreadcrumb 共享样式）==========
+   裸 button（无边框）+ hover 才显 background，降低视觉权重，
+   让箭头/链接融入导航路径而非孤立按钮（参考 Linear / Notion）。
+   margin-left: -10px 让最左侧箭头与下方标题区左对齐（父容器 padding-left 32px）。 */
+.lb-breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--color-mute);
+  min-width: 0;
+}
+.lb-breadcrumb__list {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+.lb-breadcrumb__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.lb-breadcrumb__arrow,
+.lb-breadcrumb__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: color var(--duration-fast, 0.15s) ease,
+              background var(--duration-fast, 0.15s) ease;
+  white-space: nowrap;
+}
+.lb-breadcrumb__arrow {
+  margin-left: -10px;
+}
+.lb-breadcrumb__arrow .anticon {
+  font-size: 14px;
+}
+.lb-breadcrumb__arrow:hover,
+.lb-breadcrumb__link:hover {
+  color: var(--color-ink);
+  background: var(--color-canvas-soft-2);
+}
+.lb-breadcrumb__current {
+  color: var(--color-body);
+  font-weight: 500;
+  padding: 6px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-breadcrumb__sep {
+  color: var(--color-mute);
+  margin: 0 2px;
+  user-select: none;
+}
+
+/* ========== 详情页头部 ========== */
+/* 顶部 icon-only 返回按钮：用于独立页面（Playground / StandaloneGraph / PromptTemplateManage）
+   或其他不使用 LbDetailHeader 面包屑模式的场景。无文字、圆角方块、hover 浅灰背景，
+   视觉权重低于带文字的按钮，避免抢戏标题。 */
+.page-back-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md, 8px);
+  color: var(--color-body);
+  font-size: 16px;
+  cursor: pointer;
+  transition: background var(--duration-fast, 0.15s) ease, color var(--duration-fast, 0.15s) ease;
+}
+.page-back-icon:hover {
+  background: var(--color-canvas-soft-2);
+  color: var(--color-ink);
+}
+
+.lb-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  gap: 24px;
+}
+.lb-detail-header__main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.lb-detail-header__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-mute);
+  font-size: 14px;
+  cursor: pointer;
+}
+.lb-detail-header__back:hover {
+  color: var(--color-link);
+}
+.lb-detail-header__title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-ink);
+  margin: 0;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.lb-detail-header__tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.lb-detail-header__extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ----- 面包屑模式：顶栏 + 标题区 两行布局（v4 2.1.7.x）----- */
+.lb-detail-header--stack {
+  display: block;
+  margin-bottom: 0;
+}
+.lb-detail-header--stack .lb-detail-header__top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 32px;
+  background: var(--color-canvas);
+  border-bottom: 1px solid var(--color-hairline);
+}
+.lb-detail-header--stack .lb-detail-header__title-section {
+  padding: 20px 32px;
+  background: var(--color-canvas);
+  border-bottom: 1px solid var(--color-hairline);
+}
+.lb-detail-header--stack .lb-detail-header__title {
+  font-size: 20px;
+}
+.lb-detail-header__title-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 8px;
+}
+.lb-detail-header__title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+  /* 父级 .lb-detail-header__title-text 是 flex column + align-items: flex-start， */
+  /* 不撑满父容器会导致 #stats 槽的 margin-left:auto 推不到容器右侧，统计信息无法靠右 */
+  width: 100%;
+}
+.lb-detail-header__title-row .lb-detail-header__tags {
+  margin: 0;
+}
+/* title-row 内的统计/元信息槽：推到最右侧，与标题/标签共享同一行 */
+.lb-detail-header__stats {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.lb-detail-header__desc {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-body);
+  padding: 4px 0 4px 12px;
+  border-left: 3px solid var(--color-link);
+  margin: 0;
+  word-break: break-word;
+}
+.lb-detail-header__top-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+.lb-detail-header__tags--inline {
+  flex-wrap: nowrap;
+}
+.lb-detail-header--slim .lb-detail-header__top-bar {
+  padding: 12px 32px;
+}
+
+/* ========== 详情页布局外壳 ==========
+   与 LbDetailHeader 配套：外壳无 padding，让 header 顶到视口边缘；
+   内容区 .detail-page__body 自带 padding，让卡片与页面有间隔。
+   避免每个详情页重复写 scoped 样式，也避免污染全局 .page（admin-page.css）。 */
+.detail-page {
+  height: 100vh;
+  background: var(--color-canvas-soft);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.detail-page__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-xl);
+  padding-right: calc(var(--space-xl) + var(--scroll-content-gap, 8px));
+  scrollbar-gutter: stable;
+}
+
+/* ========== 管理页头部 ========== */
+.lb-manage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  gap: 16px;
+}
+.lb-manage-header__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-ink);
+  white-space: nowrap;
+}
+.lb-manage-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+/* ========== 标签列表 ========== */
+.lb-tag-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.lb-tag-list--empty {
+  font-size: 12px;
+  color: var(--color-mute);
+}
+
+/* ========== 路由切换动画（供 2.3.1 使用，预先放好） ========== */
+.lb-route-enter-active,
+.lb-route-leave-active {
+  transition: opacity var(--duration-fast, 0.15s) ease, transform var(--duration-fast, 0.15s) ease;
+}
+.lb-route-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.lb-route-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* ========== TransitionGroup 列表动画（供 2.3.2 使用，预先放好） ========== */
+.lb-list-enter-active,
+.lb-list-leave-active {
+  transition: all var(--duration-base, 0.24s) ease;
+}
+.lb-list-enter-from {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+.lb-list-leave-to {
+  opacity: 0;
+  transform: translateX(20px);
+}
+.lb-list-leave-active {
+  position: absolute;
+}
+.lb-list-move {
+  transition: transform var(--duration-base, 0.24s) ease;
+}
+
+/* ========== 数字/计数变化动画（2.3.4）==========
+   配合 useCountPop composable 使用：监听数字变化，在元素上短暂添加 .lb-count-pop 触发缩放反馈。
+   keyframes 中 50% 处用 var(--color-link) 让数字短暂着色，凸显"刚刚更新"。 */
+.lb-count-pop {
+  animation: lb-count-pop 0.36s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes lb-count-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.18); color: var(--color-link); }
+  100% { transform: scale(1); }
+}

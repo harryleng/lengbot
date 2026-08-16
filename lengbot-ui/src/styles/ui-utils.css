@@ -1,0 +1,43 @@
+/* UI 工具类 - 统一卡片/面板/按钮样式 */
+
+/* 垂直滚动区域：内容与滚动条保持统一间距
+   滚动条本身（宽度/颜色/圆角/hover）由 src/styles/scrollbar.css 全局统一，
+   此处仅保留"这是滚动容器，需要 gutter + 内容右留白"的语义。 */
+.scroll-area-y,
+.modal-scroll-body {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: var(--scroll-content-gap);
+}
+
+/* 面板（详情页、设置页的大区块） */
+.ui-panel {
+  background: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+}
+
+/* 卡片（管理页的网格卡片） */
+.ui-card {
+  background: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+
+/* 柔和卡片（浅灰背景） */
+.ui-card-soft {
+  background: var(--color-canvas-soft);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+}
+
+/* 分隔线 */
+.ui-divider {
+  border-top: 1px solid var(--color-hairline);
+}
+
+/* 柔和分隔线（dashed） */
+.ui-divider-dashed {
+  border-top: 1px dashed var(--color-hairline);
+}

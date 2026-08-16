@@ -1,0 +1,84 @@
+package com.lengbot.controller;
+
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.lengbot.common.Result;
+import com.lengbot.dto.ToolRequestDTO;
+import com.lengbot.entity.Tool;
+import com.lengbot.service.ToolService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
+
+@Tag(name = "Tool管理", description = "Tool的增删改查")
+@RestController
+@RequestMapping("/api/tools")
+@RequiredArgsConstructor
+public class ToolController {
+
+    private final ToolService toolService;
+
+    @Operation(summary = "新增Tool")
+    @PostMapping
+    public Result<Tool> create(@Valid @RequestBody ToolRequestDTO request) {
+        return Result.ok(toolService.create(request));
+    }
+
+    @Operation(summary = "更新Tool")
+    @PutMapping
+    public Result<Tool> update(@Valid @RequestBody ToolRequestDTO request) {
+        return Result.ok(toolService.update(request));
+    }
+
+    @Operation(summary = "删除Tool")
+    @DeleteMapping("/{id}")
+    public Result<Void> delete(@PathVariable Long id) {
+        toolService.deleteById(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "分页查询Tool")
+    @GetMapping
+    public Result<Page<Tool>> list(
+            @RequestParam(defaultValue = "1") int pageNum,
+            @RequestParam(defaultValue = "100") int pageSize,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String toolType,
+            @RequestParam(required = false) String tag) {
+        return Result.ok(toolService.listToolsWithFilter(pageNum, pageSize, keyword, toolType, tag));
+    }
+
+    @Operation(summary = "获取单个Tool")
+    @GetMapping("/{id}")
+    public Result<Tool> getById(@PathVariable Long id) {
+        return Result.ok(toolService.getById(id));
+    }
+
+    @Operation(summary = "获取Tool示例参数")
+    @GetMapping("/{id}/example")
+    public Result<Map<String, Object>> getExampleParams(@PathVariable Long id) {
+        return Result.ok(toolService.getExampleParams(id));
+    }
+
+    @Operation(summary = "启用/禁用Tool")
+    @PutMapping("/{id}/enabled")
+    public Result<Void> setEnabled(@PathVariable Long id, @RequestParam boolean enabled) {
+        toolService.setEnabled(id, enabled);
+        return Result.ok();
+    }
+
+    @Operation(summary = "获取Tool IO Schema（工作流参数映射）")
+    @GetMapping("/{id}/io-schema")
+    public Result<Map<String, Object>> getIoSchema(@PathVariable Long id) {
+        return Result.ok(toolService.getIoSchema(id));
+    }
+
+    @Operation(summary = "测试执行Tool")
+    @PostMapping("/{id}/test")
+    public Result<String> testTool(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        return Result.ok(toolService.testTool(id, body.getOrDefault("args", "{}")));
+    }
+}

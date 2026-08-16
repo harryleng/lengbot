@@ -1,0 +1,127 @@
+package com.lengbot.controller;
+
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.lengbot.common.Result;
+import com.lengbot.dto.EvalEvaluatorCreateDTO;
+import com.lengbot.vo.EvalEvaluatorExampleVO;
+import com.lengbot.dto.EvalEvaluatorTestDTO;
+import com.lengbot.dto.EvalEvaluatorVersionCreateDTO;
+import com.lengbot.dto.EvalScoreResultDTO;
+import com.lengbot.entity.EvalEvaluator;
+import com.lengbot.entity.EvalEvaluatorTemplate;
+import com.lengbot.entity.EvalEvaluatorVersion;
+import com.lengbot.service.EvalChatService;
+import com.lengbot.service.EvalEvaluatorService;
+import com.lengbot.service.EvalEvaluatorTemplateService;
+import com.lengbot.service.EvalEvaluatorVersionService;
+import cn.dev33.satoken.stp.StpUtil;
+import io.swagger.v3.oas.annotations.Operation;
+import jakarta.validation.Valid;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+/**
+ * 评估器管理接口
+ *
+ * @author finch
+ * @since 2026-05-27
+ */
+@Tag(name = "评估器管理", description = "评估器的增删改查及版本管理")
+@RestController
+@RequestMapping("/api/eval/evaluators")
+@RequiredArgsConstructor
+public class EvalEvaluatorController {
+
+    private final EvalEvaluatorService evaluatorService;
+    private final EvalEvaluatorVersionService evaluatorVersionService;
+    private final EvalEvaluatorTemplateService evaluatorTemplateService;
+    private final EvalChatService evalChatService;
+
+    @Operation(summary = "创建评估器")
+    @PostMapping
+    public Result<EvalEvaluator> create(@Valid @RequestBody EvalEvaluatorCreateDTO request) {
+        return Result.ok(evaluatorService.create(request.getName(), request.getDescription(), request.getTags(), StpUtil.getLoginIdAsLong()));
+    }
+
+    @Operation(summary = "获取评估器详情")
+    @GetMapping("/{id}")
+    public Result<EvalEvaluator> getById(@PathVariable Long id) {
+        return Result.ok(evaluatorService.getById(id));
+    }
+
+    @Operation(summary = "获取评估器列表")
+    @GetMapping
+    public Result<Page<EvalEvaluator>> list(
+            @RequestParam(defaultValue = "1") int pageNum,
+            @RequestParam(defaultValue = "20") int pageSize,
+            @RequestParam(required = false) String keyword) {
+        return Result.ok(evaluatorService.list(pageNum, pageSize, keyword, StpUtil.getLoginIdAsLong()));
+    }
+
+    @Operation(summary = "更新评估器")
+    @PutMapping("/{id}")
+    public Result<Void> update(@PathVariable Long id, @Valid @RequestBody EvalEvaluatorCreateDTO request) {
+        evaluatorService.update(id, request.getName(), request.getDescription(), request.getTags());
+        return Result.ok();
+    }
+
+    @Operation(summary = "删除评估器")
+    @DeleteMapping("/{id}")
+    public Result<Void> delete(@PathVariable Long id) {
+        evaluatorService.deleteById(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "创建评估器版本")
+    @PostMapping("/versions")
+    public Result<EvalEvaluatorVersion> createVersion(@Valid @RequestBody EvalEvaluatorVersionCreateDTO request) {
+        return Result.ok(evaluatorVersionService.create(
+                request.getEvaluatorId(), request.getVersion(),
+                request.getPrompt(), request.getVariables(), request.getModelConfig()));
+    }
+
+    @Operation(summary = "获取评估器版本列表")
+    @GetMapping("/{evaluatorId}/versions")
+    public Result<List<EvalEvaluatorVersion>> listVersions(@PathVariable Long evaluatorId) {
+        return Result.ok(evaluatorVersionService.listByEvaluatorId(evaluatorId));
+    }
+
+    @Operation(summary = "获取评估器模板列表")
+    @GetMapping("/templates")
+    public Result<List<EvalEvaluatorTemplate>> listTemplates() {
+        return Result.ok(evaluatorTemplateService.listAll());
+    }
+
+    @Operation(summary = "获取评估器模板详情")
+    @GetMapping("/templates/{key}")
+    public Result<EvalEvaluatorTemplate> getTemplate(@PathVariable String key) {
+        return Result.ok(evaluatorTemplateService.getByKey(key));
+    }
+
+    @Operation(summary = "测试评估器")
+    @PostMapping("/test")
+    public Result<EvalScoreResultDTO> test(@Valid @RequestBody EvalEvaluatorTestDTO request) {
+        EvalEvaluatorVersion version = evaluatorVersionService.getById(request.getEvaluatorVersionId());
+        if (version == null) {
+            return Result.ok(null);
+        }
+        EvalScoreResultDTO result = evalChatService.callEvaluator(
+                version.getModelConfig(), version.getPrompt(), request.getVariables());
+        return Result.ok(result);
+    }
+
+    @Operation(summary = "获取示例评估器列表")
+    @GetMapping("/examples")
+    public Result<List<EvalEvaluatorExampleVO>> listExamples() {
+        return Result.ok(evaluatorService.listExamples());
+    }
+
+    @Operation(summary = "从示例模板创建评估器")
+    @PostMapping("/examples/{key}")
+    public Result<EvalEvaluator> createFromExample(@PathVariable String key) {
+        return Result.ok(evaluatorService.createFromExample(key, StpUtil.getLoginIdAsLong()));
+    }
+}

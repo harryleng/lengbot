@@ -1,0 +1,112 @@
+package com.lengbot.controller;
+
+import com.lengbot.common.Result;
+import com.lengbot.dto.ChangePasswordDTO;
+import com.lengbot.dto.InitAdminDTO;
+import com.lengbot.vo.InitStatusVO;
+import com.lengbot.dto.LoginDTO;
+import com.lengbot.dto.ProfileUpdateDTO;
+import com.lengbot.dto.RegisterDTO;
+import com.lengbot.dto.UserDTO;
+import com.lengbot.service.UserService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+@Tag(name = "认证管理", description = "用户注册、登录、登出")
+@RestController
+@RequestMapping("/api/auth")
+@RequiredArgsConstructor
+public class AuthController {
+
+    private final UserService userService;
+
+    @Operation(summary = "用户注册")
+    @PostMapping("/register")
+    public Result<UserDTO> register(@Valid @RequestBody RegisterDTO request) {
+        UserDTO user = userService.register(request);
+        return Result.ok(user);
+    }
+
+    @Operation(summary = "用户登录")
+    @PostMapping("/login")
+    public Result<Map<String, Object>> login(@Valid @RequestBody LoginDTO request) {
+        // 1. 先判断是否首次登录（login 会更新 lastLoginAt）
+        boolean firstLogin = userService.isFirstLogin(request.getUsername());
+        // 2. 执行登录
+        UserDTO user = userService.login(request);
+        user.setFirstLogin(firstLogin);
+        // 3. 返回
+        Map<String, Object> data = new HashMap<>();
+        data.put("token", cn.dev33.satoken.stp.StpUtil.getTokenValue());
+        data.put("user", user);
+        return Result.ok(data);
+    }
+
+    @Operation(summary = "用户登出")
+    @PostMapping("/logout")
+    public Result<Void> logout() {
+        userService.logout();
+        return Result.ok();
+    }
+
+    @Operation(summary = "获取当前用户信息")
+    @GetMapping("/me")
+    public Result<UserDTO> me() {
+        return Result.ok(userService.getCurrentUser());
+    }
+
+    @Operation(summary = "批量获取用户信息（按ID列表）")
+    @GetMapping("/users/batch")
+    public Result<List<UserDTO>> getUsersByIds(@RequestParam List<Long> ids) {
+        return Result.ok(userService.getUsersByIds(ids));
+    }
+
+    @Operation(summary = "搜索用户（按用户名或昵称）")
+    @GetMapping("/users/search")
+    public Result<List<UserDTO>> searchUsers(@RequestParam String keyword) {
+        return Result.ok(userService.searchUsers(keyword));
+    }
+
+    @Operation(summary = "更新个人信息")
+    @PutMapping("/profile")
+    public Result<UserDTO> updateProfile(@Valid @RequestBody ProfileUpdateDTO request) {
+        return Result.ok(userService.updateProfile(request));
+    }
+
+    @Operation(summary = "修改密码")
+    @PutMapping("/password")
+    public Result<Void> changePassword(@Valid @RequestBody ChangePasswordDTO request) {
+        userService.changePassword(request);
+        return Result.ok();
+    }
+
+    @Operation(summary = "上传用户头像")
+    @PostMapping("/avatar")
+    public Result<String> uploadAvatar(@RequestParam("file") MultipartFile file) {
+        return Result.ok(userService.uploadAvatar(file));
+    }
+
+    @Operation(summary = "检查系统初始化状态")
+    @GetMapping("/init-status")
+    public Result<InitStatusVO> getInitStatus() {
+        return Result.ok(new InitStatusVO(userService.hasAnyUser()));
+    }
+
+    @Operation(summary = "初始化管理员账号（仅系统无用户时可用）")
+    @PostMapping("/init-admin")
+    public Result<Map<String, Object>> initAdmin(@Valid @RequestBody InitAdminDTO request) {
+        UserDTO user = userService.initAdmin(request.getUsername(), request.getPassword(), request.getNickname());
+        Map<String, Object> data = new HashMap<>();
+        data.put("token", cn.dev33.satoken.stp.StpUtil.getTokenValue());
+        data.put("user", user);
+        return Result.ok(data);
+    }
+}

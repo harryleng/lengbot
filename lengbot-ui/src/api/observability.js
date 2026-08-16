@@ -1,0 +1,17 @@
+import request from '../utils/request'
+
+export function getTraces(params) {
+  return request.get('/observability/traces', { params })
+}
+
+export function getTraceDetail(id) {
+  return request.get(`/observability/traces/${id}`)
+}
+
+export function getTraceOverview(traceSource) {
+  return request.get('/observability/overview', { params: { traceSource } })
+}
+
+export function deleteTraces(ids) {
+  return request.delete('/observability/traces', { data: ids })
+}
