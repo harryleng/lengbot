@@ -116,6 +116,8 @@ async function handleInit() {
     })
     message.success('管理员创建成功')
     router.push('/app')
+  } catch {
+    // 初始化失败：错误信息已由 request 拦截器统一 toast，仅吞掉异常避免整页崩溃
   } finally {
     loading.value = false
   }

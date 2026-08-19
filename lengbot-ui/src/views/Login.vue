@@ -96,6 +96,9 @@ async function handleLogin() {
     await userStore.login(form)
     message.success('登录成功')
     router.push(resolveRedirectTarget())
+  } catch {
+    // 登录失败：错误信息已由 request 拦截器统一 toast（如"用户名或密码错误"），
+    // 这里吞掉异常，避免冒泡到全局 ErrorBoundary 导致整页被错误卡片替换
   } finally {
     loading.value = false
   }

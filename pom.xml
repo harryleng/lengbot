@@ -39,7 +39,8 @@
         <spring-cloud-alibaba.version>2023.0.1.0</spring-cloud-alibaba.version>
 
         <!-- AgentScope Java（直接使用核心库，不使用 Spring Boot Starter 以避免版本冲突） -->
-        <agentscope.version>2.0.1-SNAPSHOT</agentscope.version>
+        <!-- 原为 2.0.1-SNAPSHOT，任何公共仓库均无此版本，改用正式版 2.0.1 -->
+        <agentscope.version>2.0.1</agentscope.version>
 
         <!-- 数据库 & ORM -->
         <mybatis-plus.version>3.5.9</mybatis-plus.version>

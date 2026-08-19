@@ -45,6 +45,14 @@ export default defineConfig({
     // 安全响应头：开发态即生效，生产态由 Nginx 同步下发
     // 防点击劫持（X-Frame-Options）、MIME 嗅探（X-Content-Type-Options）、
     // Referer 泄漏（Referrer-Policy）、禁用麦克风/相机/定位（Permissions-Policy）
+    allowedHosts: [
+        'lizhongcun.com',
+        '.lizhongcun.com',  // 允许所有子域名
+        'localhost',
+        '127.0.0.1',
+        // 如果你有其他访问域名或 IP，也加进来
+        // '10.10.13.163',  // 局域网 IP
+    ],
     headers: {
       'X-Frame-Options': 'SAMEORIGIN',
       'X-Content-Type-Options': 'nosniff',
@@ -53,8 +61,8 @@ export default defineConfig({
       // CSP 先用宽松版（允许 unsafe-inline / unsafe-eval），后续按 Report-Only 收集后收紧
       'Content-Security-Policy': [
         "default-src 'self'",
-        // img-src 放行 MinIO 开发地址（localhost:9000）；生产环境 MinIO 走 https 或反代后可移除该白名单
-        "img-src 'self' data: blob: https: http://localhost:9000",
+        // img-src 放行 MinIO 开发地址（localhost:9100，原 9000 被 portainer 占用）；生产环境 MinIO 走 https 或反代后可移除该白名单
+        "img-src 'self' data: blob: https: http://localhost:9000 http://localhost:9100",
         "media-src 'self' data: blob:",
         "style-src 'self' 'unsafe-inline'",
         "script-src 'self' 'unsafe-inline' 'unsafe-eval'",

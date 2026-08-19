@@ -46,14 +46,19 @@ const errorDetail = computed(() => {
 })
 
 onErrorCaptured((err, instance, info) => {
-  error.value = err
-  capturedContext.value = {
-    source: 'errorCaptured',
-    info,
-    componentTag: instance?.$options?.__name || instance?.$options?.name,
+  const componentTag = instance?.$options?.__name || instance?.$options?.name
+  const context = { source: 'errorCaptured', info, componentTag }
+  // 事件处理器（@click/@submit 等）抛出的错误不应视为渲染失败：
+  // 登录等表单请求失败时，request 拦截器 reject 的错误若冒泡到这里，把整页替换成
+  // 错误卡片会造成"点个按钮页面就崩了"。这类错误只记录上报、不替换页面；
+  // 渲染/生命周期（render function、mounted hook 等）错误才触发整页错误态。
+  const isEventHandlerError = typeof info === 'string' && info.includes('event handler')
+  if (!isEventHandlerError) {
+    error.value = err
+    capturedContext.value = context
   }
   // 上报到监控 + 触发上游 hook（如局部错误需要全局通知）
-  captureException(err, capturedContext.value)
+  captureException(err, context)
   emit('error', err, info)
   // 返回 false 阻止错误继续向上冒泡（外层 ErrorBoundary 不会重复捕获）
   return false

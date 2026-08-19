@@ -166,6 +166,8 @@ async function handleRegister() {
     await register(submitData)
     message.success('注册成功，请登录')
     router.push('/login')
+  } catch {
+    // 注册失败：错误信息已由 request 拦截器统一 toast，仅吞掉异常避免整页崩溃
   } finally {
     loading.value = false
   }
