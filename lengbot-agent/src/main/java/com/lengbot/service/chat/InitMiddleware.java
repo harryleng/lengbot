@@ -4,8 +4,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lengbot.model.ProviderResolver;
 import com.lengbot.constant.ConfigKeys;
+import com.lengbot.common.BizException;
 import com.lengbot.dto.LlmTraceSpanDTO;
 import com.lengbot.entity.Agent;
+import com.lengbot.enums.ErrorCode;
 import com.lengbot.entity.ChatSession;
 import com.lengbot.enums.AgentStatus;
 import com.lengbot.model.ModelFactory;
@@ -233,17 +235,29 @@ public class InitMiddleware implements ChatMiddleware {
     /**
      * 加载Agent配置。
      * agentId非空时加载指定Agent；为空时查询用户的默认Agent。
+     * <p>越权防护：agentId 非空时校验可访问性（owner/默认Agent/管理员），
+     * 防止任意登录用户按 ID 加载他人 Agent 并读取其知识库/工具/记忆（Agent IDOR）。
+     * API Key 路径无 Sa-Token 登录态时降级为校验 Agent 存在。</p>
      */
     public Agent loadAgent(Long agentId) {
         if (agentId != null) {
+            Long userId;
+            try {
+                userId = cn.dev33.satoken.stp.StpUtil.getLoginIdAsLong();
+            } catch (Exception e) {
+                userId = null;
+            }
+            if (userId != null) {
+                return agentService.ensureAccessible(agentId);
+            }
             Agent agent = agentService.getById(agentId);
             if (agent == null) {
                 log.warn("[Chat] Agent不存在，agentId={}", agentId);
             }
             return agent;
         }
-        long userId = cn.dev33.satoken.stp.StpUtil.getLoginIdAsLong();
-        return agentService.getDefaultAgent(userId);
+        long uid = cn.dev33.satoken.stp.StpUtil.getLoginIdAsLong();
+        return agentService.getDefaultAgent(uid);
     }
 
     /**
@@ -296,9 +310,20 @@ public class InitMiddleware implements ChatMiddleware {
 
     /**
      * 解析会话ID：有则复用，无则新建
+     * <p>复用前必须做越权校验：请求传入的 sessionId 须属于当前用户，
+     * 否则任意登录用户可读/写他人会话历史与附件（会话 IDOR）。
+     * API Key 路径无 Sa-Token userId 时降级为校验会话存在，避免完全绕过。</p>
      */
     private Long resolveSessionId(Long sessionId, Long agentId, Long userId) {
         if (sessionId != null) {
+            if (userId != null) {
+                chatSessionService.ensureOwnedByUser(sessionId, userId);
+            } else {
+                ChatSession session = chatSessionService.getById(sessionId);
+                if (session == null) {
+                    throw new BizException(ErrorCode.SESSION_NOT_FOUND);
+                }
+            }
             return sessionId;
         }
         return chatSessionService.createSession(userId, agentId).getId();

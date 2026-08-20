@@ -78,6 +78,7 @@ public class AgentController {
     @Operation(summary = "获取Agent详情（含绑定的知识库ID列表）")
     @GetMapping("/{id}/detail")
     public Result<Map<String, Object>> getDetail(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentService.getAgentDetail(id));
     }
 
@@ -86,12 +87,14 @@ public class AgentController {
     public Result<AgentChatCapabilitiesDTO> getChatCapabilities(
             @PathVariable Long id,
             @RequestParam(required = false) Integer configVersion) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentService.getChatCapabilities(id, configVersion));
     }
 
     @Operation(summary = "获取Agent详情")
     @GetMapping("/{id}")
     public Result<Agent> getById(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentService.getById(id));
     }
 
@@ -101,6 +104,7 @@ public class AgentController {
             @PathVariable Long id,
             @RequestParam(required = false) Long agentVersionId,
             @RequestParam(required = false) String types) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentService.getMentionOptions(id, agentVersionId, types));
     }
 
@@ -109,6 +113,7 @@ public class AgentController {
     public Result<Void> updateKnowledgeBindings(
             @PathVariable Long id,
             @RequestBody List<String> knowledgeIds) {
+        agentService.ensureAccessible(id);
         agentService.updateKnowledgeBindings(id, parseBindingIdStrings(knowledgeIds));
         return Result.ok();
     }
@@ -116,6 +121,7 @@ public class AgentController {
     @Operation(summary = "获取Agent绑定的知识库ID列表")
     @GetMapping("/{id}/knowledge")
     public Result<List<Long>> getKnowledgeIds(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentService.getKnowledgeIds(id));
     }
 
@@ -124,6 +130,7 @@ public class AgentController {
     public Result<Void> updateToolBindings(
             @PathVariable Long id,
             @RequestBody List<String> toolIds) {
+        agentService.ensureAccessible(id);
         agentService.updateToolBindings(id, parseBindingIdStrings(toolIds));
         return Result.ok();
     }
@@ -131,6 +138,7 @@ public class AgentController {
     @Operation(summary = "获取Agent绑定的工具ID列表")
     @GetMapping("/{id}/tools")
     public Result<List<String>> getToolIds(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         List<Long> toolIds = agentService.getToolIds(id);
         List<String> toolIdStrs = toolIds.stream().map(String::valueOf).toList();
         return Result.ok(toolIdStrs);
@@ -139,12 +147,14 @@ public class AgentController {
     @Operation(summary = "获取Agent绑定的工具详情列表")
     @GetMapping("/{id}/tools/detail")
     public Result<List<Tool>> getToolDetails(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentService.getToolDetails(id));
     }
 
     @Operation(summary = "获取Agent绑定的MCP Server ID列表")
     @GetMapping("/{id}/mcp-servers")
     public Result<List<String>> getMcpServerIds(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         List<Long> mcpServerIds = agentService.getMcpServerIds(id);
         List<String> mcpServerIdStrs = mcpServerIds.stream().map(String::valueOf).toList();
         return Result.ok(mcpServerIdStrs);
@@ -155,6 +165,7 @@ public class AgentController {
     public Result<Void> updateMcpServerBindings(
             @PathVariable Long id,
             @RequestBody List<String> mcpServerIds) {
+        agentService.ensureAccessible(id);
         agentService.updateMcpServerBindings(id, parseBindingIdStrings(mcpServerIds));
         return Result.ok();
     }
@@ -162,12 +173,14 @@ public class AgentController {
     @Operation(summary = "获取Agent绑定的MCP Server详情列表")
     @GetMapping("/{id}/mcp-servers/detail")
     public Result<List<McpServer>> getMcpServerDetails(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentService.getMcpServerDetails(id));
     }
 
     @Operation(summary = "获取Agent绑定的SubAgent ID列表")
     @GetMapping("/{id}/subagents")
     public Result<List<String>> getSubAgentIds(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         List<Long> subAgentIds = agentService.getSubAgentIds(id);
         List<String> subAgentIdStrs = subAgentIds.stream().map(String::valueOf).toList();
         return Result.ok(subAgentIdStrs);
@@ -178,6 +191,7 @@ public class AgentController {
     public Result<Void> updateSubAgentBindings(
             @PathVariable Long id,
             @RequestBody List<String> subAgentIds) {
+        agentService.ensureAccessible(id);
         agentService.updateSubAgentBindings(id, parseBindingIdStrings(subAgentIds));
         return Result.ok();
     }
@@ -185,6 +199,7 @@ public class AgentController {
     @Operation(summary = "获取Agent绑定的Skill ID列表")
     @GetMapping("/{id}/skills")
     public Result<List<String>> getSkillIds(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         List<Long> skillIds = agentService.getSkillIds(id);
         return Result.ok(skillIds.stream().map(String::valueOf).toList());
     }
@@ -194,6 +209,7 @@ public class AgentController {
     public Result<Void> updateSkillBindings(
             @PathVariable Long id,
             @RequestBody List<String> skillIds) {
+        agentService.ensureAccessible(id);
         agentService.updateSkillBindings(id, parseBindingIdStrings(skillIds));
         return Result.ok();
     }
@@ -215,6 +231,7 @@ public class AgentController {
     @Operation(summary = "删除Agent")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         agentService.deleteById(id);
         return Result.ok();
     }
@@ -222,24 +239,28 @@ public class AgentController {
     @Operation(summary = "克隆Agent（深拷贝配置+绑定关系）")
     @PostMapping("/{id}/clone")
     public Result<Agent> clone(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentService.clone(id));
     }
 
     @Operation(summary = "AI生成系统提示词")
     @PostMapping("/{id}/generate-prompt")
     public Result<String> generatePrompt(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentService.generateSystemPrompt(id));
     }
 
     @Operation(summary = "AI生成推荐问题")
     @PostMapping("/{id}/generate-questions")
     public Result<String> generateQuestions(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentService.generateRecommendedQuestions(id));
     }
 
     @Operation(summary = "设置为默认Agent")
     @PutMapping("/{id}/default")
     public Result<Void> setDefault(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         agentService.setDefaultAgent(id);
         return Result.ok();
     }
@@ -248,6 +269,7 @@ public class AgentController {
     @PostMapping("/{id}/avatar")
     public Result<String> uploadAvatar(@PathVariable Long id,
                                        @RequestParam("file") MultipartFile file) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentService.uploadAvatar(id, file));
     }
 
@@ -256,6 +278,7 @@ public class AgentController {
     public Result<Map<String, Object>> publishAgent(
             @PathVariable Long id,
             @RequestBody(required = false) @Valid AgentPublishDTO body) {
+        agentService.ensureAccessible(id);
         String description = body != null ? body.getDescription() : null;
         return Result.ok(agentVersionService.publishChatAgent(id, description));
     }
@@ -263,6 +286,7 @@ public class AgentController {
     @Operation(summary = "已发布版本列表")
     @GetMapping("/{id}/versions")
     public Result<AgentVersionListVO> listVersions(@PathVariable Long id) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentVersionService.listVersionsWithDraft(id));
     }
 
@@ -271,12 +295,14 @@ public class AgentController {
     public Result<Map<String, Object>> getVersionDetail(
             @PathVariable Long id,
             @PathVariable Integer version) {
+        agentService.ensureAccessible(id);
         return Result.ok(agentVersionService.getPublishedVersionDetail(id, version));
     }
 
     @Operation(summary = "恢复已发布版本到当前编辑态")
     @PostMapping("/{id}/versions/{version}/restore")
     public Result<Void> restoreVersion(@PathVariable Long id, @PathVariable Integer version) {
+        agentService.ensureAccessible(id);
         agentVersionService.restorePublishedToDraft(id, version);
         return Result.ok();
     }
@@ -284,6 +310,7 @@ public class AgentController {
     @Operation(summary = "删除已发布版本")
     @DeleteMapping("/{id}/versions/{version}")
     public Result<Void> deleteVersion(@PathVariable Long id, @PathVariable Integer version) {
+        agentService.ensureAccessible(id);
         agentVersionService.deletePublishedVersion(id, version);
         return Result.ok();
     }

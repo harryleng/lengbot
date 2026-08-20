@@ -170,6 +170,11 @@ public class AgentServiceImpl extends ServiceImpl<AgentMapper, Agent>
     }
 
     @Override
+    public Agent ensureAccessible(Long id) {
+        return checkOwnership(id);
+    }
+
+    @Override
     public Agent clone(Long id) {
         // 1. 校验源Agent存在性 + 所有权
         Agent source = checkOwnership(id);

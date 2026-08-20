@@ -72,6 +72,15 @@ public interface AgentService extends IService<Agent> {
     Map<String, Object> getAgentDetail(Long id);
 
     /**
+     * 校验 Agent 可访问性（owner / 默认 Agent / 管理员），无权访问或不存在时抛异常。
+     * <p>供 Chat 链路（loadAgent）与 Controller 入口统一使用，堵住跨用户按 ID 越权访问。</p>
+     *
+     * @param id Agent ID
+     * @return 已通过校验的 Agent 实体
+     */
+    Agent ensureAccessible(Long id);
+
+    /**
      * 按对话配置版本解析 Agent 对话能力（上传/语音/TTS 等）
      *
      * @param id            Agent ID

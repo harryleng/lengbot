@@ -5,6 +5,7 @@ import com.lengbot.constant.ChatAttachmentConstants;
 import com.lengbot.constant.ConfigKeys;
 import com.lengbot.dto.AgentChatCapabilitiesDTO;
 import com.lengbot.dto.ChatAttachmentDTO;
+import com.lengbot.entity.ChatSession;
 import com.lengbot.enums.ErrorCode;
 import cn.dev33.satoken.stp.StpUtil;
 import com.lengbot.service.AgentService;
@@ -50,6 +51,23 @@ public class ChatAttachmentServiceImpl implements ChatAttachmentService {
     public ChatAttachmentDTO upload(Long agentId, Long sessionId, Integer configVersion, MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST.getCode(), "请选择文件");
+        }
+        // 越权防护：上传到已有会话时，sessionId 必须属于当前用户（会话 IDOR）
+        if (sessionId != null) {
+            Long userId;
+            try {
+                userId = StpUtil.getLoginIdAsLong();
+            } catch (Exception e) {
+                userId = null;
+            }
+            if (userId != null) {
+                chatSessionService.ensureOwnedByUser(sessionId, userId);
+            } else {
+                ChatSession session = chatSessionService.getById(sessionId);
+                if (session == null) {
+                    throw new BizException(ErrorCode.SESSION_NOT_FOUND);
+                }
+            }
         }
         var agent = agentService.getById(agentId);
         if (agent == null) {
