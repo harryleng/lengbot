@@ -2,12 +2,12 @@ package com.lengbot.tool.builtin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lengbot.constant.ToolResultPrefixes;
+import com.lengbot.service.sandbox.SandboxFileAccess;
 import com.lengbot.service.sandbox.SandboxFs;
 import com.lengbot.service.sandbox.SandboxPath;
 import com.lengbot.tool.ToolEventEmitter;
 import com.lengbot.tool.annotation.SystemTool;
 import com.lengbot.tool.annotation.ToolParamMeta;
-import com.lengbot.util.MinioUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import io.agentscope.core.tool.ToolCallParam;
@@ -22,10 +22,10 @@ import java.util.Map;
 
 /**
  * 内置工具 — 文件交付
- * <p>将工作区中生成的文件交付给用户，返回预签名下载链接。
- * 前端可据此渲染文件卡片（图片预览 / 文档下载）。</p>
+ * <p>将工作区中生成的文件交付给用户，返回下载链接（MinIO 后端=预签名 URL，
+ * 本地磁盘后端=/api/sandbox/files/... 下载接口）。前端可据此渲染文件卡片（图片预览 / 文档下载）。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 @Slf4j
@@ -37,7 +37,6 @@ import java.util.Map;
         outputSchema = "{\"type\":\"object\",\"properties\":{\"success\":{\"type\":\"boolean\"},\"artifacts\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"path\":{\"type\":\"string\"},\"url\":{\"type\":\"string\"},\"size\":{\"type\":\"integer\"},\"contentType\":{\"type\":\"string\"}}}}}}")
 public class PresentArtifactsTool {
 
-    private final MinioUtil minioUtil;
     private final SandboxFs sandboxFs;
     private final ObjectMapper objectMapper;
 
@@ -98,28 +97,19 @@ public class PresentArtifactsTool {
                         ? normalized.substring(normalized.lastIndexOf('/') + 1)
                         : normalized;
 
-                // 5. 生成预签名 URL（预览 inline / 下载 attachment）
-                String minioPath = sandboxPath.toMinioPath();
-                String presignedUrl = minioUtil.getPresignedUrl(minioPath, contentType);
-                String downloadUrl = minioUtil.getPresignedDownloadUrl(minioPath, name, contentType);
-
-                // 6. 获取文件元数据
-                long size = 0;
-                try {
-                    size = minioUtil.statObject(minioPath).size();
-                } catch (Exception ignored) {
-                }
+                // 5. 解析访问信息（URL/下载URL/大小，由 SandboxFs 后端实现提供）
+                SandboxFileAccess access = sandboxFs.resolveFileAccess(sandboxPath, contentType);
 
                 Map<String, Object> artifact = new LinkedHashMap<>();
                 artifact.put("name", name);
                 artifact.put("path", normalized);
-                artifact.put("url", presignedUrl);
-                artifact.put("downloadUrl", downloadUrl);
-                artifact.put("size", size);
+                artifact.put("url", access.url());
+                artifact.put("downloadUrl", access.downloadUrl());
+                artifact.put("size", access.size());
                 artifact.put("contentType", contentType);
                 artifacts.add(artifact);
 
-                log.info("[Tool:present_artifacts] 文件就绪: path={}, size={}", normalized, size);
+                log.info("[Tool:present_artifacts] 文件就绪: path={}, size={}", normalized, access.size());
             } catch (Exception e) {
                 log.warn("[Tool:present_artifacts] 处理文件失败: path={}, error={}", filepath, e.getMessage());
                 errors.add(filepath + "（" + e.getMessage() + "）");
@@ -162,9 +152,13 @@ public class PresentArtifactsTool {
         if (lower.endsWith(".webp")) return "image/webp";
         if (lower.endsWith(".svg")) return "image/svg+xml";
         if (lower.endsWith(".pdf")) return "application/pdf";
-        if (lower.endsWith(".doc") || lower.endsWith(".docx")) return "application/msword";
-        if (lower.endsWith(".xls") || lower.endsWith(".xlsx")) return "application/vnd.ms-excel";
-        if (lower.endsWith(".ppt") || lower.endsWith(".pptx")) return "application/vnd.ms-powerpoint";
+        // OOXML 与 OLE2 复合文档的 MIME 不同，需分开判断
+        if (lower.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (lower.endsWith(".doc")) return "application/msword";
+        if (lower.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (lower.endsWith(".xls")) return "application/vnd.ms-excel";
+        if (lower.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        if (lower.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
         if (lower.endsWith(".zip")) return "application/zip";
         if (lower.endsWith(".json")) return "application/json";
         if (lower.endsWith(".csv")) return "text/csv";

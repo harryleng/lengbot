@@ -1,11 +1,11 @@
 package com.lengbot.tool.builtin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lengbot.service.sandbox.SandboxFileAccess;
 import com.lengbot.service.sandbox.SandboxFs;
 import com.lengbot.service.sandbox.SandboxPath;
 import com.lengbot.tool.annotation.SystemTool;
 import com.lengbot.tool.annotation.ToolParamMeta;
-import com.lengbot.util.MinioUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import io.agentscope.core.tool.ToolCallParam;
@@ -13,6 +13,7 @@ import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,8 +24,10 @@ import java.util.Map;
  * <p>工作区路径自动注入当前会话 ID，AI 只需传相对路径。</p>
  * <p>写入内容不设长度上限（对标 Yuxi：write 仅做路径/权限校验，正文原样透传）；
  * 需要续写时可用 {@code sandbox_append_file} 向同一路径追加。</p>
+ * <p>底层存储通过 {@link SandboxFs} 接口解耦：默认 MinIO，配置 {@code lengbot.sandbox.backend=local}
+ * 时切换到本地磁盘，本类无需任何改动。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 @Slf4j
@@ -36,7 +39,6 @@ public class SandboxFileTool {
 
     private final SandboxFs sandboxFs;
     private final ObjectMapper objectMapper;
-    private final MinioUtil minioUtil;
 
     @Tool(name = "sandbox_read_file",
           description = "读取沙盒中的文件内容。两种路径模式：" +
@@ -129,46 +131,32 @@ public class SandboxFileTool {
         }
         try {
             SandboxPath sandboxPath = resolvePath(path.trim(), toolContext);
-            // 实际写入字节数：append 时为旧内容+新内容，overwrite 时为新内容
-            long writeBytes;
+            // 追加语义下沉到 SandboxFs 实现：本地磁盘 APPEND 原子追加；MinIO 存在则读-拼-写、不存在则创建
             if (append) {
-                String existing = "";
-                try {
-                    existing = sandboxFs.readFile(sandboxPath);
-                } catch (Exception ignored) {
-                    // 文件不存在则当作空文件追加
-                }
-                String merged = existing + content;
-                sandboxFs.writeFile(sandboxPath, merged);
-                writeBytes = merged.getBytes().length;
+                sandboxFs.appendFile(sandboxPath, content);
             } else {
                 sandboxFs.writeFile(sandboxPath, content);
-                writeBytes = content.getBytes().length;
             }
+            // 实际字节数按 UTF-8 计算（与存储编码一致，避免平台默认字符集差异）
+            long writeBytes = content.getBytes(StandardCharsets.UTF_8).length;
             Map<String, Object> output = new LinkedHashMap<>();
             output.put("path", path.trim());
             output.put("size", writeBytes);
             output.put("success", true);
             output.put("mode", append ? "append" : "overwrite");
-            // outputs/ 路径：交付物，附预签名 URL 让前端直接渲染文件卡片
-            String normalized = path.trim().replace("\\", "/");
-            if (normalized.startsWith("/")) {
-                normalized = normalized.substring(1);
-            }
+            // outputs/ 路径：交付物，附访问 URL 让前端直接渲染文件卡片（MinIO=预签名，本地=下载接口）
+            String normalized = normalizeLeadingSlash(path.trim());
             if (normalized.startsWith("outputs/")) {
                 String contentType = inferContentType(normalized);
-                String name = normalized.contains("/")
-                        ? normalized.substring(normalized.lastIndexOf('/') + 1)
-                        : normalized;
-                String minioPath = sandboxPath.toMinioPath();
                 try {
-                    output.put("name", name);
-                    output.put("contentType", contentType);
-                    output.put("url", minioUtil.getPresignedUrl(minioPath, contentType));
-                    output.put("downloadUrl", minioUtil.getPresignedDownloadUrl(minioPath, name, contentType));
+                    SandboxFileAccess access = sandboxFs.resolveFileAccess(sandboxPath, contentType);
+                    output.put("name", access.name());
+                    output.put("contentType", access.contentType());
+                    output.put("url", access.url());
+                    output.put("downloadUrl", access.downloadUrl());
                 } catch (Exception ex) {
-                    // 预签名失败不影响写入结果，只记日志
-                    log.warn("[Tool:sandbox_{}] 生成预签名URL失败: path={}, error={}",
+                    // 访问 URL 生成失败不影响写入结果，只记日志
+                    log.warn("[Tool:sandbox_{}] 生成访问URL失败: path={}, error={}",
                             append ? "append_file" : "write_file", path, ex.getMessage());
                 }
             }
@@ -186,9 +174,13 @@ public class SandboxFileTool {
         if (lower.endsWith(".webp")) return "image/webp";
         if (lower.endsWith(".svg")) return "image/svg+xml";
         if (lower.endsWith(".pdf")) return "application/pdf";
-        if (lower.endsWith(".doc") || lower.endsWith(".docx")) return "application/msword";
-        if (lower.endsWith(".xls") || lower.endsWith(".xlsx")) return "application/vnd.ms-excel";
-        if (lower.endsWith(".ppt") || lower.endsWith(".pptx")) return "application/vnd.ms-powerpoint";
+        // OOXML 与 OLE2 复合文档的 MIME 不同，需分开判断（避免浏览器 Content-Type 不匹配）
+        if (lower.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (lower.endsWith(".doc")) return "application/msword";
+        if (lower.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (lower.endsWith(".xls")) return "application/vnd.ms-excel";
+        if (lower.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        if (lower.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
         if (lower.endsWith(".zip")) return "application/zip";
         if (lower.endsWith(".json")) return "application/json";
         if (lower.endsWith(".csv")) return "text/csv";
@@ -202,10 +194,7 @@ public class SandboxFileTool {
      * 解析路径：skills/ 开头走 Skill 路径，outputs/ 开头走 AI 产出区，其余自动归属到当前会话工作区
      */
     private SandboxPath resolvePath(String path, ToolCallParam toolContext) {
-        String normalized = path.replace("\\", "/");
-        if (normalized.startsWith("/")) {
-            normalized = normalized.substring(1);
-        }
+        String normalized = normalizeLeadingSlash(path);
         // Skill 路径：skills/{slug}/...（只读）
         if (normalized.startsWith("skills/")) {
             String relative = normalized.substring("skills/".length());
@@ -225,13 +214,21 @@ public class SandboxFileTool {
     }
 
     private String extractSessionId(ToolCallParam toolContext) {
-        if (toolContext != null) {
+        if (toolContext != null && toolContext.getRuntimeContext() != null) {
             Object sid = toolContext.getRuntimeContext().get("sessionId");
             if (sid != null) {
                 return String.valueOf(sid);
             }
         }
         return "default";
+    }
+
+    private static String normalizeLeadingSlash(String path) {
+        String normalized = path.replace("\\", "/");
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        return normalized;
     }
 
     private String toJson(Object obj) {
@@ -242,7 +239,15 @@ public class SandboxFileTool {
         }
     }
 
+    /** 用 ObjectMapper 序列化错误信息，保证 JSON 转义完整（换行/制表/反斜杠均正确处理） */
     private String errorJson(String message) {
-        return "{\"success\":false,\"error\":\"" + message.replace("\"", "\\\"") + "\"}";
+        Map<String, Object> error = new LinkedHashMap<>();
+        error.put("success", false);
+        error.put("error", message);
+        try {
+            return objectMapper.writeValueAsString(error);
+        } catch (Exception e) {
+            return "{\"success\":false,\"error\":\"序列化失败\"}";
+        }
     }
 }
