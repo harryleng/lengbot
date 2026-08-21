@@ -12,7 +12,7 @@ import java.util.Map;
  * 工作流节点定义
  * <p>前端传递的节点数据结构</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Data

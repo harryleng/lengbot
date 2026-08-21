@@ -15,7 +15,7 @@ import java.util.Map;
 /**
  * LLM调用链追踪 Controller
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Tag(name = "可观测性", description = "AI调用链追踪查询")

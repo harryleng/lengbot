@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * 子图 VO（用于可视化和检索）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Data

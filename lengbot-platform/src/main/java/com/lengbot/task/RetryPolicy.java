@@ -5,7 +5,7 @@ import lombok.Data;
 /**
  * 任务重试策略（按 TaskType 配置，未配置则用默认值）
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Data

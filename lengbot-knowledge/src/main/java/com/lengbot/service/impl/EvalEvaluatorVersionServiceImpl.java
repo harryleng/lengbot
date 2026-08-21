@@ -18,7 +18,7 @@ import java.util.List;
 /**
  * 评测器版本服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Slf4j

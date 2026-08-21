@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
 /**
  * 任务队列服务实现：基于 Redis Stream（消费者组） + ZSet（延迟） + Hash（进度）
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Slf4j

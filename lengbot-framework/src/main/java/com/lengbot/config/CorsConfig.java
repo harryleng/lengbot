@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  *   - 5174：lengbot(8082) 的前端 dev 端口（lengbot-ui 默认）
  *   - 3000：常见前端 dev 端口
  *
- * @author finch
+ * @author lw
  * @since 2026-07-19
  */
 @Configuration

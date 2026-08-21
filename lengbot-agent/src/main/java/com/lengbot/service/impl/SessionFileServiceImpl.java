@@ -30,7 +30,7 @@ import java.util.Set;
 /**
  * 会话文件服务实现：基于 MinIO 非递归扫描构建懒加载目录树，索引 enrich 来源信息。
  *
- * @author finch
+ * @author lw
  * @since 2026-06-30
  */
 @Slf4j

@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
  * <p>基于 Milvus Entity/Triple 向量检索 + Neo4j 图遍历 + PPR 排序</p>
  * <p>实现流程：种子实体检索 → 2-hop 子图查询 → PPR 迭代 → 结果排序</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-16
  */
 @Slf4j

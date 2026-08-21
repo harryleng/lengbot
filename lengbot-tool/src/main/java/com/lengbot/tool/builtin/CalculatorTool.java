@@ -16,7 +16,7 @@ import java.util.Map;
  * 内置工具 — 数学计算器
  * <p>由 {@link com.lengbot.tool.registrar.BuiltinToolRegistrar} 注册，用户可选绑定</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-22
  */
 @Slf4j

@@ -14,7 +14,7 @@ import java.util.Map;
 /**
  * 知识库服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 public interface KnowledgeService extends IService<Knowledge> {

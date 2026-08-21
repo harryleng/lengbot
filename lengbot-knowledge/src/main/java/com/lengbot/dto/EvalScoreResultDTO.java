@@ -7,7 +7,7 @@ import java.math.BigDecimal;
 /**
  * LLM 评分结果
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Data

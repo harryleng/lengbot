@@ -8,7 +8,7 @@ import java.util.List;
  * 中间件链式执行器。
  * <p>按顺序执行中间件列表，最后一个中间件之后调用终端核心。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 public class ChatMiddlewareChain {

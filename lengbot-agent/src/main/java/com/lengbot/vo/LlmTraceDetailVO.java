@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * LLM调用链详情VO（spans解析为对象列表）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Data

@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * 评测数据集版本服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 public interface EvalDatasetVersionService extends IService<EvalDatasetVersion> {

@@ -23,7 +23,7 @@ import java.util.Map;
  *       GRAPH_EXTRACTION: { max-attempts: 2, backoff-base-ms: 30000 }
  * </pre>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Slf4j

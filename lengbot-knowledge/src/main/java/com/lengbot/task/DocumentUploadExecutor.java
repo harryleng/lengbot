@@ -28,7 +28,7 @@ import java.util.UUID;
 /**
  * 文档上传任务执行器：MinIO上传 + Tika解析 + OCR + Markdown转换
  *
- * @author finch
+ * @author lw
  * @since 2026-05-21
  */
 @Slf4j

@@ -3,7 +3,7 @@ package com.lengbot.constant;
 /**
  * 工具执行结果前缀常量
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 public final class ToolResultPrefixes {

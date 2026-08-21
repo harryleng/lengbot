@@ -16,7 +16,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 /**
  * Sa-Token 路由鉴权配置
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Configuration

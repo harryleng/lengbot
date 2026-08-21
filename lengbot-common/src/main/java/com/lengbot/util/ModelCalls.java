@@ -33,7 +33,7 @@ import java.util.Map;
  *
  * <p>用于替换原 Spring AI 中 {@code chatModel.call(prompt)} 的同步语义。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-08-01
  */
 public final class ModelCalls {

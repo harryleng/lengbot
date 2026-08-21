@@ -16,7 +16,7 @@ import java.util.Map;
  * <p>按语言查找可用引擎，自动降级。同语言多个引擎时按 {@code @Order} 优先级选首选
  * （GraalVM 优先级高于 Nashorn / subprocess PythonEngine）。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 @Slf4j

@@ -5,7 +5,7 @@ import lombok.Data;
 /**
  * Prompt调试运行请求
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Data

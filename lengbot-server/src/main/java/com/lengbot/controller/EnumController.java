@@ -13,7 +13,7 @@ import java.util.stream.Collectors;
 /**
  * 枚举值查询接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Tag(name = "枚举查询", description = "获取系统各类枚举值")

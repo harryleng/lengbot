@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
  * <p>llm_trace / workflow_test_run 等日志类表无界增长，按保留期物理删除过期数据。
  * 默认每天凌晨 2 点执行一次，保留天数由 {@code lengbot.log-cleanup.retention-days} 配置。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Slf4j

@@ -21,7 +21,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * 解决 ModelFactory / McpClientServiceImpl 等本地 Map 缓存在水平扩展时的数据不一致问题。</p>
  * <p>消息体格式：JSON {@code {"type":"chatModel","key":"123"}}，type 区分缓存域，key 为缓存键</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-19
  */
 @Slf4j

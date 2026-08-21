@@ -19,7 +19,7 @@ import java.util.Map;
 /**
  * 知识图谱实体关系抽取器（基于 LLM）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Slf4j

@@ -21,7 +21,7 @@ import java.util.Map;
  * 脚本节点：委托 {@link SandboxService} 执行脚本（JavaScript / Python / Groovy / Java）并写入输出变量
  * <p>约定入口：JS/Python/Groovy 使用 {@code main(params)}；Java 为 Janino {@code run(params)} 方法体。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 @Slf4j

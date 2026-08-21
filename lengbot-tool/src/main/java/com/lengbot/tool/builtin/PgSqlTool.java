@@ -29,7 +29,7 @@ import lombok.RequiredArgsConstructor;
  * 系统内置工具 — PostgreSQL 数据库查询
  * <p>提供只读数据库查询能力，包括列出表、查看表结构、执行 SELECT 查询</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-22
  */
 @Slf4j

@@ -16,7 +16,7 @@ import java.util.Set;
  * Skill 激活状态存储
  * <p>基于 Redis 存储每个会话已激活的 Skill slug 集合，跨轮次持久化。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 @Slf4j

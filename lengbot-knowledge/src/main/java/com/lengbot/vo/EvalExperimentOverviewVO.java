@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 /**
  * 实验概览 VO（按评估器分组的统计）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Data

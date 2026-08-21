@@ -13,7 +13,7 @@ import java.util.List;
 /**
  * 模型提供商服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 public interface ModelProviderService extends IService<ModelProvider> {

@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * 会话文件树响应（懒加载单层 entries + 全局统计）。
  *
- * @author finch
+ * @author lw
  * @since 2026-06-30
  */
 @Data

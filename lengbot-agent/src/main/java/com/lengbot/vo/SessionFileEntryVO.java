@@ -9,7 +9,7 @@ import lombok.Data;
  * 会话文件树条目（扁平结构，配合懒加载）。
  * <p>参考 Yuxi viewer filesystem entries。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-30
  */
 @Data

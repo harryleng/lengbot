@@ -22,7 +22,7 @@ import java.util.List;
 /**
  * 管理员专用接口（用户管理、资源查看）
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 @Tag(name = "管理员管理", description = "用户管理、资源查看（仅管理员）")

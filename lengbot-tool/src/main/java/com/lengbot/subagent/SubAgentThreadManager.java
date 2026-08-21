@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
  * SubAgent 线程管理器
  * <p>负责子代理线程 ID 的确定性生成和消息历史的 Redis 持久化，支持续跑机制。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 @Slf4j

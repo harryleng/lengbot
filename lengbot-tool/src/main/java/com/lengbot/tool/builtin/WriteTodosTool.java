@@ -21,7 +21,7 @@ import java.util.Map;
  * <p>合并语义（防 AI 漏传丢项）：从 ToolCallParam.currentTodos 读历史快照，按 id upsert；
  * 未在新传入列表中提及的项默认保留；已完成/已取消项不会被清除。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-14
  */
 @Slf4j

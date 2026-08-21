@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 /**
  * 文档版本列表VO
  *
- * @author finch
+ * @author lw
  * @since 2026-06-17
  */
 @Data

@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>用于缓存穿透防护，启动时加载所有实体 ID 到布隆过滤器</p>
  * <p>查询前先用 mightExist() 快速判断 ID 是否可能存在，不存在则直接返回 null 避免穿透 DB</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 @Slf4j

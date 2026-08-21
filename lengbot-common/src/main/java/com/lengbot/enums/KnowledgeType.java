@@ -9,7 +9,7 @@ import lombok.Getter;
 /**
  * 知识库类型
  *
- * @author finch
+ * @author lw
  * @since 2026-06-15
  */
 @Getter

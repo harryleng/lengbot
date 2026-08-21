@@ -10,7 +10,7 @@ import lombok.Data;
 /**
  * 管理员更新用户请求
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 @Data

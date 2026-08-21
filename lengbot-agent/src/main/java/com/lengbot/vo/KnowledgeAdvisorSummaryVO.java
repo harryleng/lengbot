@@ -8,7 +8,7 @@ import lombok.Data;
 /**
  * 知识库反馈聚合概览 VO
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Data

@@ -7,7 +7,7 @@ import java.util.List;
 /**
  * 文档版本服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-06-17
  */
 public interface DocumentVersionService {

@@ -28,7 +28,7 @@ import java.util.Map;
  * <p>简化版：仅支持 GitHub 仓库安装（owner/repo 格式），
  * 不支持 npx 全局搜索、ModelScope、沙盒路径安装。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 @Slf4j

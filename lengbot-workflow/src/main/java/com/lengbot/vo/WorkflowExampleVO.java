@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * 工作流示例 Agent 信息
  *
- * @author finch
+ * @author lw
  * @since 2026-05-31
  */
 @Data

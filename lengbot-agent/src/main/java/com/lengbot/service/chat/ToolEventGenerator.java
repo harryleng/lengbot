@@ -11,7 +11,7 @@ import java.util.Map;
 /**
  * 工具调用事件 JSON 生成器
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Component

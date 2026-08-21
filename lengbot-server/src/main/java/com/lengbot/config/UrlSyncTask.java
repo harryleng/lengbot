@@ -19,7 +19,7 @@ import java.util.Map;
  * URL 文档定时同步任务
  * <p>每小时检查一次，同步到期的 URL 文档（根据 syncInterval 配置）</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-26
  */
 @Slf4j

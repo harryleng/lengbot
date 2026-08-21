@@ -8,7 +8,7 @@ import java.util.List;
  * 会话待办服务：负责待办的读取。
  * <p>事实源仍是 message.metadata.toolEvents（write_todos 工具结果），不维护独立表。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-17
  */
 public interface SessionTodoService {

@@ -10,7 +10,7 @@ import lombok.Data;
 /**
  * MCP Server 请求DTO
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Data

@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * 工具调用记录 Mapper
  *
- * @author finch
+ * @author lw
  * @since 2026-05-22
  */
 @Mapper

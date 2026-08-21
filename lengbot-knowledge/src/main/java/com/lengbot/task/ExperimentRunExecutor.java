@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 /**
  * 实验执行任务执行器
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Slf4j

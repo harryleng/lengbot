@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
  * 内置工具 — 文档内容定位
  * <p>在知识库文档中按关键词或正则表达式定位匹配内容，返回匹配行及上下文</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-17
  */
 @Slf4j

@@ -9,7 +9,7 @@ import java.util.Map;
 /**
  * RAG 检索增强生成服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 public interface RagService {

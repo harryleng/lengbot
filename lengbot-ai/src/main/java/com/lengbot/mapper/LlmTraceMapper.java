@@ -14,7 +14,7 @@ import java.util.Map;
 /**
  * LLM调用链追踪 Mapper
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Mapper

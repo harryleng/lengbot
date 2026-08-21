@@ -60,7 +60,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 解析 SubAgent.tools（按 name 查表）形成自己的工具集，
  * 走一轮流式工具调用循环，最终返回 assistant 文本给主 Agent。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Slf4j

@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Chat 流式会话中止注册表。
  * <p>维护 requestId → ChatContext 映射，供停止端点显式触发 in-flight 对话的中断。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-13
  */
 @Slf4j

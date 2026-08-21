@@ -7,7 +7,7 @@ import lombok.Data;
 /**
  * 消息反馈请求
  *
- * @author finch
+ * @author lw
  * @since 2026-06-26
  */
 @Data

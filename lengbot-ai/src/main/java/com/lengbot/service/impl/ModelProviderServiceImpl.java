@@ -31,7 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 模型提供商服务实现类
  * <p>纯数据层 CRUD，不依赖 ModelFactory，避免循环依赖</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Slf4j

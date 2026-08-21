@@ -10,7 +10,7 @@ import org.springframework.core.Ordered;
  * TraceId 过滤器注册：拦截所有 {@code /api/**} 请求写入 MDC + 响应头
  * <p>Order 置于 {@link Ordered#HIGHEST_PRECEDENCE} 最高优先级，确保后续过滤器和 Controller 的日志都能拿到 traceId。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-21
  */
 @Configuration

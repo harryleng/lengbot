@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
  * 法律法规分块策略
  * <p>按编/章/节/条款结构切分，保持法律条文的上下文完整性</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Slf4j

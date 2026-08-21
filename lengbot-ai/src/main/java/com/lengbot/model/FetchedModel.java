@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 /**
  * 联网拉取的模型信息
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Data

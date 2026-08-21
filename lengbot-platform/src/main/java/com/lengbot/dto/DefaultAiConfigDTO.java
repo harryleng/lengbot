@@ -11,7 +11,7 @@ import lombok.NoArgsConstructor;
 /**
  * 默认AI配置DTO（单个模型配置）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Data

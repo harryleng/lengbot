@@ -14,7 +14,7 @@ import java.util.Map;
  * 工作流定义
  * <p>从 Agent.config.workflow JSON 解析的工作流结构</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Data

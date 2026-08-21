@@ -25,7 +25,7 @@ import java.util.Set;
  * <p>将沙盒中的 PDF / 图片文件解析为文本（复用知识库的 RapidOCR 引擎 {@link OcrUtil}），
  * 结果写入当前会话工作区 ocr/ 目录，仅返回结果文件路径与短预览，不直接返回完整文本。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-04
  */
 @Slf4j

@@ -8,7 +8,7 @@ import com.lengbot.entity.EvalRagResultDetail;
 /**
  * RAG 评估结果服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 public interface EvalRagResultService extends IService<EvalRagResult> {

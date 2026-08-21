@@ -9,7 +9,7 @@ import lombok.Getter;
 /**
  * Workflow 节点类型
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Getter

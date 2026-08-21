@@ -7,7 +7,7 @@ import lombok.Data;
 /**
  * Skill 文件写入请求
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 @Data

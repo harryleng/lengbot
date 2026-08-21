@@ -35,7 +35,7 @@ import java.util.UUID;
 /**
  * RAG 评估基准服务实现
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Slf4j

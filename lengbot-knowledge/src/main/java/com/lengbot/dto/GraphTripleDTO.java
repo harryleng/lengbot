@@ -6,7 +6,7 @@ import lombok.Data;
 /**
  * 图谱三元组 DTO（用于 LLM 抽取结果和手动导入）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Data

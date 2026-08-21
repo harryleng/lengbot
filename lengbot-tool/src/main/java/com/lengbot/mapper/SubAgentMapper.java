@@ -8,7 +8,7 @@ import org.apache.ibatis.annotations.Select;
 /**
  * SubAgent Mapper
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Mapper

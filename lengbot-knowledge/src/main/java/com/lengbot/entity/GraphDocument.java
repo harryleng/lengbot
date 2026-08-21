@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 /**
  * 图谱文档关联（记录每个文档的图谱抽取状态）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-30
  */
 @Data

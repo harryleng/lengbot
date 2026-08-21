@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 /**
  * 系统配置实体
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Data

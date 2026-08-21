@@ -12,7 +12,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * <p>限制 pageSize 不超过 {@link #MAX_PAGE_SIZE}，避免恶意大分页请求打 DB</p>
  * <p>同时兼容 pageNum/pageSize 缺省、非数字、负数等情况：缺省放行，非法值按上限拒绝</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Component

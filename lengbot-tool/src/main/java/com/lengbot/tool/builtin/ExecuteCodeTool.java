@@ -20,7 +20,7 @@ import java.util.Map;
  * 内置工具 — 代码执行
  * <p>在安全沙盒中执行代码片段，支持 Java、JavaScript 和 Python。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 @Slf4j

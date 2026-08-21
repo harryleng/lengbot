@@ -6,7 +6,7 @@ package com.lengbot.service.port;
  * tool 模块位于 agent 之下，不能反向依赖 AgentService，故定义此端口由 agent 层实现，
  * 保持依赖方向永远向下。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-12
  */
 public interface DefaultAgentIdProvider {

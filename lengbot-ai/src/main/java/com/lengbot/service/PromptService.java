@@ -7,7 +7,7 @@ import com.lengbot.entity.Prompt;
 /**
  * 提示词服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 public interface PromptService extends IService<Prompt> {

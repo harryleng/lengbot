@@ -8,7 +8,7 @@ import org.springframework.http.HttpStatus;
  * 业务错误码枚举
  * <p>所有业务错误信息统一管理，禁止在代码中硬编码错误字符串</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Getter

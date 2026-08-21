@@ -5,7 +5,7 @@ package com.lengbot.service.port;
  * <p>TaskService 在任务创建/状态变更时通过此端口通知上层推送最新计数，
  * 由 server 层的 SSE 控制器实现，避免下层 service 反向依赖 controller</p>
  *
- * @author finch
+ * @author lw
  */
 public interface TaskCountNotifier {
 

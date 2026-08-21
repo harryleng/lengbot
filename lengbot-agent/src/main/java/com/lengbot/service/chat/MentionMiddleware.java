@@ -30,7 +30,7 @@ import java.util.Set;
  * <p>校验通过后构建 {@link MentionScope} 写入 {@link ChatContext}，
  * 供提示词注入「优先使用」说明；不再收窄运行时工具/知识库/SubAgent 加载范围。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-29
  */
 @Slf4j

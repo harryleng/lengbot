@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * 日志监控接口，提供历史查询 + 实时 SSE 推送
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Slf4j

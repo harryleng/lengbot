@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
  * 工具调用记录表
  * <p>记录每次工具调用的输入、输出和状态</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-22
  */
 @Data

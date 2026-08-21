@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 /**
  * RAG 评估任务执行器
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Slf4j

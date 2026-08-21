@@ -12,7 +12,7 @@ import java.util.Map;
  * <p>pgvector 的 vector 类型和余弦距离运算符(&lt;=&gt;)无法通过 MyBatis-Plus 映射，
  * 因此向量相关操作使用 @Select/@Insert/@Delete 注解编写原生SQL</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Mapper

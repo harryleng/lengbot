@@ -16,7 +16,7 @@ import java.util.Map;
  * <p>统一聚合 PostgreSQL / Redis / MinIO 三方连通性，供健康检查接口和 Actuator 复用。
  * 编排逻辑下沉到 Service，Controller 仅做透传。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-19
  */
 @Slf4j

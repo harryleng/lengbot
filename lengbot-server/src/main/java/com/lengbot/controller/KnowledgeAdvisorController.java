@@ -20,7 +20,7 @@ import java.util.List;
 /**
  * 知识库 Advisor 接口：基于用户反馈聚合给出调优建议
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Slf4j

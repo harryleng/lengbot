@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * 评测实验结果服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 public interface EvalExperimentResultService extends IService<EvalExperimentResult> {

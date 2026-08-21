@@ -27,7 +27,7 @@ import java.util.*;
  *
  * <p>type 优先级：方法级别 > 类级别（默认 "builtin"）</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-17
  */
 @Slf4j

@@ -7,7 +7,7 @@ import lombok.Data;
  * <p>由对话编排层（server）在助手消息落库后构建，替代原先直接传入 ChatContext，
  * 使记忆抽取逻辑脱离 server 编排层，得以下沉至 agent 模块。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-12
  */
 @Data

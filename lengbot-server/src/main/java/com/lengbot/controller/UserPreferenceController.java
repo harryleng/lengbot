@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 用户个人配置接口
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 @Tag(name = "用户个人配置", description = "用户偏好与长期记忆开关")

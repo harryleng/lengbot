@@ -12,7 +12,7 @@ import java.util.Set;
  * 本轮 @ 提及的资源（由 {@link MentionMiddleware} 校验后构建）
  * <p>各 ID 集合用于提示词「优先使用」增强；不再收窄运行时工具/知识库/SubAgent 加载范围。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-29
  */
 @Data

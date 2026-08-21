@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
  * <p>基于 Redis 实现用户级和全局级日 Token 限额，防止滥用</p>
  * <p>Redis key 格式：lengbot:token_budget:{scope}:{id}:{date}</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 @Slf4j

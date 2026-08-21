@@ -22,7 +22,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 /**
  * 对话管道上下文，承载整个中间件链的共享状态
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Data

@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
 /**
  * 消息反馈服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-06-26
  */
 @Slf4j

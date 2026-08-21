@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
 /**
  * 文档在线编辑接口
  *
- * @author finch
+ * @author lw
  * @since 2026-06-16
  */
 @Tag(name = "文档在线编辑", description = "文档内容在线编辑、保存、重建")

@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * Mention 候选资源项
  *
- * @author finch
+ * @author lw
  * @since 2026-06-29
  */
 @Data

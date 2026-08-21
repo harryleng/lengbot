@@ -15,7 +15,7 @@ import java.util.List;
  * </ul>
  * <p>工具代码无需感知模式差异，统一调用 {@code ToolEventEmitter.emit("xxx")} 即可。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-22
  */
 public final class ToolEventEmitter {

@@ -5,7 +5,7 @@ import java.util.regex.Pattern;
 /**
  * 文本规范化工具：清理入库/检索内容中的异常换行与空白，避免干扰模型 Markdown 输出
  *
- * @author finch
+ * @author lw
  * @since 2026-05-26
  */
 public final class TextNormalizeUtil {

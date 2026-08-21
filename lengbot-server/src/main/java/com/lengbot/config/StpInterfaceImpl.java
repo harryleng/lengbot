@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * Sa-Token 角色/权限数据源：从 UserService 读取角色，供 {@code StpUtil.checkRole} 使用。
  *
- * @author finch
+ * @author lw
  * @since 2026-07-07
  */
 @Component

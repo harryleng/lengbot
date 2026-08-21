@@ -5,7 +5,7 @@ package com.lengbot.common.task;
  * <p>Worker 捕获后直接 markCancelled，不重试、不进死信。
  * 通常由 Executor 内部检测到 Redis 取消信号后抛出。
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 public class TaskCancelledException extends TaskException {

@@ -7,7 +7,7 @@ import lombok.Data;
 /**
  * MCP 工具 VO（运行时获取）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Data

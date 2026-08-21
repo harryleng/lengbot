@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 /**
  * OCR 配置属性
  *
- * @author finch
+ * @author lw
  * @since 2026-05-21
  */
 @Data

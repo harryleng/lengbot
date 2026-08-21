@@ -19,7 +19,7 @@ import java.util.Map;
 /**
  * 用户个人配置服务实现
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 @Service

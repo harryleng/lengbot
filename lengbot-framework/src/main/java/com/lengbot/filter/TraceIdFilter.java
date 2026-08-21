@@ -17,7 +17,7 @@ import java.util.UUID;
  * 同步写入 {@link MDC}（供 logback pattern {@code %X{traceId}} 引用）与响应头，前端拦截器读取后回写 sessionStorage，
  * ErrorBoundary 上报时附带，实现前后端日志关联。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-21
  */
 @Slf4j

@@ -12,7 +12,7 @@ import java.util.Map;
 /**
  * Tool 服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 public interface ToolService extends IService<Tool> {

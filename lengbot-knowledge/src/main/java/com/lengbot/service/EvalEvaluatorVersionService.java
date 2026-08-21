@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * 评测器版本服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 public interface EvalEvaluatorVersionService extends IService<EvalEvaluatorVersion> {

@@ -26,7 +26,7 @@ import java.util.Map;
 /**
  * 用户长期记忆工具回调工厂
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 @Slf4j

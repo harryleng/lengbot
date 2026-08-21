@@ -3,7 +3,7 @@ package com.lengbot.util;
 /**
  * 向量工具类：float[] 与 pgvector 字符串格式互转
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 public final class VectorUtil {

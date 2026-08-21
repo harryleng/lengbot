@@ -14,7 +14,7 @@ import java.util.function.Supplier;
  * 缓存防护工具
  * <p>封装布隆过滤器防穿透 + 分布式锁防击穿 + 随机TTL防雪崩的三层防护逻辑</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 @Slf4j

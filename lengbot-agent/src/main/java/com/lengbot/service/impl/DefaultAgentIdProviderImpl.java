@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
  * <p>由 agent 层实现 tool 层定义的 {@link DefaultAgentIdProvider} 端口，
  * 供工具测试执行时兜底解析当前用户默认 Agent，依赖方向向下。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-12
  */
 @Component

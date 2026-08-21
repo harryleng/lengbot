@@ -17,7 +17,7 @@ import java.util.Map;
 /**
  * 任务管理接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-21
  */
 @Tag(name = "任务管理", description = "任务查询、取消")

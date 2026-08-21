@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
  * 工作流执行服务
  * <p>DAG 执行引擎，从 START 节点开始，按边连接顺序执行各节点</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Slf4j

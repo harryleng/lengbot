@@ -7,7 +7,7 @@ import lombok.Data;
 /**
  * 模型提供商连通性检查请求DTO（表单实时数据）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Data

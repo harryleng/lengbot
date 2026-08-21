@@ -9,7 +9,7 @@ import lombok.extern.slf4j.Slf4j;
  * JSON 格式校验器
  * <p>校验字符串是否为合法的 JSON 对象或数组格式</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Slf4j

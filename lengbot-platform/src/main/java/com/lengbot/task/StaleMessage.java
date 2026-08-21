@@ -6,7 +6,7 @@ import lombok.Data;
 /**
  * 待回收消息（PEL 中超时未 ACK 的消息）
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Data

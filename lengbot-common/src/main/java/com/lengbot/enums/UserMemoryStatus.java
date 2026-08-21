@@ -9,7 +9,7 @@ import lombok.Getter;
 /**
  * 用户长期记忆状态
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 @Getter

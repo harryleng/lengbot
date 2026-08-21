@@ -7,7 +7,7 @@ import org.apache.ibatis.annotations.Mapper;
 /**
  * MCP Server Mapper
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Mapper

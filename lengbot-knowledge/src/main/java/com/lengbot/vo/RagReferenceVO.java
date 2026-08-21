@@ -10,7 +10,7 @@ import lombok.Data;
  * RAG检索引用信息VO
  * <p>用于在流式对话中返回检索到的文献引用信息</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-22
  */
 @Data

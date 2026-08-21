@@ -23,7 +23,7 @@ import java.util.List;
  * 知识库文档内容安全扫描（Prompt 注入检测）
  * <p>使用系统默认 AI 配置中的提供商与模型，未配置时回退到首个可用提供商。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-25
  */
 @Slf4j

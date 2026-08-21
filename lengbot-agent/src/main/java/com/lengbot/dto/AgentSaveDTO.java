@@ -10,7 +10,7 @@ import lombok.Data;
  * Agent 创建/更新请求 DTO
  * <p>仅包含用户可编辑的字段，防止客户端设置 id、userId、status 等内部字段</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 @Data

@@ -9,7 +9,7 @@ import lombok.Data;
 /**
  * 模型请求DTO
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Data

@@ -13,7 +13,7 @@ import java.util.Map;
  * 节点处理器注册中心
  * <p>自动注册所有 NodeProcessor 实现，按 NodeType 索引</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Slf4j

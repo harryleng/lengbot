@@ -7,7 +7,7 @@ import lombok.Data;
 /**
  * 远程 Skill 仓库列表请求
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 @Data

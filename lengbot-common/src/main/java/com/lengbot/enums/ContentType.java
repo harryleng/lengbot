@@ -9,7 +9,7 @@ import lombok.Getter;
 /**
  * 消息内容类型
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Getter

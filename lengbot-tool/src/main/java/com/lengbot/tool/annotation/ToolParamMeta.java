@@ -9,7 +9,7 @@ import java.lang.annotation.Target;
  * 工具参数元数据注解
  * <p>配合 Spring AI 的 @ToolParam 使用，提供额外的参数信息如示例值。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Target(ElementType.PARAMETER)

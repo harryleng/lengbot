@@ -22,7 +22,7 @@ import java.io.Serializable;
 /**
  * 提示词服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Slf4j

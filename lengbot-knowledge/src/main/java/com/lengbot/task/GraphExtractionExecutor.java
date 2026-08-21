@@ -43,7 +43,7 @@ import java.util.stream.Collectors;
 /**
  * 图谱抽取任务执行器
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Slf4j

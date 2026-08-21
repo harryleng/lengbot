@@ -8,7 +8,7 @@ import java.util.*;
  * 内置示例工作流模板定义
  * <p>9 个示例 Agent 覆盖工作流节点与工具节点（含 confirm / tool / ask_user / app_component），帮助用户快速学习</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-31
  */
 public final class WorkflowExampleTemplates {

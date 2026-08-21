@@ -10,7 +10,7 @@ import java.util.List;
  * 通用分块策略
  * <p>递归分隔符切分 + token 合并 + 重叠 + 超长硬切</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Slf4j

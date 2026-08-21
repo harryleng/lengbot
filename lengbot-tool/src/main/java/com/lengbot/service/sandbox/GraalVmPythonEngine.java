@@ -16,7 +16,7 @@ import java.util.Map;
  * EngineRegistry 自动降级到 {@link PythonEngine}（subprocess）。引入后优先级高于 subprocess 引擎</p>
  * <p>已知限制：GraalPy 对 numpy/pandas/scipy 等需要 C 扩展的库兼容性差，依赖这些库的场景请保留 subprocess PythonEngine</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Slf4j

@@ -22,7 +22,7 @@ import java.util.Map;
 /**
  * 重排序工具类（封装 DashScope Rerank API）
  *
- * @author finch
+ * @author lw
  * @since 2026-06-16
  */
 @Slf4j

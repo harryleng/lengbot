@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 /**
  * 对话会话表
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Data

@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 /**
  * 低分分块 VO（点踩较多的分块，需关注）
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Data

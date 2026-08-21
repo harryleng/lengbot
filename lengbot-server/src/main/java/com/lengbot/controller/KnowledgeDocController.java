@@ -30,7 +30,7 @@ import java.util.List;
 /**
  * 知识库文档管理接口
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 @Tag(name = "知识库文档管理", description = "文档上传、入库、预览、下载、分块查看")

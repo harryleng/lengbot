@@ -8,7 +8,7 @@ import java.util.Map;
 /**
  * 工具调用记录 Service
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 public interface ToolCallService extends IService<ToolCall> {

@@ -9,7 +9,7 @@ import lombok.Getter;
 /**
  * MCP Server 安装方式
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Getter

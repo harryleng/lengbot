@@ -9,7 +9,7 @@ import java.util.List;
  * 沙箱路径安全校验工具
  * <p>防止路径遍历攻击（..），并校验读写白名单。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 public final class SandboxPathValidator {

@@ -6,7 +6,7 @@ import lombok.Data;
 /**
  * 任务消息（Stream 消息体解析结果）
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Data

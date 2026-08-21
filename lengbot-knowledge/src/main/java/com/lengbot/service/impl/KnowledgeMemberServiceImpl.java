@@ -19,7 +19,7 @@ import java.util.stream.Collectors;
 /**
  * 知识库成员服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Service

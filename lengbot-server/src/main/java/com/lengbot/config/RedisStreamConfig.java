@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Configuration;
  * <p>应用启动时幂等创建 main stream 的两个消费组（cg:default / cg:heavy），
  * BUSYGROUP 错误由 TaskQueueServiceImpl 内部吞掉。
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Slf4j

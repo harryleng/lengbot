@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 /**
  * SubAgent 对外工具门面；编排、查询和取消逻辑均委托给 {@link SubAgentTaskService}。
  *
- * @author finch
+ * @author lw
  * @since 2026-07-10
  */
 @Component

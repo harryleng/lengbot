@@ -20,7 +20,7 @@ import java.util.Map;
 /**
  * 系统配置接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Tag(name = "系统配置", description = "全局系统配置管理")

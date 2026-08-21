@@ -8,7 +8,7 @@ import java.util.*;
  * 内置示例评估器模板定义
  * <p>提供 4 个常见评估场景的示例评估器，帮助用户快速创建评估器并学习评估 Prompt 的编写方式</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-19
  */
 public final class EvalEvaluatorExampleTemplates {

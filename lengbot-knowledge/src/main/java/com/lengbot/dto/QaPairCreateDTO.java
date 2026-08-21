@@ -8,7 +8,7 @@ import lombok.Data;
 /**
  * 问答对创建DTO
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Data

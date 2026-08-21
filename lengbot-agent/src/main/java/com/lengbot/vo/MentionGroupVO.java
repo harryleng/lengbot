@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * Mention 候选分组
  *
- * @author finch
+ * @author lw
  * @since 2026-06-29
  */
 @Data

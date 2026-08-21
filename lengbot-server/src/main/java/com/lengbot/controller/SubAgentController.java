@@ -21,7 +21,7 @@ import java.util.List;
 /**
  * SubAgent 管理接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Tag(name = "SubAgent管理", description = "子智能体的增删改查")

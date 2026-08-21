@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * Skill 文件树节点
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 @Data

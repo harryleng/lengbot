@@ -16,7 +16,7 @@ import java.util.Map;
 /**
  * API Key 管理接口
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 @Tag(name = "API Key管理")

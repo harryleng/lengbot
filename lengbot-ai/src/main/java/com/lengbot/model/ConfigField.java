@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * 配置字段描述，用于前端动态渲染表单
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Data

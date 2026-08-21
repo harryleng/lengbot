@@ -9,7 +9,7 @@ import lombok.Data;
 /**
  * 模型提供商预设 VO
  *
- * @author finch
+ * @author lw
  * @since 2026-06-27
  */
 @Data

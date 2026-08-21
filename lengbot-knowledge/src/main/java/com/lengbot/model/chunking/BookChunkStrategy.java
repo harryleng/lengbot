@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
  * 书籍分块策略
  * <p>识别 Markdown 标题和中文章节标题，按层级拆分，合并短段落</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Slf4j

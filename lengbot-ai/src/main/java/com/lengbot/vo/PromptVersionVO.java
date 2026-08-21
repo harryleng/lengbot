@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 /**
  * Prompt版本详情 VO
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Data

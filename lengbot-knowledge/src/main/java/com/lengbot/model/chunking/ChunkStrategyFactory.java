@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
 /**
  * 分块策略工厂
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Slf4j

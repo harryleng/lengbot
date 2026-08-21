@@ -12,7 +12,7 @@ import lombok.Data;
  *   <li>图片/PDF/二进制：返回 {@code previewUrl}（预签名）+ {@code previewType}</li>
  * </ul>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-30
  */
 @Data

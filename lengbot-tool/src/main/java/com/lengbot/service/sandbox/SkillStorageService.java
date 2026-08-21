@@ -32,7 +32,7 @@ import java.util.zip.ZipOutputStream;
  * Skill 文件存储服务
  * <p>封装 MinIO 上 skills/ 目录的读写、SKILL.md frontmatter 解析、ZIP 导入导出。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 @Slf4j

@@ -47,7 +47,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>幂等性：markFailed 通过状态 CAS（仅 RUNNING → FAILED）保证重复扫描不会误改终态任务。
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Slf4j

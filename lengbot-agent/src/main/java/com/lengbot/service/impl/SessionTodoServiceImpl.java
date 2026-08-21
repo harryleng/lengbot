@@ -16,7 +16,7 @@ import java.util.List;
 /**
  * 会话待办服务实现：从消息工具事件恢复 todos 快照。
  *
- * @author finch
+ * @author lw
  * @since 2026-07-17
  */
 @Slf4j

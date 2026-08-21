@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 任务事件 SSE 推送，实时通知前端运行中任务数量变化
  * <p>任务创建/状态变更时由 TaskServiceImpl 主动触发推送</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-21
  */
 @Slf4j

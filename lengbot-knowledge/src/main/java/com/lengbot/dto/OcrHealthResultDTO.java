@@ -7,7 +7,7 @@ import lombok.Data;
 /**
  * OCR 健康检查结果
  *
- * @author finch
+ * @author lw
  * @since 2026-05-21
  */
 @Data

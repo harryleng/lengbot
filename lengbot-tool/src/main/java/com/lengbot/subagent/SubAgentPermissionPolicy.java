@@ -22,7 +22,7 @@ import java.util.Set;
  * {@code subagentDangerous=true} 标记危险工具，除非同时声明
  * {@code subagentDangerAllowed=true}。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 @Slf4j

@@ -7,7 +7,7 @@ import com.lengbot.util.SessionStoragePath;
  *
  * @param type         路径类型
  * @param relativePath 相对路径（不含类型前缀）
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 public record SandboxPath(PathType type, String relativePath) {

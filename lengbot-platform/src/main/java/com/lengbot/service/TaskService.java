@@ -11,7 +11,7 @@ import java.util.Map;
 /**
  * 任务队列服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-21
  */
 public interface TaskService extends IService<Task> {

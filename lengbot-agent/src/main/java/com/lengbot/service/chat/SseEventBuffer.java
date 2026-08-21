@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit;
  * SSE 事件缓冲：为每个请求缓存最近事件，支持断线重连时重放
  * <p>使用 Caffeine Cache 替代无界 ConcurrentHashMap，自动管理大小上限和过期清理</p>
  *
- * @author finch
+ * @author lw
  */
 @Slf4j
 @Component

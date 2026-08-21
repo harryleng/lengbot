@@ -9,7 +9,7 @@ import lombok.Getter;
 /**
  * 任务状态
  *
- * @author finch
+ * @author lw
  * @since 2026-05-21
  */
 @Getter

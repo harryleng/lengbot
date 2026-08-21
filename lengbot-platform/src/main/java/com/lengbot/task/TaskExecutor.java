@@ -5,7 +5,7 @@ import com.lengbot.entity.Task;
 /**
  * 任务执行器接口，每个 TaskType 对应一个 @Component 实现
  *
- * @author finch
+ * @author lw
  * @since 2026-05-21
  */
 public interface TaskExecutor {

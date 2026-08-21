@@ -13,7 +13,7 @@ import java.util.*;
 /**
  * 文档内容重复检测工具（N-gram Shingling + Jaccard 相似度）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-30
  */
 @Slf4j

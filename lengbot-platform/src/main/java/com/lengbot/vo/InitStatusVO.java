@@ -7,7 +7,7 @@ import lombok.Data;
 /**
  * 系统初始化状态VO
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 @Data

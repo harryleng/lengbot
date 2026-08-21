@@ -19,7 +19,7 @@ import java.util.List;
 /**
  * 会话待办查询接口（只读）。
  *
- * @author finch
+ * @author lw
  * @since 2026-07-17
  */
 @Tag(name = "会话待办", description = "AI 写入的待办列表查询")

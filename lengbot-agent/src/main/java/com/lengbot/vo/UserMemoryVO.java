@@ -17,7 +17,7 @@ import java.util.List;
 /**
  * 用户长期记忆响应
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 @Data

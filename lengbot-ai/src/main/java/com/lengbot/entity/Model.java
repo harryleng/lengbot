@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 /**
  * 模型表
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Data

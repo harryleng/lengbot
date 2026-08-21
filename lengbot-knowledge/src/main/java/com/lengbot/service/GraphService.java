@@ -9,7 +9,7 @@ import java.util.Map;
 /**
  * 知识图谱服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 public interface GraphService {

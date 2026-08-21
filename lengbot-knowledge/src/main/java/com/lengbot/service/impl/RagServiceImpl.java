@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
  * RAG 检索增强生成服务实现类
  * <p>流程：问题向量化 -> 相似度检索 -> 构建上下文 -> 调用模型生成回答</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Slf4j

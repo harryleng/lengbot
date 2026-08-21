@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
  * Nashorn JavaScript 引擎
  * <p>安全级别 L2：ClassFilter + 超时控制。GraalVM 不可用时的降级方案。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 @Slf4j

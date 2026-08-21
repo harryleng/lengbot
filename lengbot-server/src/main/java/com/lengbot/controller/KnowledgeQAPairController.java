@@ -17,7 +17,7 @@ import java.util.List;
 /**
  * 知识库问答对管理接口
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 @Tag(name = "知识库问答对管理", description = "问答对CRUD、批量导入、AI生成、向量化")

@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 /**
  * 休眠分块 VO（长期未被检索命中的分块）
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Data

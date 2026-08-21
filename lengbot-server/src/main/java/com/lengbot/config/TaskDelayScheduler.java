@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>典型场景：RetryableTaskException 触发后，任务进延迟队列退避等待重试。
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Slf4j

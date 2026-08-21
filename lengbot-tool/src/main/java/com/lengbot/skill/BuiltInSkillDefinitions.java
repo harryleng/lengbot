@@ -10,7 +10,7 @@ import java.util.List;
  * <p>新增内置 Skill 时仅需在 {@link #list()} 中追加一条 Definition，
  * {@link BuiltInSkillRegistrar} 启动时会按 content_hash 同步到数据库。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 public final class BuiltInSkillDefinitions {

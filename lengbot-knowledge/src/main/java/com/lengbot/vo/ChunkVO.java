@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 /**
  * 分块详情 VO（含向量化状态）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Data

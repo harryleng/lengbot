@@ -8,7 +8,7 @@ import lombok.Getter;
 /**
  * 分块向量化状态枚举
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Getter

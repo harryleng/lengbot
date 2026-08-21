@@ -44,7 +44,7 @@ import java.util.stream.Collectors;
 /**
  * Tool 服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Slf4j

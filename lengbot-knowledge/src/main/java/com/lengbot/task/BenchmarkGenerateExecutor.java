@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
 /**
  * AI 生成评估基准任务执行器
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Slf4j

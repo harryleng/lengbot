@@ -20,7 +20,7 @@ import java.util.Map;
  * 启动时初始化默认模型提供商
  * <p>检测数据库中是否已存在对应类型的提供商，不存在则新建（状态为禁用，apiKey 留空待用户填写）</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-26
  */
 @Slf4j

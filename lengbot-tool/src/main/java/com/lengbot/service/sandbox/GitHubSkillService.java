@@ -30,7 +30,7 @@ import java.util.zip.ZipInputStream;
  * GitHub 远程 Skill 安装服务
  * <p>通过 GitHub REST API 浏览仓库中的 Skill、下载 ZIP 并暂存为草稿。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 @Slf4j

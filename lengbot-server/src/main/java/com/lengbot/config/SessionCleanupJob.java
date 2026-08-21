@@ -23,7 +23,7 @@ import java.util.Map;
  * 默认每天凌晨 3 点执行一次，保留天数由 {@code lengbot.session-cleanup.retention-days} 配置。</p>
  * <p>仅清理「已归档」会话，活跃会话不动，避免误删用户进行中的对话。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-08-20
  */
 @Slf4j

@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
  * QA 问答对分块策略
  * <p>识别 Q:/A:、问题/答案、编号问题等模式，保持问答对完整性</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Slf4j

@@ -26,7 +26,7 @@ import static com.lengbot.service.chat.ToolEventGenerator.*;
  * 工作流中间件
  * <p>WORKFLOW 类型 Agent 执行工作流 DAG，跳过后续 LLM 中间件</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Slf4j

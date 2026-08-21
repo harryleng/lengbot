@@ -15,7 +15,7 @@ import java.util.Map;
  * 解决 Nashorn (JDK15+ 移除) 与 ES5 语法限制问题。GraalVM 依赖未引入时
  * {@link GraalVmSandbox#isLanguageAvailable(String)} 返回 false，EngineRegistry 自动降级到 Nashorn</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Slf4j

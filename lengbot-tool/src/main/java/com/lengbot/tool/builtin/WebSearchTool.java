@@ -25,7 +25,7 @@ import java.util.Map;
  * 系统内置工具 — 联网搜索（Tavily API）
  * <p>通过 Tavily API 搜索互联网获取最新信息</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-22
  */
 @Slf4j

@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * OCR 服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-21
  */
 @Tag(name = "OCR服务", description = "OCR健康检查和模型管理")

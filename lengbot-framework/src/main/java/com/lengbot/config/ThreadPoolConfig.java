@@ -12,7 +12,7 @@ import java.util.concurrent.ThreadPoolExecutor;
  * <p>替代各 Service 中散落的 newCachedThreadPool / newFixedThreadPool，
  * 集中管理线程资源，防止高并发下线程数失控。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 @Configuration

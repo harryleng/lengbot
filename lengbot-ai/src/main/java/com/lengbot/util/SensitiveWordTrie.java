@@ -10,7 +10,7 @@ import java.util.Map;
  * 相比每条词独立 Pattern.compile 的 O(n * m) 实现，5000 词字典下耗时从 800ms+ 降到 &lt;1ms。</p>
  * <p>大小写不敏感（构建时词与文本均 toLowerCase），匹配返回最长词；中文直接按字符匹配无需特殊处理。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 class SensitiveWordTrie {

@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 /**
  * 评测实验结果服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Slf4j

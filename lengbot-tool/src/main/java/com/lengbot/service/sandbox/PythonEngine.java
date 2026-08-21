@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
  * Python 代码执行引擎（ProcessBuilder 子进程方式）
  * <p>安全级别 L4：OS 进程隔离，天然沙盒。依赖宿主机安装 Python 3。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 @Slf4j

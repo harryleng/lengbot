@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>封装 SseEmitter 创建、Reactor 订阅、心跳/事件 ID/事件缓冲、断连清理等公共编排，
  * 让 Controller 仅做参数透传 + 返回 SseEmitter。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-19
  */
 @Slf4j

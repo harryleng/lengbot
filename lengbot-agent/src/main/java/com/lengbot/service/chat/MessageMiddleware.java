@@ -55,7 +55,7 @@ import java.util.Map;
 /**
  * 消息构建中间件：保存用户消息、构建消息列表（含系统提示词+工具引导+历史+摘要）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Slf4j

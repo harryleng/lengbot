@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * MCP 客户端服务：连接管理、工具发现、工具转回调
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 public interface McpClientService {

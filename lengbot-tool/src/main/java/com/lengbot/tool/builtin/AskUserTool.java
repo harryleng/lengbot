@@ -19,7 +19,7 @@ import java.util.Map;
  * 内置工具 — 向用户提问。
  * <p>兼容单题参数，并支持一次收集最多五个独立问题的回答。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-17
  */
 @Slf4j

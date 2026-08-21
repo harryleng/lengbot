@@ -19,7 +19,7 @@ import java.util.Map;
 /**
  * 知识库RAG问答接口
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 @Tag(name = "知识库RAG问答", description = "基于知识库的RAG问答、检索测试")

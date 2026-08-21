@@ -6,7 +6,7 @@ import lombok.Data;
 /**
  * SSE 断线重连请求
  *
- * @author finch
+ * @author lw
  */
 @Data
 public class ReconnectDTO {

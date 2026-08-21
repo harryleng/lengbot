@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>XINFO CONSUMERS 只能看到聚合后一条记录，因此 XPENDING 是观察堆积的主要入口。
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Slf4j

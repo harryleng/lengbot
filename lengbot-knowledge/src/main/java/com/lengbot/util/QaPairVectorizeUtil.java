@@ -16,7 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 问答对向量化辅助类（独立事务，避免向量化失败污染批量导入事务）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Slf4j

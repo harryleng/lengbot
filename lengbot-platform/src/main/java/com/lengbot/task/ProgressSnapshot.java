@@ -7,7 +7,7 @@ import lombok.NoArgsConstructor;
 /**
  * 任务进度快照（Redis Hash 缓存读出）
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Data

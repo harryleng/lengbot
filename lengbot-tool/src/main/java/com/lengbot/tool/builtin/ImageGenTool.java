@@ -29,7 +29,7 @@ import java.util.UUID;
  * 系统内置工具 — AI 文生图（SiliconFlow API）
  * <p>根据文字描述生成图片，使用 Qwen-Image 模型</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-22
  */
 @Slf4j

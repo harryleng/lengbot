@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * 分块策略接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 public interface ChunkStrategy {

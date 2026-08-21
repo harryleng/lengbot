@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 /**
  * 向量表
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Data

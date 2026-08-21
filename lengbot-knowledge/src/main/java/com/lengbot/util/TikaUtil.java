@@ -39,7 +39,7 @@ import java.util.UUID;
  * <p>支持 PDF、DOC、DOCX、PPT、PPTX、XLS、XLSX、TXT、MD、HTML、CSV 等格式</p>
  * <p>使用 Spring AI 的 TikaDocumentReader（Tika 3.2.3）统一解析所有格式</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Slf4j

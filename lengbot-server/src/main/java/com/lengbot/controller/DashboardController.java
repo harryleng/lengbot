@@ -15,7 +15,7 @@ import java.util.Map;
 /**
  * Dashboard统计接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Tag(name = "Dashboard", description = "平台统计概览")

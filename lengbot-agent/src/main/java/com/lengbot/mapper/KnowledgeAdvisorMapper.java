@@ -13,7 +13,7 @@ import java.util.Map;
  * ragReferences 中 chunkId/knowledgeId 因前端 ToStringSerializer 序列化为字符串，
  * SQL 中以 ->> 取文本后再 ::bigint 转换</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Mapper

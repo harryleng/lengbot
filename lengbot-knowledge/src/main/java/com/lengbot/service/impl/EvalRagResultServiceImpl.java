@@ -33,7 +33,7 @@ import java.util.Map;
 /**
  * RAG 评估结果服务实现
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Slf4j

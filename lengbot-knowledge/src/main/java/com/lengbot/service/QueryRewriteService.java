@@ -18,7 +18,7 @@ import java.util.List;
  * 查询改写服务：将用户原始问题改写为更适合知识库检索的查询
  * <p>短查询、模糊查询、代词引用等场景下，改写后能显著提升向量检索召回率。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-26
  */
 @Slf4j

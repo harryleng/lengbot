@@ -30,7 +30,7 @@ import java.util.Set;
 /**
  * 文档在线编辑服务实现
  *
- * @author finch
+ * @author lw
  * @since 2026-06-16
  */
 @Slf4j

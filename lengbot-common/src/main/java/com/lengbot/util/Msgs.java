@@ -12,7 +12,7 @@ import java.util.stream.Collectors;
  * AgentScope 消息工具类
  * <p>提供 Spring AI 风格的消息创建和转换便捷方法，减少项目中各处重复的转换代码</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-08-01
  */
 public final class Msgs {

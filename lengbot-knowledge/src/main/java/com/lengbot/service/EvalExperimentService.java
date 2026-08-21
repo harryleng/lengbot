@@ -9,7 +9,7 @@ import com.lengbot.entity.Task;
 /**
  * 评测实验服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 public interface EvalExperimentService extends IService<EvalExperiment> {

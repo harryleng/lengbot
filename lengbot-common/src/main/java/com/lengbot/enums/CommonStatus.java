@@ -9,7 +9,7 @@ import lombok.Getter;
 /**
  * 通用状态（模型提供商、知识库、Tool、Skill 共用）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Getter

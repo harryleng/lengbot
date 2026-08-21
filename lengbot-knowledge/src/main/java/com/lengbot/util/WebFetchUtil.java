@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
 /**
  * Web URL 内容抓取工具（多策略正文提取 + 预览 HTML）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Slf4j

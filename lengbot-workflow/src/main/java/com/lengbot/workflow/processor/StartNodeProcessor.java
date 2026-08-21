@@ -15,7 +15,7 @@ import java.util.Map;
  * 开始节点处理器
  * <p>工作流的入口节点，将用户输入传递给下一个节点</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Component

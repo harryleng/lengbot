@@ -58,7 +58,7 @@ import java.util.Map;
 /**
  * 知识库服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Slf4j

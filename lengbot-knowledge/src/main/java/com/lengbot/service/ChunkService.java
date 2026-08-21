@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * 文档分块服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 public interface ChunkService extends IService<Chunk> {

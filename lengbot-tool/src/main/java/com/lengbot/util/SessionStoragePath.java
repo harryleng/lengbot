@@ -15,7 +15,7 @@ import java.util.Locale;
  * └── workspace/              # Agent 沙盒工作区（sandbox_write_file / execute_code）
  * </pre>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-30
  */
 public final class SessionStoragePath {

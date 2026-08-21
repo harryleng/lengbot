@@ -7,7 +7,7 @@ import java.util.List;
 /**
  * Skill ZIP 导入预览 DTO
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 @Data

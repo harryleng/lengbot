@@ -21,7 +21,7 @@ import java.util.Set;
  * <p>支持的 Schema 子集（覆盖 ToolRegistrar 生成 + API Tool 自定义场景的 95%）：
  * type/required/properties/enum/items；不支持 $ref、oneOf 等高级特性</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Slf4j

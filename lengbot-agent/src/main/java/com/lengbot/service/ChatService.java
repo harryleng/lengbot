@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * AI对话服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 public interface ChatService {

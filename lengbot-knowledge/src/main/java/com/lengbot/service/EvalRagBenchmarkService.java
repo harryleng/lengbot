@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * RAG 评估基准服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 public interface EvalRagBenchmarkService extends IService<EvalRagBenchmark> {

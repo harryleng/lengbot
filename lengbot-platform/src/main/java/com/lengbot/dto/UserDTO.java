@@ -15,7 +15,7 @@ import java.time.LocalDateTime;
 /**
  * 用户响应DTO
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Data

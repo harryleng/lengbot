@@ -37,7 +37,7 @@ import java.util.stream.Collectors;
 /**
  * 用户服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Slf4j

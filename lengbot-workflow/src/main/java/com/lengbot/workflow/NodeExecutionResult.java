@@ -11,7 +11,7 @@ import java.util.Map;
  * 工作流节点执行结果
  * <p>节点执行完成后返回的结果，包含下一个节点ID和本节点输出</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Data

@@ -37,7 +37,7 @@ import java.util.Map;
  * <p>作为最外层中间件，通过包裹下游 Flux 的 doOnComplete/doOnError 实现后置处理。
  * AI 回复持久化已移至 ChatServiceImpl.buildDoneEvent（[DONE] 之前执行）。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Slf4j

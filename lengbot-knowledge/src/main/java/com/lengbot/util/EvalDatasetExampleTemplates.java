@@ -8,7 +8,7 @@ import java.util.*;
  * 内置示例评测集模板定义
  * <p>提供 4 个常见评测场景的示例数据集，帮助用户快速创建评测集</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-17
  */
 public final class EvalDatasetExampleTemplates {

@@ -7,7 +7,7 @@ import com.lengbot.vo.SessionFileTreeResponseVO;
  * 会话文件服务：基于 MinIO 扫描的懒加载目录树 / 内容预览 / 下载 / 删除。
  * <p>参考 Yuxi viewer_filesystem_service。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-30
  */
 public interface SessionFileService {

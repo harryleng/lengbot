@@ -15,7 +15,7 @@ import java.util.Map;
  * 模型提供商 ID 解析器
  * 统一各处 providerId 解析逻辑，优先级：显式指定 > Agent配置 > 系统默认 > 第一个可用
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 @Slf4j

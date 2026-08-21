@@ -10,7 +10,7 @@ import lombok.Data;
 /**
  * AI 生成评估基准请求
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Data

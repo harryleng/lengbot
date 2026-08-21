@@ -5,7 +5,7 @@ import lombok.Data;
 /**
  * 分块参数
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Data

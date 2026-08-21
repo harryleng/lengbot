@@ -8,7 +8,7 @@ import lombok.Getter;
 /**
  * API Key 权限枚举
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 @Getter

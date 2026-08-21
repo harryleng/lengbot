@@ -15,7 +15,7 @@ import java.util.List;
 /**
  * 独立知识图谱接口（全局，不关联知识库）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Tag(name = "独立知识图谱", description = "全局知识图谱，JSONL导入、语义搜索、节点/边CRUD")

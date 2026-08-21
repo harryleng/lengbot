@@ -11,7 +11,7 @@ import java.util.Map;
  * RAG 参数解析器
  * 统一各处 RAG 参数解析逻辑，优先级：overrides > queryParams > config > 默认值
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 @Slf4j

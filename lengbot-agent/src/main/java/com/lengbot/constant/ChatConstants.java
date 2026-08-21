@@ -3,7 +3,7 @@ package com.lengbot.constant;
 /**
  * 对话运行时通用常量
  *
- * @author finch
+ * @author lw
  * @since 2026-06-30
  */
 public final class ChatConstants {

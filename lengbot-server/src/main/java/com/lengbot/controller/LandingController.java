@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 /**
  * Landing 页面接口
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 @Tag(name = "Landing", description = "Landing 页面配置")

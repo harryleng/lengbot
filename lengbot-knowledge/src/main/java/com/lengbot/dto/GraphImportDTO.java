@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * 图谱批量导入请求
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Data

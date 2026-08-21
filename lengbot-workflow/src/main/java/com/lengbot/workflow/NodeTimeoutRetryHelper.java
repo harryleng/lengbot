@@ -14,7 +14,7 @@ import java.util.concurrent.TimeoutException;
  * 节点超时与重试辅助类
  * <p>从 nodeData 中提取连接/响应超时与重试配置，包装节点执行逻辑</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-26
  */
 @Slf4j

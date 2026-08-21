@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * 对话会话服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 public interface ChatSessionService extends IService<ChatSession> {

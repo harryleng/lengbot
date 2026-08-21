@@ -9,7 +9,7 @@ import lombok.Data;
 /**
  * 文档入库请求DTO
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Data

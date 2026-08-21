@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * LLM调用链Span数据
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Data

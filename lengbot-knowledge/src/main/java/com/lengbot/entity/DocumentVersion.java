@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 /**
  * 文档版本历史实体
  *
- * @author finch
+ * @author lw
  * @since 2026-06-17
  */
 @Data

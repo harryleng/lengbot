@@ -21,7 +21,7 @@ import java.util.Map;
  * 内置工具 — 读取技能
  * <p>读取指定 Skill 的 SKILL.md 全文，触发懒激活。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 @Slf4j

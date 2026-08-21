@@ -26,7 +26,7 @@ import java.util.List;
 /**
  * 评估器管理接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Tag(name = "评估器管理", description = "评估器的增删改查及版本管理")

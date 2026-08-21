@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
 /**
  * 知识图谱服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Slf4j

@@ -8,7 +8,7 @@ import lombok.Getter;
 /**
  * 问答对来源枚举
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Getter

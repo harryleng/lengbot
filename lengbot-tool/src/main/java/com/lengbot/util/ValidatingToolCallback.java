@@ -14,7 +14,7 @@ import reactor.core.publisher.Mono;
  * <p>包装原始 {@link ToolBase}，在 callAsync 前用 {@link ToolInputSchemaValidator} 校验入参，
  * 校验失败时返回结构化错误 JSON 回喂给 LLM 触发重试，避免非法参数进入工具导致 NPE 或脏数据</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Slf4j

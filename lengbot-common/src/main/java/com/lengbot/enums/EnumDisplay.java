@@ -3,7 +3,7 @@ package com.lengbot.enums;
 /**
  * 枚举展示接口，统一枚举的 code 和 desc 获取方式
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 public interface EnumDisplay {

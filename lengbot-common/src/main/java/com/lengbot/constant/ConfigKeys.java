@@ -4,7 +4,7 @@ package com.lengbot.constant;
  * JSONB config 字段的 key 常量
  * 避免在业务代码中使用魔法值
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 public final class ConfigKeys {

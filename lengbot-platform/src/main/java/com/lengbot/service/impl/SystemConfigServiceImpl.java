@@ -20,7 +20,7 @@ import java.io.Serializable;
 /**
  * 系统配置服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Slf4j

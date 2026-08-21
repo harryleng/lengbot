@@ -25,7 +25,7 @@ import java.util.Map;
  * 内置工具 — 知识库操作工具集
  * <p>提供列出知识库、获取思维导图、打开文档原文等能力</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-17
  */
 @Slf4j

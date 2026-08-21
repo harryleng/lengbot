@@ -7,7 +7,7 @@ import lombok.Data;
 /**
  * 会话文件统计。
  *
- * @author finch
+ * @author lw
  * @since 2026-06-30
  */
 @Data

@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
 /**
  * 文档分块服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Service

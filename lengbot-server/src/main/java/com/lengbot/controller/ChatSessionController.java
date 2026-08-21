@@ -24,7 +24,7 @@ import java.util.List;
 /**
  * 对话会话管理接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Tag(name = "对话会话管理", description = "对话会话的增删改查")

@@ -10,7 +10,7 @@ import lombok.Data;
 /**
  * 会话附件视图对象（会话级附件列表返回）
  *
- * @author finch
+ * @author lw
  * @since 2026-06-29
  */
 @Data

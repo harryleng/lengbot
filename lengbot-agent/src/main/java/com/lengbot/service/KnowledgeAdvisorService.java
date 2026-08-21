@@ -16,7 +16,7 @@ import java.util.List;
  * </ul>
  * 数据来源：message.metadata.ragReferences 关联 message_feedback</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 public interface KnowledgeAdvisorService {

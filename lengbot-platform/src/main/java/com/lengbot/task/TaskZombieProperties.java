@@ -26,7 +26,7 @@ import java.util.Map;
  *         QA_PAIR_GENERATE: 30
  * </pre>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Slf4j

@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
  * 知识库 Advisor 服务实现
  * <p>聚合 message_feedback 反馈数据，结合 chunk 表生成调优建议</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Slf4j

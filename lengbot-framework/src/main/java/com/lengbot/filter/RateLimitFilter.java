@@ -19,7 +19,7 @@ import java.io.IOException;
  * 接口速率限制过滤器
  * <p>基于 Redis INCR + TTL 实现滑动窗口计数，超限返回 429</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 @Slf4j

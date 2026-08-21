@@ -22,7 +22,7 @@ import static com.lengbot.service.chat.ToolEventGenerator.STATUS_PREFIX;
  * </ul>
  * 落库完成后置 ctx.sensitiveUserBlocked=true，让 buildDoneEvent 跳过常规 AI 落库流程</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Slf4j

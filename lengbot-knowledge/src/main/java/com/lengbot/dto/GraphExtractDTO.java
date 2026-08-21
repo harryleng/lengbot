@@ -9,7 +9,7 @@ import java.util.Map;
 /**
  * 图谱抽取请求
  *
- * @author finch
+ * @author lw
  * @since 2026-06-15
  */
 @Data

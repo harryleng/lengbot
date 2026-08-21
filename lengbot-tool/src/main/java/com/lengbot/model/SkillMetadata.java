@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * SKILL.md frontmatter 解析后的结构化数据
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 @Data

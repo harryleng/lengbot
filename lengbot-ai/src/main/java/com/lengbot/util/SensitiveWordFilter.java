@@ -14,7 +14,7 @@ import java.util.Map;
  * <p>底层基于 {@link SensitiveWordTrie} DFA 单次扫描，5000 词字典下耗时 &lt;1ms；
  * 流式场景由 {@link StreamState} 持有累积文本跨 chunk 复用过滤结果</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Slf4j

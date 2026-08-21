@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * 提示词构建模板服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Slf4j

@@ -20,7 +20,7 @@ import java.util.Map;
  * <p>暴露 Stream/ZSet/PEL 关键计数，便于线上排队堆积、消费延迟、死信累积的运维观测。
  * 通过 Sa-Token {@code StpUtil.checkRole} 强制 ADMIN 角色访问。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Tag(name = "任务队列监控", description = "Stream / PEL / 死信 / 延迟队列运行时指标（仅管理员）")

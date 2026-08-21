@@ -24,7 +24,7 @@ import java.util.List;
 /**
  * 用户长期记忆接口
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 @Tag(name = "用户长期记忆", description = "查看、编辑和管理用户长期记忆")

@@ -7,7 +7,7 @@ import lombok.Data;
 /**
  * 聊天请求中的 mention 项（用户 @ 提及的资源）
  *
- * @author finch
+ * @author lw
  * @since 2026-06-29
  */
 @Data

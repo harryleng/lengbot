@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
  * Token 计数工具
  * <p>中英混合文本的近似 token 计算：中文按字计数，英文按单词计数</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 public final class TokenUtil {

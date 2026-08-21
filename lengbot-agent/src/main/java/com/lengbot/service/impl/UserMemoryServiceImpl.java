@@ -39,7 +39,7 @@ import java.util.concurrent.Executor;
 /**
  * 用户长期记忆服务实现
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 @Slf4j

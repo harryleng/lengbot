@@ -9,7 +9,7 @@ import java.io.InputStream;
 /**
  * 文档流式下载VO
  *
- * @author finch
+ * @author lw
  * @since 2026-06-17
  */
 @Data

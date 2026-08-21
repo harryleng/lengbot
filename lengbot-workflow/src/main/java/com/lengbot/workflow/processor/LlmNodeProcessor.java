@@ -37,7 +37,7 @@ import java.util.stream.Collectors;
  * LLM节点处理器
  * <p>调用大模型生成响应，支持流式输出和对话记忆</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Slf4j

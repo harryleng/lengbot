@@ -17,7 +17,7 @@ import java.util.Map;
  * API 工具回调：将数据库中定义的 API 工具包装为 AgentScope ToolBase
  * <p>Agent 对话时 LLM 可直接调用此工具发起 HTTP 请求</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 @Slf4j

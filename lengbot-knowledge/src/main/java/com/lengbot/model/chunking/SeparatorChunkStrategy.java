@@ -10,7 +10,7 @@ import java.util.List;
  * 严格分隔策略
  * <p>遇分隔符即切分，仅超长片段内部按 token 硬切，不做合并</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Slf4j

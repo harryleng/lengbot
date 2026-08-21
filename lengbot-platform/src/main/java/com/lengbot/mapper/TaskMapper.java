@@ -7,7 +7,7 @@ import org.apache.ibatis.annotations.Mapper;
 /**
  * 任务队列 Mapper
  *
- * @author finch
+ * @author lw
  * @since 2026-05-21
  */
 @Mapper

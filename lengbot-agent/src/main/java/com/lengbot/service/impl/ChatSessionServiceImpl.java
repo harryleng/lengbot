@@ -42,7 +42,7 @@ import java.util.HashSet;
 /**
  * 对话会话服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Slf4j

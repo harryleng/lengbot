@@ -16,7 +16,7 @@ import java.util.Map;
  * 条件分支节点处理器
  * <p>支持 conditionGroups（条件组 + 规则）与画布出口 sourceHandle 联动</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Slf4j

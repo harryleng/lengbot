@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * Agent mention 候选资源聚合响应
  *
- * @author finch
+ * @author lw
  * @since 2026-06-29
  */
 @Data

@@ -26,7 +26,7 @@ import java.util.List;
 /**
  * 问答对AI生成任务执行器
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Slf4j

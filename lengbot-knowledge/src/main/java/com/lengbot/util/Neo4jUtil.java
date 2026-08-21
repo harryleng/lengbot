@@ -20,7 +20,7 @@ import java.util.*;
  * <p>封装 Neo4j Driver 操作，供 GraphService 调用</p>
  * <p>懒加载：首次使用时才初始化 Driver，无 Neo4j 服务时不影响项目启动</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Slf4j

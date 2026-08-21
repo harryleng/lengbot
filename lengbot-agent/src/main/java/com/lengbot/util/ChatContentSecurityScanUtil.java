@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
  * 对话附件内容安全扫描（Prompt 注入 + 敏感词）
  * <p>在文件上传阶段对解析后的文本进行双重扫描，拦截风险内容。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Slf4j

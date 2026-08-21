@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * 示例评测集信息
  *
- * @author finch
+ * @author lw
  * @since 2026-06-17
  */
 @Data

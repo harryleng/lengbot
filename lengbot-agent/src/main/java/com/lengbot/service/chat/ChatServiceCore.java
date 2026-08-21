@@ -5,7 +5,7 @@ import reactor.core.publisher.Flux;
 /**
  * 对话管道终端核心：执行 LLM 调用 + 工具循环
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @FunctionalInterface

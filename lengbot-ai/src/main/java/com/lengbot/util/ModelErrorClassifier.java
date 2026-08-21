@@ -9,7 +9,7 @@ import java.util.Set;
  * <p>将底层模型/网络异常翻译为用户友好的中文提示与错误码，
  * 供对话、Prompt 调试等多处复用，避免各处重复维护错误映射。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-07
  */
 public final class ModelErrorClassifier {

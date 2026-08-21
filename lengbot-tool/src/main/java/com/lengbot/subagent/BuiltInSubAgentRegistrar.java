@@ -19,7 +19,7 @@ import java.util.Map;
  * 内置 SubAgent 自动注册器
  * <p>启动时检查数据库，若不存在则插入内置 SubAgent 配置</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Slf4j

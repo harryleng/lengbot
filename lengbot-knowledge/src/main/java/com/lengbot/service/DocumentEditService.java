@@ -7,7 +7,7 @@ import com.lengbot.vo.EditableContentVO;
 /**
  * 文档在线编辑服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-06-16
  */
 public interface DocumentEditService {

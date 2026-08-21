@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * 问答对服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 public interface QaPairService extends IService<QaPair> {

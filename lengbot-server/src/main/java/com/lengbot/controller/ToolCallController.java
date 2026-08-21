@@ -14,7 +14,7 @@ import java.util.Map;
 /**
  * 工具调用记录 Controller
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Tag(name = "工具调用记录", description = "工具调用日志查询接口")

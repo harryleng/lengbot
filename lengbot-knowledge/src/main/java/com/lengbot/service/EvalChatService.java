@@ -6,7 +6,7 @@ import reactor.core.publisher.Flux;
 /**
  * 评测对话服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 public interface EvalChatService {

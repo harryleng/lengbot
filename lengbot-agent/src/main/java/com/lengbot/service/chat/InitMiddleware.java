@@ -25,7 +25,7 @@ import java.util.Map;
 /**
  * 初始化中间件：会话解析、Agent加载、Config解析、Provider确定
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Slf4j

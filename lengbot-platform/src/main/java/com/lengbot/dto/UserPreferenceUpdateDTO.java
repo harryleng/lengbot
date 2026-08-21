@@ -7,7 +7,7 @@ import lombok.Data;
 /**
  * 用户个人配置更新请求
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 @Data

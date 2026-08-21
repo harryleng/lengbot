@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit;
  * <p>由 {@link com.lengbot.tool.registrar.ToolRegistrar} 统一注册，type=knowledge，
  * 当 Agent 绑定知识库时由中间件自动注入。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-22
  */
 @Slf4j

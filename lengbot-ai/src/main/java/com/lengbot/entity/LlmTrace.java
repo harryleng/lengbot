@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 /**
  * LLM调用链追踪表
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Data

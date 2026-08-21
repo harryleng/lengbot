@@ -15,7 +15,7 @@ import java.util.List;
 /**
  * 用户服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 public interface UserService {

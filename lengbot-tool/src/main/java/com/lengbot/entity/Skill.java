@@ -17,7 +17,7 @@ import java.time.LocalDateTime;
  * <p>对标 Yuxi：Skill 是「编排指令包」，绑定一个或多个 Tool/MCP，
  * 通过 prompt_template 指导主 Agent 何时、如何使用这些能力。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Data

@@ -9,7 +9,7 @@ import java.util.Map;
 /**
  * 向量服务接口：负责向量存储和相似度检索
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 public interface EmbeddingService extends IService<Embedding> {

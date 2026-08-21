@@ -10,7 +10,7 @@ import lombok.Getter;
  * 知识库成员角色枚举
  * <p>权限等级：CREATOR > MANAGER > DEVELOPER > VIEWER</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Getter

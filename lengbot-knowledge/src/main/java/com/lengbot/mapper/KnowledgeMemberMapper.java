@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * 知识库成员 Mapper
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Mapper

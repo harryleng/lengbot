@@ -17,7 +17,7 @@ import java.util.List;
  * MCP Server 定时健康检查任务
  * <p>每 3 小时刷新所有活跃 MCP Server 的工具缓存，更新 lastSyncTime</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 @Slf4j

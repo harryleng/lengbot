@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * 消息服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 public interface MessageService extends IService<Message> {

@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
  * <p>限流配置存储于 {@code tool.rate_limit_config}，JSON 结构：
  * {@code {"limit": 10, "window": "MINUTE|HOUR|DAY"}}。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-21
  */
 @Slf4j

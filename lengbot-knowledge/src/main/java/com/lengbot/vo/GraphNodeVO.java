@@ -12,7 +12,7 @@ import java.util.Map;
 /**
  * 图谱节点 VO
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Data

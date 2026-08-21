@@ -18,7 +18,7 @@ import java.util.Map;
  * (userId, toolName) 维度判定配额；超限时返回结构化错误 JSON 回喂给 LLM，
  * 让模型感知"该工具已被限流，请改用其他方式"，避免硬抛异常被外层兜底成 500。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-21
  */
 @Slf4j

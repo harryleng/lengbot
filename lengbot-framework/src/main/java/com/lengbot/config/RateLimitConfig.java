@@ -12,7 +12,7 @@ import org.springframework.context.annotation.Configuration;
  * <p>对登录/注册接口限流：同一 IP 每分钟最多 10 次</p>
  * <p>对对话接口限流：同一用户每分钟最多 30 次</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 @Configuration

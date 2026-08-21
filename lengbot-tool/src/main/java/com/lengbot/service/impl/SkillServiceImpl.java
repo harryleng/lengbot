@@ -45,7 +45,7 @@ import java.util.regex.Pattern;
  * <p>支持「全局可复用 Skill」与「旧的按 Agent 私有 Skill」两种模式，
  * 新建 Skill 默认 scope=global，必须填写 slug。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Slf4j

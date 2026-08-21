@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * 独立知识图谱服务接口（全局，不关联知识库）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 public interface StandaloneGraphService {

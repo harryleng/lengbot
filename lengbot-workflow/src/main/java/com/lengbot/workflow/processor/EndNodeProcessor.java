@@ -20,7 +20,7 @@ import java.util.Map;
  * 结束节点处理器
  * <p>按 outputType + textTemplate/jsonParams 显式配置最终输出，禁止 Map.toString 作为对话回复</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Component

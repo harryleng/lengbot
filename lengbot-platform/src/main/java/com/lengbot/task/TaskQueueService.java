@@ -11,7 +11,7 @@ import java.util.List;
  * <p>业务层（TaskService、TaskExecutor）与消费层（TaskConsumer）均通过此接口操作队列，
  * 不直接访问 RedisTemplate，保证 Stream key / 消费组命名的统一。
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 public interface TaskQueueService {

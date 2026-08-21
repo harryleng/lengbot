@@ -6,7 +6,7 @@ import com.lengbot.vo.UserPreferenceVO;
 /**
  * 用户个人配置服务
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 public interface UserPreferenceService {

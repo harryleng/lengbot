@@ -11,7 +11,7 @@ import java.time.LocalDate;
 /**
  * API Key Mapper
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 @Mapper

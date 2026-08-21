@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  * <p>Agent 启动时只看到 Skill 名称和描述（摘要），使用 {@code read_skill} 工具读取全文后才激活。
  * 激活状态跨轮次持久化在 Redis 中。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Slf4j

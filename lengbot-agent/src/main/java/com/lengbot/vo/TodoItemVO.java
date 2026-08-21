@@ -6,7 +6,7 @@ import lombok.Data;
 /**
  * 待办项 VO（前端只读展示用）
  *
- * @author finch
+ * @author lw
  * @since 2026-07-17
  */
 @Data

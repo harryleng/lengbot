@@ -62,7 +62,7 @@ import static com.lengbot.service.chat.ToolEventGenerator.*;
 /**
  * AI对话服务实现类
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Slf4j

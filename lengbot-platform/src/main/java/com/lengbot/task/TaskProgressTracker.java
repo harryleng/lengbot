@@ -15,7 +15,7 @@ import java.util.List;
  * </ul>
  * <p>两种模式可混用，后设置的进度不会回退。
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Slf4j

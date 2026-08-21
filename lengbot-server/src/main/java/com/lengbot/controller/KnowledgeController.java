@@ -28,7 +28,7 @@ import java.util.concurrent.Executor;
 /**
  * 知识库管理接口（CRUD、成员管理、配置、思维导图、示例问题）
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Slf4j

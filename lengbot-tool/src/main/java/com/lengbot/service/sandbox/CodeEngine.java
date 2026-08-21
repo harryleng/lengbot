@@ -8,7 +8,7 @@ import java.util.Map;
  * 代码执行引擎接口
  * <p>每种语言实现一个引擎，通过 {@link EngineRegistry} 按语言路由。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 public interface CodeEngine {

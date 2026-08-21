@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
  * 工作流边定义
  * <p>节点之间的连接关系</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Data

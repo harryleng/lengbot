@@ -17,7 +17,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * <p>在 Sa-Token 拦截器之前执行，识别 lbkey_ 前缀的 Bearer Token 并走 API Key 认证</p>
  * <p>同时执行：请求频率限制、Agent 作用域校验</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-25
  */
 @Component

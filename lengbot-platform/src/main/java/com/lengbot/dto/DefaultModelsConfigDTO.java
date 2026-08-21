@@ -6,7 +6,7 @@ import lombok.Data;
 /**
  * 默认模型配置汇总DTO
  *
- * @author finch
+ * @author lw
  * @since 2026-06-19
  */
 @Data

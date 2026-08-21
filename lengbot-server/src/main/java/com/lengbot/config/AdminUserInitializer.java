@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
  * 启动时检查管理员用户状态
  * <p>检测数据库中是否存在用户，不存在时打印提示引导用户通过初始化页面创建管理员</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-29
  */
 @Slf4j

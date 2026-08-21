@@ -7,7 +7,7 @@ import org.springframework.http.HttpStatus;
 /**
  * 业务异常
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Getter

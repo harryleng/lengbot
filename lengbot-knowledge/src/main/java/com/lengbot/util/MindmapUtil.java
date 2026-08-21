@@ -21,7 +21,7 @@ import java.util.List;
  * 思维导图生成工具类
  * <p>基于文件列表（名称+类型）生成思维导图JSON结构，最多20个文件</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Slf4j

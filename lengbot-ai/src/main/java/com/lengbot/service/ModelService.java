@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * 模型服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 public interface ModelService extends IService<Model> {

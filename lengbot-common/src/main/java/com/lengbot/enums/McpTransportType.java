@@ -9,7 +9,7 @@ import lombok.Getter;
 /**
  * MCP 传输类型
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Getter

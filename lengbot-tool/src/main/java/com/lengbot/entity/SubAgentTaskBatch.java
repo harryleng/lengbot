@@ -15,7 +15,7 @@ import java.time.LocalDateTime;
 /**
  * SubAgent 委派批次表。
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 @Data

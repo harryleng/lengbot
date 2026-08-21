@@ -6,7 +6,7 @@ import com.lengbot.enums.NodeType;
  * 工作流节点处理器接口
  * <p>所有节点处理器必须实现此接口，用于执行特定类型的节点逻辑</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 public interface NodeProcessor {

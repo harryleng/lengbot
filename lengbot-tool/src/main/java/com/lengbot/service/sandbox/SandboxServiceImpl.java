@@ -15,7 +15,7 @@ import java.util.Map;
  * 统一沙盒服务实现
  * <p>代码执行路由到 {@link EngineRegistry}，文件操作委托 {@link MinioUtil} + {@link SandboxPathValidator}。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 @Slf4j

@@ -8,7 +8,7 @@ import com.lengbot.entity.SystemConfig;
 /**
  * 系统配置服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 public interface SystemConfigService extends IService<SystemConfig> {

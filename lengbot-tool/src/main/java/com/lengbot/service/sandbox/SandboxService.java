@@ -8,7 +8,7 @@ import java.util.Map;
 /**
  * 统一沙盒服务：代码执行 + 文件管理
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 public interface SandboxService {

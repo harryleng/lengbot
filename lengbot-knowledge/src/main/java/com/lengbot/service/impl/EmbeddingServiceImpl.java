@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
  * 向量服务实现类：负责向量存储和相似度检索
  * <p>pgvector 相关 SQL 操作已下沉到 EmbeddingMapper（@Select/@Insert/@Delete 注解）</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Slf4j

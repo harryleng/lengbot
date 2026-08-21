@@ -12,7 +12,7 @@ import org.apache.ibatis.type.JdbcType;
 /**
  * 子智能体配置表
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Data

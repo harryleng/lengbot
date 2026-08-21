@@ -44,7 +44,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>再 XREADGROUP &gt; BLOCK 5s 拉新消息</li>
  * </ul>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-21
  */
 @Slf4j

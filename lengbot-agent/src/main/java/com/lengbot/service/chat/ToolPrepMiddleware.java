@@ -49,7 +49,7 @@ import java.util.stream.Collectors;
 /**
  * 工具准备中间件：构建 GenerateOptions + 工具回调列表、提取工具映射
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Slf4j

@@ -19,7 +19,7 @@ import java.util.Map;
  * 内置 MCP Server 自动注册器
  * <p>启动时检查数据库，缺失的内置 MCP Server 自动插入（仅 DB 记录，不做工具发现）</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Slf4j

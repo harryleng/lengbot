@@ -20,7 +20,7 @@ import java.util.List;
 /**
  * 评测实验管理接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Tag(name = "评测实验管理", description = "评测实验的增删改查")

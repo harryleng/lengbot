@@ -27,7 +27,7 @@ import java.util.Map;
  * <p>基于 Spring Cache + RedisCacheManager，为不同业务对象配置独立 TTL</p>
  * <p>缓存 Key 前缀统一为 lengbot:{cacheName}:{key}</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-17
  */
 @Configuration

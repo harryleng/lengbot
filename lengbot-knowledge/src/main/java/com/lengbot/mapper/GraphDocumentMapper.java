@@ -7,7 +7,7 @@ import org.apache.ibatis.annotations.Mapper;
 /**
  * 图谱文档关联 Mapper
  *
- * @author finch
+ * @author lw
  * @since 2026-05-30
  */
 @Mapper

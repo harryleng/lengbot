@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
  * <p>安全级别 L3.5：编译期黑名单 + ClassLoader 隔离 + 超时控制。</p>
  * <p>将用户代码包装为类的静态方法，编译后在沙盒 ClassLoader 中执行。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 @Slf4j

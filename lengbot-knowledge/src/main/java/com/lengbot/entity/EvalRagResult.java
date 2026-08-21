@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 /**
  * RAG 评估结果表
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Data

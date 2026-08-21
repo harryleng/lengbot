@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 /**
  * 文档可编辑内容响应
  *
- * @author finch
+ * @author lw
  * @since 2026-06-16
  */
 @Data

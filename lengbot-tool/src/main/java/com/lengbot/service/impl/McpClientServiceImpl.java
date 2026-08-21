@@ -39,7 +39,7 @@ import java.util.stream.Collectors;
 /**
  * MCP 客户端服务实现：连接管理、工具发现、工具转回调
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Slf4j

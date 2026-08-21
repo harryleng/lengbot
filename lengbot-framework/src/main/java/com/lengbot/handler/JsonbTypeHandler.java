@@ -17,7 +17,7 @@ import java.sql.SQLException;
  * PostgreSQL JSONB类型处理器
  * 使用PGobject显式声明jsonb类型，避免PostgreSQL将参数识别为varchar
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @MappedTypes(String.class)

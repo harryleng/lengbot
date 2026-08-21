@@ -9,7 +9,7 @@ import lombok.Getter;
 /**
  * 评估器版本状态
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Getter

@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * 远程 Skill 安装准备请求
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 @Data

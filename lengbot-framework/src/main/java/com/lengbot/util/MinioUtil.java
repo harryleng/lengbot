@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
  * MinIO 文件存储工具类
  * <p>封装 MinIO 客户端操作，供业务层调用</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-19
  */
 @Slf4j

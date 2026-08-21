@@ -28,7 +28,7 @@ import java.util.List;
 /**
  * 文档版本服务实现
  *
- * @author finch
+ * @author lw
  * @since 2026-06-17
  */
 @Slf4j

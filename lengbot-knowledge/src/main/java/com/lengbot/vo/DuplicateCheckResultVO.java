@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * 文档内容重复检测结果
  *
- * @author finch
+ * @author lw
  * @since 2026-05-30
  */
 @Data

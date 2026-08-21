@@ -8,7 +8,7 @@ import lombok.Data;
 /**
  * 管理员初始化请求DTO
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 @Data

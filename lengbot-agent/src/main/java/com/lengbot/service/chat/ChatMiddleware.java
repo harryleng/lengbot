@@ -7,7 +7,7 @@ import reactor.core.publisher.Flux;
  * <p>洋葱模型：每个中间件处理自己的关注点，然后调用 next.proceed() 传递给下一个。</p>
  * <p>TraceMiddleware 通过包裹 next.proceed() 的 Flux 实现 doOnComplete/doOnError。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 public interface ChatMiddleware {

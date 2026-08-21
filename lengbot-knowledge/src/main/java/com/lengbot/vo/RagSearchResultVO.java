@@ -10,7 +10,7 @@ import lombok.Data;
  * 检索测试结果VO
  * <p>用于纯向量检索测试，返回检索到的文档块列表（不调用LLM）</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-22
  */
 @Data

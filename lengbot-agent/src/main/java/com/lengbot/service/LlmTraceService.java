@@ -11,7 +11,7 @@ import java.util.Map;
 /**
  * LLM调用链追踪 Service
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 public interface LlmTraceService extends IService<LlmTrace> {

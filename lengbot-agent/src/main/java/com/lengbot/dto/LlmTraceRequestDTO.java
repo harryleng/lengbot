@@ -6,7 +6,7 @@ import lombok.Data;
 /**
  * LLM调用链查询请求参数
  *
- * @author finch
+ * @author lw
  * @since 2026-05-23
  */
 @Data

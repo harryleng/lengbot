@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
  * RAG 评估引擎
  * <p>移植自 Yuxi 项目的 evaluator.py + metrics.py + benchmark_generation.py</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Slf4j

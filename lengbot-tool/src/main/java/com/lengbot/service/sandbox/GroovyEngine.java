@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
  * Groovy 脚本引擎（JSR-223）
  * <p>安全级别 L2：关键字黑名单 + 超时控制。入口约定 {@code main(params)}。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-01
  */
 @Slf4j

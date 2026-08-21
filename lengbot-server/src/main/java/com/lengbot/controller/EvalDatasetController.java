@@ -24,7 +24,7 @@ import java.util.List;
 /**
  * 评测集管理接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Tag(name = "评测集管理", description = "评测集的增删改查及版本管理")

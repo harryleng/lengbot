@@ -31,7 +31,7 @@ import java.util.List;
 /**
  * Prompt管理接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Slf4j

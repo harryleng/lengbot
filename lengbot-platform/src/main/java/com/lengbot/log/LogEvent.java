@@ -7,7 +7,7 @@ import lombok.NoArgsConstructor;
 /**
  * 日志事件DTO，用于实时日志监控
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Data

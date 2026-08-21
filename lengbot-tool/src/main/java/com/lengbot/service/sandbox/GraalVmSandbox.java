@@ -28,7 +28,7 @@ import java.util.concurrent.TimeoutException;
  * 避免 Nashorn (JDK15+ 移除) 与 OS 子进程 (PythonEngine) 的部署成本与隔离弱问题</p>
  * <p>支持语言：js（默认引入）、python（需在 pom 显式引入 org.graalvm.python:python，否则视为不可用）</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-20
  */
 @Slf4j

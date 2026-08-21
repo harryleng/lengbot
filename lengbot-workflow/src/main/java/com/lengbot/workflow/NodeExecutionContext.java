@@ -13,7 +13,7 @@ import java.util.function.Consumer;
  * 工作流节点执行上下文
  * <p>包含执行过程中需要的所有数据和变量</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Data

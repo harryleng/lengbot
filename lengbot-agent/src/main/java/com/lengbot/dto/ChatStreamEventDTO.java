@@ -11,7 +11,7 @@ import lombok.NoArgsConstructor;
  * 流式对话事件DTO
  * <p>用于在SSE流中发送不同类型的消息（状态、文本、引用等）</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-22
  */
 @Data

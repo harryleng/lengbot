@@ -5,7 +5,7 @@ import lombok.Data;
 /**
  * 评估器版本创建请求
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 @Data

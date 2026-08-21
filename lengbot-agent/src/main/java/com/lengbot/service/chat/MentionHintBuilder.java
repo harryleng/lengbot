@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * 根据用户 @ mention 构建「优先使用」提示文案（不收窄运行时工具/知识库范围）。
  *
- * @author finch
+ * @author lw
  * @since 2026-07-01
  */
 public final class MentionHintBuilder {

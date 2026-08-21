@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * 用户长期记忆创建/更新请求
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 @Data

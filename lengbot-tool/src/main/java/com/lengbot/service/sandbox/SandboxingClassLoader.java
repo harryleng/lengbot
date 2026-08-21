@@ -6,7 +6,7 @@ import java.util.Set;
  * 沙盒类加载器：仅允许加载白名单包中的类
  * <p>用于 Janino 编译的 Java 代码执行时的类加载隔离。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-24
  */
 public class SandboxingClassLoader extends ClassLoader {

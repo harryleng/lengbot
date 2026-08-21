@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 /**
  * 用户长期记忆表
  *
- * @author finch
+ * @author lw
  * @since 2026-07-09
  */
 @Data

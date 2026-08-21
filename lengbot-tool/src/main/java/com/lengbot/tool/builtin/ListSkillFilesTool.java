@@ -18,7 +18,7 @@ import java.util.Map;
  * 内置工具 — 列出技能文件
  * <p>列出指定 Skill 目录下的所有文件。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-18
  */
 @Slf4j

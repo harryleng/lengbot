@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
  * <p>每条记录表示一次「在某个会话中命中关键词的消息」，
  * 携带会话基础信息（标题、agent、最后消息时间）+ 命中消息片段，前端据此渲染并跳转</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 @Data

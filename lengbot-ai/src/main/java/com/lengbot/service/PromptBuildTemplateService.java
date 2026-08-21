@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * 提示词构建模板服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-27
  */
 public interface PromptBuildTemplateService extends IService<PromptBuildTemplate> {

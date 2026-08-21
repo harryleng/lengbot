@@ -14,7 +14,7 @@ import java.lang.annotation.Target;
  * <p>displayName 优先级：方法级别 > 类级别</p>
  * <p>type 优先级：方法级别 > 类级别（默认 "builtin"）</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-24
  */
 @Target({ElementType.TYPE, ElementType.METHOD})

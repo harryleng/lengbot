@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * Skill 请求 DTO
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Data

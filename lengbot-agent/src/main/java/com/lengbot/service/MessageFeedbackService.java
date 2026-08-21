@@ -12,7 +12,7 @@ import java.util.Map;
 /**
  * 消息反馈服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-06-26
  */
 public interface MessageFeedbackService extends IService<MessageFeedback> {

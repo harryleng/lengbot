@@ -9,7 +9,7 @@ import java.lang.annotation.*;
  * JSON 格式校验注解
  * <p>校验字符串是否为合法的 JSON 格式</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 @Target({ElementType.FIELD, ElementType.PARAMETER})

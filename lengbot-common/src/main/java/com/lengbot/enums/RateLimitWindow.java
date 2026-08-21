@@ -9,7 +9,7 @@ import lombok.Getter;
 /**
  * 限流时间窗口
  *
- * @author finch
+ * @author lw
  * @since 2026-07-21
  */
 @Getter

@@ -9,7 +9,7 @@ package com.lengbot.common.task;
  *   <li>{@link TaskCancelledException}  → markCancelled</li>
  * </ul>
  *
- * @author finch
+ * @author lw
  * @since 2026-07-18
  */
 public abstract class TaskException extends RuntimeException {

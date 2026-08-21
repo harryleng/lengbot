@@ -34,7 +34,7 @@ import java.util.List;
 /**
  * 知识库 RAG 评估接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Tag(name = "RAG 评估", description = "知识库 RAG 评估基准与评估结果管理")

@@ -28,7 +28,7 @@ import java.util.List;
  *
  * <p>顺序在 {@code BuiltinToolRegistrar} 之后执行，确保 tool 表已建好可被引用。</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Slf4j

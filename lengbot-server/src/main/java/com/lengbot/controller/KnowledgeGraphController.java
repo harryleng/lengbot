@@ -19,7 +19,7 @@ import java.util.List;
 /**
  * 知识库图谱管理接口
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 @Tag(name = "知识库图谱管理", description = "知识图谱抽取、导入、查询、节点/关系管理")

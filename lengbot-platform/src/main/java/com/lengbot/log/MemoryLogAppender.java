@@ -12,7 +12,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * 内存日志收集器，将日志事件缓存到环形队列，并通知 SSE 订阅者
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 public class MemoryLogAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {

@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * MCP Server 服务接口
  *
- * @author finch
+ * @author lw
  * @since 2026-05-20
  */
 public interface McpServerService extends IService<McpServer> {

@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 /**
  * 消息反馈列表VO（含消息内容摘要）
  *
- * @author finch
+ * @author lw
  * @since 2026-06-26
  */
 @Data

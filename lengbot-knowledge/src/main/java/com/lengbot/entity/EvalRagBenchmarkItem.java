@@ -9,7 +9,7 @@ import lombok.Data;
 /**
  * RAG 评估基准题目表
  *
- * @author finch
+ * @author lw
  * @since 2026-05-28
  */
 @Data

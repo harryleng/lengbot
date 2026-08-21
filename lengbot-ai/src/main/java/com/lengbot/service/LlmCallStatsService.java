@@ -15,7 +15,7 @@ import java.util.Map;
  * <p>基于 Redis Hash 记录每次调用的 Token 消耗、延迟、成功/失败率</p>
  * <p>Redis key: lengbot:llm:stats:{scope}:{id}:{date}</p>
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 @Slf4j

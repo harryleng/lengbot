@@ -3,7 +3,7 @@ package com.lengbot.constant;
 /**
  * RAG 检索结果类型常量
  *
- * @author finch
+ * @author lw
  * @since 2026-06-21
  */
 public final class RagResultType {
