@@ -382,15 +382,29 @@ public class TaskQueueServiceImpl implements TaskQueueService {
             redis.opsForStream().createGroup(streamKey, ReadOffset.from("0"), group);
             log.info("[TaskQueue] XGROUP CREATE 成功, stream={}, group={}", streamKey, group);
         } catch (Exception e) {
-            String msg = e.getMessage() == null ? "" : e.getMessage();
-            // BUSYGROUP 表示组已存在，幂等
-            if (msg.contains("BUSYGROUP") || msg.contains("already exists")) {
-                log.info("[TaskQueue] 消费组已存在, stream={}, group={}", streamKey, group);
+            // BUSYGROUP 表示组已存在，幂等。Spring 会把底层 RedisBusyException
+            // 包成 RedisSystemException（外层 message="Error in execution"），
+            // 因此必须沿 cause 链查找 BUSYGROUP 关键字，否则会被误判为失败。
+            if (isBusyGroup(e)) {
+                log.info("[TaskQueue] 消费组已存在(幂等), stream={}, group={}", streamKey, group);
             } else {
                 log.error("[TaskQueue] XGROUP CREATE 失败, stream={}, group={}, error={}",
-                        streamKey, group, msg, e);
+                        streamKey, group, e.getMessage(), e);
             }
         }
+    }
+
+    /** 沿异常链查找 BUSYGROUP / already exists（兼容 Spring 包装后的外层消息） */
+    private boolean isBusyGroup(Throwable t) {
+        Throwable cur = t;
+        while (cur != null) {
+            String m = cur.getMessage();
+            if (m != null && (m.contains("BUSYGROUP") || m.contains("already exists"))) {
+                return true;
+            }
+            cur = cur.getCause();
+        }
+        return false;
     }
 
     /** 解析 MapRecord 为 TaskMessage（异常返回 null） */
