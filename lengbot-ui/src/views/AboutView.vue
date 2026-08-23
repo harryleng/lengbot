@@ -16,15 +16,15 @@
       <div class="about-info">
         <div class="info-row">
           <span class="info-label">技术栈</span>
-          <span class="info-value">Spring Boot + Spring AI + Vue 3</span>
+          <span class="info-value">Spring Boot + AgentScope Java + Vue 3</span>
         </div>
         <div class="info-row">
           <span class="info-label">作者</span>
-          <span class="info-value">finch</span>
+          <span class="info-value">harryleng</span>
         </div>
-        <div class="info-row">
+        <div class="info-row">clear
           <span class="info-label">开源地址</span>
-          <a class="info-link" href="https://github.com/finch04/LengBot" target="_blank" rel="noopener noreferrer">
+          <a class="info-link" href="https://github.com/harryleng/LengBot" target="_blank" rel="noopener noreferrer">
             <GithubOutlined />
             GitHub
           </a>

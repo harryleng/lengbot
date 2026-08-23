@@ -53,9 +53,9 @@
     <!-- 底部链接 -->
     <div class="page-footer">
       <div class="footer-links">
-        <a href="https://github.com/finch04" target="_blank" rel="noopener">联系我们</a>
+        <a href="https://github.com/harryleng" target="_blank" rel="noopener">联系我们</a>
         <span class="divider">|</span>
-        <a href="https://github.com/finch04/LengBot" target="_blank" rel="noopener">使用帮助</a>
+        <a href="https://github.com/harryleng/LengBot" target="_blank" rel="noopener">使用帮助</a>
       </div>
       <div class="footer-copyright">© 2026 LengBot. All Rights Reserved.</div>
     </div>

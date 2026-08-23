@@ -35,7 +35,7 @@
         <div class="header-actions">
           <a
             class="github-link"
-            :href="config.github || 'https://github.com/finch04/LengBot'"
+            :href="config.github || 'https://github.com/harryleng/LengBot'"
             target="_blank"
             rel="noopener noreferrer"
             aria-label="GitHub"
@@ -328,7 +328,7 @@ async function loadLandingConfig() {
         { icon: 'Eval', title: '评测中心', desc: '数据集管理与自动评估' },
         { icon: 'Observability', title: '可观测性', desc: '全链路 Trace 追踪与监控' },
       ],
-      github: 'https://github.com/finch04/LengBot',
+      github: 'https://github.com/harryleng/LengBot',
       copyright: '© 2026 LengBot. All Rights Reserved.',
     }
   }
