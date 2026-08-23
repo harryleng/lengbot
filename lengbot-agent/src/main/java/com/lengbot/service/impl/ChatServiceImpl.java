@@ -182,6 +182,7 @@ public class ChatServiceImpl implements ChatService {
     private final SessionAttachmentRegistrar sessionAttachmentRegistrar;
     private final SubAgentService subAgentService;
     private final UserMemoryService userMemoryService;
+    private final WorkspaceMemoryService workspaceMemoryService;
     private final ChatAbortRegistry chatAbortRegistry;
     private final com.lengbot.subagent.service.SubAgentTaskService subAgentTaskService;
 
@@ -562,6 +563,18 @@ public class ChatServiceImpl implements ChatService {
                 userMemoryService.extractAsync(buildMemoryExtractRequest(ctx));
             } catch (Exception e) {
                 log.warn("[Chat] 调度长期记忆抽取失败: {}", e.getMessage());
+            }
+
+            // 1.4 记录当日工作日志（轻量：记录用户本轮诉求），与主回复完成事件解耦
+            try {
+                workspaceMemoryService.recordTurn(
+                        ctx.getUserId(),
+                        ctx.getSessionId(),
+                        ctx.getAgent() != null ? ctx.getAgent().getId() : null,
+                        ctx.getRequest() != null ? ctx.getRequest().getMessage() : null,
+                        ctx.getFullReply() != null ? ctx.getFullReply().toString() : "");
+            } catch (Exception e) {
+                log.warn("[Chat] 调度每日工作日志记录失败: {}", e.getMessage());
             }
 
             // 2. 返回带消息ID、Token数和完整metadata的 [DONE] 事件

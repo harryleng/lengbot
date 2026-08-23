@@ -453,6 +453,8 @@ public class UserMemoryServiceImpl extends ServiceImpl<UserMemoryMapper, UserMem
             case PROFILE -> "用户背景";
             case PROJECT_FACT -> "项目事实";
             case INSTRUCTION -> "长期指令";
+            case LESSON -> "踩坑经验";
+            case CASE -> "成功案例";
         };
     }
 

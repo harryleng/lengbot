@@ -22,6 +22,7 @@ import com.lengbot.service.ToolService;
 import com.lengbot.service.UserPreferenceService;
 import com.lengbot.subagent.DelegateSubAgentTool;
 import com.lengbot.agent.tool.memory.UserMemoryToolCallbackFactory;
+import com.lengbot.agent.tool.memory.ExperienceMemoryToolCallbackFactory;
 import com.lengbot.util.JsonIdParser;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
@@ -69,6 +70,7 @@ public class ToolPrepMiddleware implements ChatMiddleware {
     private final SessionTodoService sessionTodoService;
     private final UserPreferenceService userPreferenceService;
     private final UserMemoryToolCallbackFactory userMemoryToolCallbackFactory;
+    private final ExperienceMemoryToolCallbackFactory experienceMemoryToolCallbackFactory;
 
     @Autowired
     @Qualifier("lengBotExecutor")
@@ -218,6 +220,8 @@ public class ToolPrepMiddleware implements ChatMiddleware {
             boolean memoryToolsInjected = shouldInjectUserMemoryTools(ctx);
             if (memoryToolsInjected) {
                 allCallbacks.addAll(userMemoryToolCallbackFactory.buildCallbacks());
+                // 经验沉淀工具（踩坑/成功案例 → project_memory），随长期记忆一同注入
+                allCallbacks.addAll(experienceMemoryToolCallbackFactory.buildCallbacks());
                 log.info("[Chat] 自动注入用户长期记忆工具: userId={}, agentId={}",
                         ctx.getUserId(), agent.getId());
             }
@@ -459,6 +463,7 @@ public class ToolPrepMiddleware implements ChatMiddleware {
             case UserMemoryToolCallbackFactory.SAVE_TOOL_NAME -> "保存长期记忆";
             case UserMemoryToolCallbackFactory.SEARCH_TOOL_NAME -> "查询长期记忆";
             case UserMemoryToolCallbackFactory.DELETE_TOOL_NAME -> "停用长期记忆";
+            case ExperienceMemoryToolCallbackFactory.SAVE_TOOL_NAME -> "保存经验";
             default -> null;
         };
     }

@@ -1716,3 +1716,55 @@ ALTER TABLE tool ADD COLUMN IF NOT EXISTS rate_limit_enabled BOOLEAN NOT NULL DE
 ALTER TABLE tool ADD COLUMN IF NOT EXISTS rate_limit_config JSONB;
 COMMENT ON COLUMN tool.rate_limit_enabled IS '是否启用限流';
 COMMENT ON COLUMN tool.rate_limit_config IS '限流配置 JSON：limit/window';
+
+-- ============================================================================
+-- 工作区记忆 + 每日日志（2026-08-23）
+-- 对照 user_memory，补齐 lengbot 缺失的「项目/工作区级记忆 + 每日工作日志」这一层。
+-- ============================================================================
+
+CREATE TABLE project_memory (
+    id                  BIGINT          NOT NULL,
+    user_id             BIGINT          NOT NULL,
+    workspace_id        BIGINT,
+    session_id          BIGINT,
+    memory_type         VARCHAR(32)     NOT NULL,
+    content             TEXT            NOT NULL,
+    keywords            JSONB           NOT NULL DEFAULT '[]'::jsonb,
+    source_message_id   BIGINT,
+    confidence          NUMERIC(5,4)    NOT NULL DEFAULT 1.0000,
+    status              VARCHAR(32)     NOT NULL DEFAULT 'active',
+    embedding_vector    vector(1536),
+    last_used_at        TIMESTAMP,
+    create_time         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted             SMALLINT        NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+CREATE INDEX idx_project_memory_user_status ON project_memory (user_id, status);
+CREATE INDEX idx_project_memory_workspace ON project_memory (workspace_id);
+CREATE INDEX idx_project_memory_type ON project_memory (memory_type);
+CREATE INDEX idx_project_memory_vector_hnsw ON project_memory
+    USING hnsw (embedding_vector vector_cosine_ops)
+    WHERE embedding_vector IS NOT NULL AND deleted = 0;
+COMMENT ON TABLE project_memory IS '工作区/项目级长期记忆表';
+COMMENT ON COLUMN project_memory.memory_type IS '记忆类型：preference/profile/project_fact/instruction';
+COMMENT ON COLUMN project_memory.status IS '状态：active/disabled/archived';
+COMMENT ON COLUMN project_memory.embedding_vector IS '记忆语义向量，用于工作区记忆语义检索';
+
+CREATE TABLE daily_log (
+    id                  BIGINT          NOT NULL,
+    user_id             BIGINT          NOT NULL,
+    workspace_id        BIGINT,
+    log_date            DATE            NOT NULL,
+    summary             TEXT,
+    raw_entries         JSONB           NOT NULL DEFAULT '[]'::jsonb,
+    create_time         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted             SMALLINT        NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+CREATE INDEX idx_daily_log_user_date ON daily_log (user_id, log_date);
+COMMENT ON TABLE daily_log IS '每日工作日志表：按 userId + log_date 记录当日工作要点';
+COMMENT ON COLUMN daily_log.log_date IS '日志日期（按天）';
+COMMENT ON COLUMN daily_log.summary IS '当日要点摘要（可由 LLM 归纳原始记录得到）';
+COMMENT ON COLUMN daily_log.raw_entries IS '原始记录列表：[{time, type, content}]';
