@@ -116,6 +116,19 @@ public class MessageMiddleware implements ChatMiddleware {
             - 可在文末补充：「如需了解【某主题】的更多细节，可以继续问我」
             """;
 
+    /**
+     * 文件交付规范：引导 agent 把"自己生成的产出"写入会话沙盒（session sandbox），
+     * 经 sandbox_write_file + present_artifacts 交付，从而出现在会话文件树中；
+     * 主机文件工具（local_*_file）仅用于用户显式点名的本机文件，禁止用于 agent 自身产出。
+     */
+    private static final String DELIVERABLE_GUIDANCE = """
+
+            ## 文件交付规范（重要）
+            - 你**自己生成**的产出（报告、HTML 页面、代码、图片、数据文件等），必须用 **sandbox_write_file** 写入，路径以 `outputs/` 开头（如 `outputs/report.md`、`outputs/tank-battle.html`），随后调用 **present_artifacts** 传入该路径，用户即可在会话文件面板看到并下载/预览。
+            - **本地文件访问（local_read/write/append/delete_file）只用于用户显式点名的本机文件**（例如"读取 D:/xxx/foo.txt"、"把结果存到我的工作目录"）。不要用它来保存你自己生成的产出，否则文件不会出现在用户的会话文件树里。
+            - 一句话区分：你生成的文件 → sandbox_write_file(outputs/...) + present_artifacts；用户指名要读写的主机文件 → local_*_file。
+            """;
+
     /** 工具调用轮次预算提示（%d 为运行时 maxExecutionSteps） */
     private static final String TOOL_STEP_BUDGET_HINT_TEMPLATE = """
 
@@ -496,6 +509,7 @@ public class MessageMiddleware implements ChatMiddleware {
         systemPrompt = appendUserMemoryPrompt(systemPrompt, ctx, agent, userMessage);
         if (apiToolsEnabled) {
             systemPrompt = systemPrompt + PLATFORM_TOOL_KNOWLEDGE_HINT;
+            systemPrompt = systemPrompt + DELIVERABLE_GUIDANCE;
             systemPrompt = systemPrompt + String.format(TOOL_STEP_BUDGET_HINT_TEMPLATE, resolveMaxExecutionStepsHint(agentConfigMap));
         }
         // 注入当前会话 todos 快照：让 AI 调用 write_todos 前看到已有项，避免漏传导致丢项

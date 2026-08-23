@@ -15,10 +15,14 @@ import com.lengbot.util.SessionStoragePath;
 import io.minio.StatObjectResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -52,11 +56,71 @@ public class SessionFileServiceImpl implements SessionFileService {
     private final MinioUtil minioUtil;
     private final ChatSessionService chatSessionService;
 
+    /** 沙盒后端：local 时文件树改读本地磁盘，minio 时沿用 MinIO（默认） */
+    @Value("${lengbot.sandbox.backend:minio}")
+    private String sandboxBackend;
+
+    /** 本地磁盘后端根目录（与 LocalDiskSandboxFs 解析方式一致） */
+    @Value("${lengbot.sandbox.local-root:./data/sandbox}")
+    private String localRootRaw;
+
+    /** 主机文件访问根（lengbot.local-file.root）：配置后，outputs 分区改挂到 {root}/outputs；留空则 outputs 仍读会话沙盒 */
+    @Value("${lengbot.local-file.root:}")
+    private String localFileRootRaw;
+
+    private boolean isLocal() {
+        return "local".equalsIgnoreCase(sandboxBackend);
+    }
+
+    /** 解析本地沙盒根（与 LocalDiskSandboxFs 构造一致：相对路径按进程 CWD 解析为绝对路径） */
+    private Path localRootPath() {
+        return Path.of(localRootRaw).toAbsolutePath().normalize();
+    }
+
+    /** 主机文件访问根（规范化绝对路径），未配置返回 null */
+    private Path localFileRootPath() {
+        if (localFileRootRaw == null || localFileRootRaw.isBlank()) {
+            return null;
+        }
+        return Path.of(localFileRootRaw).toAbsolutePath().normalize();
+    }
+
+    /** 是否启用主机根（lengbot.local-file.root 已配置） */
+    private boolean hostFsEnabled() {
+        return localFileRootPath() != null;
+    }
+
+    /** outputs 分区是否改挂到主机根（仅当配置了 local-file.root 时） */
+    private boolean isHostOutput(String normalized) {
+        if (!hostFsEnabled()) {
+            return false;
+        }
+        return normalized.equals(SessionStoragePath.OUTPUTS_DIR)
+                || normalized.startsWith(SessionStoragePath.OUTPUTS_DIR + "/");
+    }
+
+    /** 将 outputs 分区的相对树路径解析到主机根下的绝对路径（剥离 "outputs/" 前缀） */
+    private Path hostOutputResolve(String normalized) {
+        String rel = normalized.equals(SessionStoragePath.OUTPUTS_DIR)
+                ? ""
+                : normalized.substring(SessionStoragePath.OUTPUTS_DIR.length() + 1);
+        return localFileRootPath().resolve(rel).normalize();
+    }
+
+    /** 主机根文件访问 URL（由 HostFileController 提供，受 local-file 白名单校验） */
+    private String hostFileUrl(String relativeTreePath) {
+        return "/api/host/files/" + relativeTreePath;
+    }
+
+    /** 本地文件访问 URL（与 LocalDiskSandboxFs.resolveFileAccess / SandboxFileController 映射一致） */
+    private String localFileUrl(String objectKey) {
+        return "/api/sandbox/files/" + objectKey;
+    }
+
     @Override
     public SessionFileTreeResponseVO listDirectory(Long sessionId, String path) {
         SessionFileTreeResponseVO resp = new SessionFileTreeResponseVO();
         String normalized = normalizeRelativePath(path);
-        String root = SessionStoragePath.sessionRoot(sessionId);
 
         // 1. 根路径返回三个固定顶级目录（与 Yuxi 一致，即使为空也展示）
         if (normalized.isEmpty()) {
@@ -68,12 +132,17 @@ public class SessionFileServiceImpl implements SessionFileService {
         // 2. 校验路径必须落在允许的分区下
         ensureAllowedPartition(normalized);
 
-        // 3. MinIO 非递归列举直接子条目
-        String prefix = root + normalized + "/";
-        List<MinioUtil.MinioDirEntry> rawEntries = safeList(prefix);
-        // 兼容旧路径：uploads/ 同时并入 inputs/
-        if (normalized.equals(SessionStoragePath.INPUTS_DIR)) {
-            rawEntries.addAll(legacyUploadsEntries(sessionId));
+        // 3. 列举直接子条目；outputs 分区在配置 local-file.root 后改挂主机根
+        List<MinioUtil.MinioDirEntry> rawEntries;
+        if (isHostOutput(normalized)) {
+            rawEntries = hostOutputListDirectoryEntries(normalized);
+        } else {
+            String prefix = SessionStoragePath.sessionRoot(sessionId) + normalized + "/";
+            rawEntries = safeList(prefix);
+            // 兼容旧路径：uploads/ 同时并入 inputs/
+            if (normalized.equals(SessionStoragePath.INPUTS_DIR)) {
+                rawEntries.addAll(legacyUploadsEntries(sessionId));
+            }
         }
 
         // 4. 构建 attachments 索引 map（按 objectKey 索引）
@@ -85,7 +154,7 @@ public class SessionFileServiceImpl implements SessionFileService {
             if (".keep".equals(raw.name)) {
                 continue;
             }
-            entries.add(toEntry(root, normalized, raw, index));
+            entries.add(toEntry(SessionStoragePath.sessionRoot(sessionId), normalized, raw, index));
         }
         entries.sort(Comparator
                 .comparing((SessionFileEntryVO e) -> !Boolean.TRUE.equals(e.getDirectory()))
@@ -105,6 +174,14 @@ public class SessionFileServiceImpl implements SessionFileService {
         SessionFileContentVO vo = new SessionFileContentVO();
         vo.setPath(normalized);
         vo.setObjectKey(objectKey);
+
+        if (isHostOutput(normalized)) {
+            return readContentHost(normalized, vo);
+        }
+
+        if (isLocal()) {
+            return readContentLocal(normalized, objectKey, vo);
+        }
 
         StatObjectResponse stat;
         try {
@@ -158,15 +235,161 @@ public class SessionFileServiceImpl implements SessionFileService {
         return vo;
     }
 
+    /** 本地磁盘后端：读取文件内容/预览（形态与 MinIO 分支一致） */
+    private SessionFileContentVO readContentLocal(String normalized, String objectKey, SessionFileContentVO vo) {
+        Path target = localRootPath().resolve(objectKey);
+        if (!Files.isRegularFile(target)) {
+            vo.setSupported(false);
+            vo.setPreviewType("unsupported");
+            vo.setMessage("文件不存在或已被删除");
+            return vo;
+        }
+        long size;
+        try {
+            size = Files.size(target);
+        } catch (IOException e) {
+            size = 0;
+        }
+        vo.setSize(size);
+        String mime = guessMimeFromName(normalized);
+        vo.setMimeType(mime);
+
+        String previewType = detectPreviewType(mime, normalized);
+        if ("text".equals(previewType) || "markdown".equals(previewType)) {
+            if (size > MAX_TEXT_PREVIEW_BYTES) {
+                vo.setSupported(true);
+                vo.setPreviewType(previewType);
+                vo.setMessage("文件过大，建议下载后查看");
+                vo.setPreviewUrl(localFileUrl(objectKey));
+                return vo;
+            }
+            try {
+                String content = new String(Files.readAllBytes(target), StandardCharsets.UTF_8);
+                vo.setSupported(true);
+                vo.setPreviewType(previewType);
+                vo.setContent(content);
+                return vo;
+            } catch (IOException e) {
+                vo.setSupported(false);
+                vo.setPreviewType("unsupported");
+                vo.setMessage("读取内容失败：" + e.getMessage());
+                return vo;
+            }
+        }
+        if ("image".equals(previewType) || "pdf".equals(previewType) || "video".equals(previewType)) {
+            vo.setSupported(true);
+            vo.setPreviewType(previewType);
+            vo.setPreviewUrl(localFileUrl(objectKey));
+            return vo;
+        }
+        vo.setSupported(true);
+        vo.setPreviewType("download");
+        vo.setPreviewUrl(localFileUrl(objectKey));
+        return vo;
+    }
+
+    /** 主机根 outputs 分区：按相对树路径列举直接子条目（形态与 localListDirectoryEntries 一致） */
+    private List<MinioUtil.MinioDirEntry> hostOutputListDirectoryEntries(String normalized) {
+        Path dir = hostOutputResolve(normalized);
+        List<MinioUtil.MinioDirEntry> result = new ArrayList<>();
+        if (!Files.isDirectory(dir)) {
+            return result;
+        }
+        try (var stream = Files.list(dir)) {
+            List<Path> children = stream.toList();
+            for (Path p : children) {
+                String name = p.getFileName().toString();
+                MinioUtil.MinioDirEntry e = new MinioUtil.MinioDirEntry();
+                e.name = name;
+                boolean isDir = Files.isDirectory(p);
+                e.directory = isDir;
+                String childKey = normalized.isEmpty() ? name : normalized + "/" + name;
+                e.objectName = isDir ? stripTrailingSlashLocal(childKey) : childKey;
+                try {
+                    e.size = isDir ? 0L : Files.size(p);
+                } catch (IOException ex) {
+                    e.size = 0L;
+                }
+                try {
+                    e.lastModified = Files.getLastModifiedTime(p).toString();
+                } catch (IOException ex) {
+                    e.lastModified = null;
+                }
+                result.add(e);
+            }
+        } catch (IOException e) {
+            log.warn("[SessionFile] 主机根列举失败: dir={}, error={}", dir, e.getMessage());
+        }
+        return result;
+    }
+
+    /** 主机根后端：读取文件内容/预览（形态与 readContentLocal 一致） */
+    private SessionFileContentVO readContentHost(String normalized, SessionFileContentVO vo) {
+        Path target = hostOutputResolve(normalized);
+        if (!Files.isRegularFile(target)) {
+            vo.setSupported(false);
+            vo.setPreviewType("unsupported");
+            vo.setMessage("文件不存在或已被删除");
+            return vo;
+        }
+        long size;
+        try {
+            size = Files.size(target);
+        } catch (IOException e) {
+            size = 0;
+        }
+        vo.setSize(size);
+        String mime = guessMimeFromName(normalized);
+        vo.setMimeType(mime);
+        String previewType = detectPreviewType(mime, normalized);
+        if ("text".equals(previewType) || "markdown".equals(previewType)) {
+            if (size > MAX_TEXT_PREVIEW_BYTES) {
+                vo.setSupported(true);
+                vo.setPreviewType(previewType);
+                vo.setMessage("文件过大，建议下载后查看");
+                vo.setPreviewUrl(hostFileUrl(normalized));
+                return vo;
+            }
+            try {
+                String content = new String(Files.readAllBytes(target), StandardCharsets.UTF_8);
+                vo.setSupported(true);
+                vo.setPreviewType(previewType);
+                vo.setContent(content);
+                return vo;
+            } catch (IOException e) {
+                vo.setSupported(false);
+                vo.setPreviewType("unsupported");
+                vo.setMessage("读取内容失败：" + e.getMessage());
+                return vo;
+            }
+        }
+        if ("image".equals(previewType) || "pdf".equals(previewType) || "video".equals(previewType)) {
+            vo.setSupported(true);
+            vo.setPreviewType(previewType);
+            vo.setPreviewUrl(hostFileUrl(normalized));
+            return vo;
+        }
+        vo.setSupported(true);
+        vo.setPreviewType("download");
+        vo.setPreviewUrl(hostFileUrl(normalized));
+        return vo;
+    }
+
     @Override
     public String getDownloadUrl(Long sessionId, String path) {
         String normalized = normalizeRelativePath(path);
         ensureAllowedPartition(normalized);
+        if (isHostOutput(normalized)) {
+            return hostFileUrl(normalized) + "?attachment=1";
+        }
         String objectKey = SessionStoragePath.sessionRoot(sessionId) + normalized;
-        String mime = guessMimeFromName(normalized);
         String fileName = normalized.contains("/")
                 ? normalized.substring(normalized.lastIndexOf('/') + 1)
                 : normalized;
+        if (isLocal()) {
+            return localFileUrl(objectKey) + "?attachment=1";
+        }
+        String mime = guessMimeFromName(normalized);
         return minioUtil.getPresignedDownloadUrl(objectKey, fileName, mime);
     }
 
@@ -174,12 +397,24 @@ public class SessionFileServiceImpl implements SessionFileService {
     public void deleteFile(Long sessionId, String path) {
         String normalized = normalizeRelativePath(path);
         ensureAllowedPartition(normalized);
+        // 主机根文件不在会话中提供删除（避免误删跨会话共享的主机文件）
+        if (isHostOutput(normalized)) {
+            throw new BizException(ErrorCode.BAD_REQUEST.getCode(), "主机文件不可在会话中删除");
+        }
         // 禁止删除顶级分区目录
         if (isTopLevelPartition(normalized)) {
             throw new BizException(ErrorCode.BAD_REQUEST.getCode(), "不允许删除顶级目录");
         }
         String objectKey = SessionStoragePath.sessionRoot(sessionId) + normalized;
-        minioUtil.delete(objectKey);
+        if (isLocal()) {
+            try {
+                Files.deleteIfExists(localRootPath().resolve(objectKey));
+            } catch (IOException e) {
+                log.warn("[SessionFile] 本地删除失败: objectKey={}, error={}", objectKey, e.getMessage());
+            }
+        } else {
+            minioUtil.delete(objectKey);
+        }
         // 同步移除 attachments 索引中匹配 objectKey 的记录
         try {
             chatSessionService.removeSessionAttachmentByObjectKey(sessionId, objectKey);
@@ -211,29 +446,82 @@ public class SessionFileServiceImpl implements SessionFileService {
     }
 
     private List<MinioUtil.MinioDirEntry> safeList(String prefix) {
+        if (isLocal()) {
+            return new ArrayList<>(localListDirectoryEntries(prefix));
+        }
         try {
-            return minioUtil.listDirectoryEntries(prefix);
+            return new ArrayList<>(minioUtil.listDirectoryEntries(prefix));
         } catch (Exception e) {
             log.warn("[SessionFile] 列举目录失败: prefix={}, error={}", prefix, e.getMessage());
-            return List.of();
+            return new ArrayList<>();
         }
     }
 
     /** 兼容历史 sessions/{id}/uploads/ 下的文件，并入 inputs/ 视图 */
     private List<MinioUtil.MinioDirEntry> legacyUploadsEntries(Long sessionId) {
+        String prefix = SessionStoragePath.sessionRoot(sessionId) + "uploads/";
+        if (isLocal()) {
+            return new ArrayList<>(localListDirectoryEntries(prefix));
+        }
         try {
-            return minioUtil.listDirectoryEntries(SessionStoragePath.sessionRoot(sessionId) + "uploads/");
+            return new ArrayList<>(minioUtil.listDirectoryEntries(prefix));
         } catch (Exception e) {
-            return List.of();
+            return new ArrayList<>();
         }
     }
 
     private boolean hasAnyObject(String prefix) {
+        if (isLocal()) {
+            return !localListDirectoryEntries(prefix).isEmpty();
+        }
         try {
             return !minioUtil.listDirectoryEntries(prefix).isEmpty();
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** 本地磁盘后端：按 objectKey 前缀列举直接子条目（形态与 MinIO 分支的 MinioDirEntry 一致） */
+    private List<MinioUtil.MinioDirEntry> localListDirectoryEntries(String prefix) {
+        Path dir = localRootPath().resolve(prefix);
+        if (!Files.isDirectory(dir)) {
+            return new ArrayList<>();
+        }
+        List<MinioUtil.MinioDirEntry> result = new ArrayList<>();
+        try {
+            List<Path> children = Files.list(dir).toList();
+            for (Path p : children) {
+                String name = p.getFileName().toString();
+                MinioUtil.MinioDirEntry e = new MinioUtil.MinioDirEntry();
+                e.name = name;
+                boolean isDir = Files.isDirectory(p);
+                e.directory = isDir;
+                String childKey = prefix + name; // prefix 以 "/" 结尾
+                e.objectName = isDir ? stripTrailingSlashLocal(childKey) : childKey;
+                try {
+                    e.size = isDir ? 0L : Files.size(p);
+                } catch (IOException ex) {
+                    e.size = 0L;
+                }
+                try {
+                    e.lastModified = Files.getLastModifiedTime(p).toString();
+                } catch (IOException ex) {
+                    e.lastModified = null;
+                }
+                result.add(e);
+            }
+        } catch (IOException e) {
+            log.warn("[SessionFile] 本地列举目录失败: prefix={}, error={}", prefix, e.getMessage());
+            return new ArrayList<>();
+        }
+        return result;
+    }
+
+    private static String stripTrailingSlashLocal(String s) {
+        while (s.endsWith("/")) {
+            s = s.substring(0, s.length() - 1);
+        }
+        return s;
     }
 
     private SessionFileEntryVO toEntry(String root, String parentPath, MinioUtil.MinioDirEntry raw,
