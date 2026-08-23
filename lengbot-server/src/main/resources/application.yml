@@ -110,6 +110,13 @@ neo4j:
 # LengBot 系统配置
 # ========================================
 lengbot:
+  sandbox:
+    # 不配置则默认minio
+    backend: local
+    local-root: ./data/sandbox
+  # 本地文件访问工具（Agent 直接读写本机磁盘，白名单根目录；留空则禁用该工具）
+  local-file:
+    root: 'D:/lengbot/workspace'
   # 对话内核：harness（AgentScope HarnessAgent，默认）/ legacy（手搓工具循环，回滚用）
   chat:
     engine: 'harness'
@@ -216,7 +223,7 @@ lengbot:
 
   # Tavily 联网搜索 API Key
   tavily:
-    api-key: ${TAVILY_API_KEY:}
+    api-key: ${TAVILY_API_KEY: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}
 
   # SiliconFlow AI 生图 API Key
   siliconflow:
