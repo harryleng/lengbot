@@ -51,6 +51,11 @@ public class WorkspaceMemoryServiceImpl implements WorkspaceMemoryService {
     // ====================== 读取（注入用） ======================
 
     @Override
+    /**
+     * 构建工作区记忆 prompt（注入用）。
+     * @param userId 用户ID；当前记忆按 userId 全局维度存取
+     * @param query 当前用户消息，用于向量语义检索
+     */
     public String buildWorkspaceMemoryPrompt(Long userId, String query) {
         if (userId == null) {
             return "";
@@ -73,6 +78,10 @@ public class WorkspaceMemoryServiceImpl implements WorkspaceMemoryService {
     }
 
     @Override
+    /**
+     * 构建每日工作日志 prompt（注入用）。
+     * @param userId 用户ID；当前按 userId 全局维度存取
+     */
     public String buildDailyLogPrompt(Long userId) {
         if (userId == null) {
             return "";
@@ -105,6 +114,10 @@ public class WorkspaceMemoryServiceImpl implements WorkspaceMemoryService {
     // ====================== 写入 ======================
 
     @Override
+    /**
+     * 保存工作区记忆。
+     * @param workspaceId 预留字段：传 null 表示全局维度；待接入工作区隔离后启用
+     */
     public Long saveWorkspaceMemory(Long userId, Long workspaceId, Long sessionId, Long sourceMessageId,
                                     String memoryType, String content, List<String> keywords, BigDecimal confidence) {
         ProjectMemory memory = new ProjectMemory();
@@ -124,6 +137,10 @@ public class WorkspaceMemoryServiceImpl implements WorkspaceMemoryService {
     }
 
     @Override
+    /**
+     * 追加每日工作日志条目。
+     * @param workspaceId 预留字段：当前传 null 表示全局维度
+     */
     public void appendDailyLog(Long userId, Long workspaceId, Long sessionId, String type, String content) {
         if (userId == null || content == null || content.isBlank()) {
             return;
@@ -188,6 +205,7 @@ public class WorkspaceMemoryServiceImpl implements WorkspaceMemoryService {
                 .orderByDesc(ProjectMemory::getLastUsedAt)
                 .orderByDesc(ProjectMemory::getUpdateTime)
                 .last("LIMIT " + Math.max(safeLimit * 2, safeLimit));
+        // 扩展点：传入非 null workspaceId 时按工作区过滤（当前调用方均传 null，分支不触发）
         if (workspaceId != null) {
             wrapper.and(w -> w.isNull(ProjectMemory::getWorkspaceId).or().eq(ProjectMemory::getWorkspaceId, workspaceId));
         } else {

@@ -32,6 +32,11 @@ public interface WorkspaceMemoryService {
      * @param query  当前用户消息（用于语义检索相关性；可为 null/空）
      * @return 形如 "- 偏好：...\n- 事实：..." 的条目片段；无内容返回空串
      */
+    /**
+     * 构建工作区记忆 prompt（注入用）。
+     * @param userId 用户ID；当前记忆按 userId 全局维度存取
+     * @param query 当前用户消息，用于向量语义检索
+     */
     String buildWorkspaceMemoryPrompt(Long userId, String query);
 
     /**
@@ -41,6 +46,10 @@ public interface WorkspaceMemoryService {
      * @param userId 当前用户 ID
      * @return 当日工作记录条目片段；无内容返回空串
      */
+    /**
+     * 构建每日工作日志 prompt（注入用）。
+     * @param userId 用户ID；当前按 userId 全局维度存取
+     */
     String buildDailyLogPrompt(Long userId);
 
     /**
@@ -48,11 +57,19 @@ public interface WorkspaceMemoryService {
      *
      * @return 保存后的记忆 ID
      */
+    /**
+     * 保存工作区记忆。
+     * @param workspaceId 预留字段：传 null 表示全局维度；待接入工作区隔离后启用
+     */
     Long saveWorkspaceMemory(Long userId, Long workspaceId, Long sessionId, Long sourceMessageId,
                              String memoryType, String content, List<String> keywords, BigDecimal confidence);
 
     /**
      * 向当日工作日志追加一条记录（raw_entries 数组末尾）。
+     */
+    /**
+     * 追加每日工作日志条目。
+     * @param workspaceId 预留字段：当前传 null 表示全局维度
      */
     void appendDailyLog(Long userId, Long workspaceId, Long sessionId, String type, String content);
 

@@ -87,9 +87,9 @@
   padding-bottom: var(--scroll-content-gap);
 }
 
-/* ============ 特例 1：侧栏（始终深色背景） ============ */
-/* 侧栏 --sidebar-bg: #171717，在浅色模式下也不能用浅色 thumb（看不见）。
-   固定使用 sidebar 专属变量。 */
+/* ============ 特例 1：侧栏（跟随主题） ============ */
+/* 侧栏背景跟随主题变化，滚动条 thumb 使用 --sidebar-border 变量，
+   浅色模式为 #e0e0e0（在 #f5f5f5 背景上可见），深色模式为 #27272a。 */
 .sidebar,
 .sidebar * {
   scrollbar-color: var(--sidebar-border) transparent;
