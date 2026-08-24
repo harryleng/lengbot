@@ -1,11 +1,13 @@
 package com.lengbot.model;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lengbot.common.BizException;
 import com.lengbot.entity.ModelProvider;
 import com.lengbot.enums.ErrorCode;
 import com.lengbot.enums.ModelProviderType;
 import com.lengbot.event.CacheInvalidationBroadcaster;
+import com.lengbot.mapper.ModelMapper;
 import com.lengbot.service.ModelProviderService;
 import com.lengbot.service.SystemConfigService;
 import com.lengbot.util.ModelProviderCacheUtil;
@@ -22,7 +24,9 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -54,6 +58,7 @@ public class ModelFactory {
     private final ModelProviderCacheUtil cacheUtil;
     private final SystemConfigService systemConfigService;
     private final ObjectMapper objectMapper;
+    private final ModelMapper modelMapper;
     private final CacheInvalidationBroadcaster cacheInvalidationBroadcaster;
 
     /** 多实例广播的缓存域标识：model（按 providerId 索引） */
@@ -340,6 +345,17 @@ public class ModelFactory {
      * 确保 config 含有效 modelId（旁路调用时避免 "unknown-model" 错误）。
      */
     public void ensureModelIdInConfig(Long providerId, Map<String, Object> config) {
+        ensureModelIdInConfig(providerId, config, null);
+    }
+
+    /**
+     * 确保 config 含有效 modelId，优先使用调用方传入的会话模型（四级降级）。
+     *
+     * @param providerId       模型提供商 ID
+     * @param config           目标配置（会被填充 modelId）
+     * @param preferredModelId 会话当前模型 ID（可为 null）
+     */
+    public void ensureModelIdInConfig(Long providerId, Map<String, Object> config, String preferredModelId) {
         if (config == null || providerId == null) {
             return;
         }
@@ -348,9 +364,58 @@ public class ModelFactory {
                 && !"unknown-model".equalsIgnoreCase(modelId.toString().trim())) {
             return;
         }
+        String resolved = resolveModelIdWithFallback(providerId, preferredModelId);
+        if (resolved != null) {
+            config.put("modelId", resolved);
+        }
+    }
+
+    /**
+     * 解析模型 ID（四级降级，按"越来越不可能出错"排序）：
+     * <ol>
+     *   <li>preferredModelId —— 会话当前模型（主对话正在用，最可靠）</li>
+     *   <li>provider.config.modelId —— 用户显式配置的模型</li>
+     *   <li>model 表该 provider 的 active 模型 —— 数据库真实记录</li>
+     *   <li>handler.getCheapestModel() —— 供应商硬编码兜底</li>
+     * </ol>
+     *
+     * @param providerId       模型提供商 ID
+     * @param preferredModelId 会话当前模型 ID（可为 null）
+     * @return 选中的模型 ID（不会为 null）
+     */
+    public String resolveModelIdWithFallback(Long providerId, String preferredModelId) {
+        List<String> candidates = getModelIdCandidates(providerId, preferredModelId);
+        return candidates.isEmpty() ? null : candidates.get(0);
+    }
+
+    /**
+     * 获取候选模型 ID 列表（去重，按可靠性降序），供调用失败时逐个重试。
+     *
+     * @param providerId       模型提供商 ID
+     * @param preferredModelId 会话当前模型 ID（可为 null）
+     * @return 非空候选列表（最坏也包含 cheapest 硬编码兜底）
+     */
+    public List<String> getModelIdCandidates(Long providerId, String preferredModelId) {
         ModelProvider provider = resolveProvider(providerId);
         ModelProviderHandler handler = getHandler(provider.getType());
-        config.put("modelId", resolveModelId(provider, handler));
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        if (preferredModelId != null && !preferredModelId.isBlank()) {
+            candidates.add(preferredModelId.trim());
+        }
+        String configModelId = readConfigModelId(provider);
+        if (configModelId != null) {
+            candidates.add(configModelId);
+        }
+        for (com.lengbot.entity.Model m : queryActiveModels(providerId)) {
+            if (m.getModelId() != null && !m.getModelId().isBlank()) {
+                candidates.add(m.getModelId().trim());
+            }
+        }
+        String cheapest = handler.getCheapestModel();
+        if (cheapest != null && !cheapest.isBlank()) {
+            candidates.add(cheapest);
+        }
+        return new ArrayList<>(candidates);
     }
 
     /**
@@ -398,21 +463,51 @@ public class ModelFactory {
     }
 
     private String resolveModelId(ModelProvider provider, ModelProviderHandler handler) {
-        String config = provider.getConfig();
-        if (config != null && !config.isBlank()) {
-            try {
-                var node = objectMapper.readTree(config);
-                if (node.has("modelId")) {
-                    String modelId = node.get("modelId").asText("");
-                    if (!modelId.isBlank()) {
-                        return modelId;
-                    }
-                }
-            } catch (Exception ignored) {
-                // 配置解析失败时使用默认模型
-            }
+        String configModelId = readConfigModelId(provider);
+        if (configModelId != null) {
+            return configModelId;
+        }
+        List<com.lengbot.entity.Model> models = queryActiveModels(provider.getId());
+        if (!models.isEmpty() && models.get(0).getModelId() != null && !models.get(0).getModelId().isBlank()) {
+            return models.get(0).getModelId().trim();
         }
         return handler.getCheapestModel();
+    }
+
+    /**
+     * 读取 provider.config JSON 中显式配置的 modelId（解析失败或为空返回 null）。
+     */
+    private String readConfigModelId(ModelProvider provider) {
+        String config = provider.getConfig();
+        if (config == null || config.isBlank()) {
+            return null;
+        }
+        try {
+            var node = objectMapper.readTree(config);
+            if (node.has("modelId")) {
+                String modelId = node.get("modelId").asText("");
+                return modelId.isBlank() ? null : modelId.trim();
+            }
+        } catch (Exception ignored) {
+            // 配置解析失败时视为无配置模型
+        }
+        return null;
+    }
+
+    /**
+     * 查询 model 表中该 provider 的启用模型（按更新时间倒序，最多 5 条）。
+     */
+    private List<com.lengbot.entity.Model> queryActiveModels(Long providerId) {
+        try {
+            return modelMapper.selectList(new LambdaQueryWrapper<com.lengbot.entity.Model>()
+                    .eq(com.lengbot.entity.Model::getProviderId, providerId)
+                    .eq(com.lengbot.entity.Model::getStatus, com.lengbot.enums.CommonStatus.ACTIVE)
+                    .orderByDesc(com.lengbot.entity.Model::getUpdateTime)
+                    .last("LIMIT 5"));
+        } catch (Exception e) {
+            log.warn("[ModelFactory] 查询启用模型列表失败: providerId={}, error={}", providerId, e.getMessage());
+            return List.of();
+        }
     }
 
     private Long resolveProviderIdOrDefault(Long providerId) {

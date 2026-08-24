@@ -20,6 +20,7 @@ import com.lengbot.service.*;
 import com.lengbot.util.LlmTraceMessageSerializer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import io.agentscope.core.message.Msg;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ChatResponse;
@@ -291,33 +292,31 @@ public class TraceMiddleware implements ChatMiddleware {
                 conversationText.append(role).append("：").append(content).append("\n");
             }
 
-            // 4. 使用最便宜的模型 + 限制输出 token（50 tokens 足够生成标题）
+            // 4. 模型四级降级：会话模型 → provider.config.modelId → model表active模型 → cheapest 硬编码
             Long providerId = providerResolver.resolve();
             Map<String, Object> titleConfig = new HashMap<>();
-            // ensureModelIdInConfig 会自动设置为最便宜的模型（如 qwen-turbo、gpt-4o-mini）
-            modelFactory.ensureModelIdInConfig(providerId, titleConfig);
+            String sessionModelId = extractSessionModelId(runtimeConfig);
+            // 优先复用会话当前模型（与主对话一致，已验证可用），缺失时逐级降级兜底
+            modelFactory.ensureModelIdInConfig(providerId, titleConfig, sessionModelId);
             // 限制输出 token，加快生成速度
             titleConfig.put("maxTokens", 50);
             // 降低 temperature，提高确定性
             titleConfig.put("temperature", 0.3);
-            GenerateOptions options = modelFactory.buildGenerateOptions(providerId, titleConfig);
 
-            List<io.agentscope.core.message.Msg> promptMessages = new ArrayList<>();
+            List<Msg> promptMessages = new ArrayList<>();
             promptMessages.add(Msgs.system("生成标题，只输出标题，不超过20字。"));
             promptMessages.add(Msgs.user("对话：\n" + conversationText));
 
-            Model model = modelFactory.getModel(providerId);
-            ChatResponse response = com.lengbot.util.LlmTraceContext.callWithoutTrace(() ->
-                    ModelCalls.call(model, promptMessages, options));
-            String title = Msgs.extractText(response).trim();
+            // 5. 调用 AI 生成标题：候选模型逐个重试，失败自动换下一个
+            String title = generateTitleWithRetry(providerId, titleConfig, promptMessages, sessionModelId);
 
-            // 5. 清理标题
+            // 6. 清理标题
             title = title.replaceAll("^[\"'「」『』]+|[\"'「」『』]+$", "");
             if (title.length() > 30) {
                 title = title.substring(0, 30);
             }
 
-            // 6. 更新会话标题
+            // 7. 更新会话标题
             if (!title.isBlank()) {
                 chatSessionService.updateTitle(sessionId, title);
                 log.info("[Chat] 会话标题已生成: sessionId={}, title={}", sessionId, title);
@@ -325,6 +324,59 @@ public class TraceMiddleware implements ChatMiddleware {
         } catch (Exception e) {
             log.warn("[Chat] 标题生成失败: sessionId={}, error={}", sessionId, e.getMessage());
         }
+    }
+
+    /**
+     * 从会话运行时配置中提取当前模型 ID（主对话正在使用的模型）。
+     *
+     * @param runtimeConfig 对话运行时 config（可为 null）
+     * @return 模型 ID；无则返回 null
+     */
+    private String extractSessionModelId(Map<String, Object> runtimeConfig) {
+        if (runtimeConfig == null) {
+            return null;
+        }
+        Object modelId = runtimeConfig.get("modelId");
+        return modelId == null ? null : modelId.toString().trim();
+    }
+
+    /**
+     * 用候选模型列表依次尝试生成标题，模型调用失败时自动切换到下一个候选。
+     * <p>候选顺序：会话模型 → provider.config.modelId → model表active模型 → cheapest 硬编码，
+     * 与 {@link ModelFactory#getModelIdCandidates} 一致。</p>
+     *
+     * @return 非空标题；全部候选失败时抛出最后一个异常
+     */
+    private String generateTitleWithRetry(Long providerId, Map<String, Object> baseConfig,
+                                          List<Msg> promptMessages, String sessionModelId) throws Exception {
+        List<String> candidates = modelFactory.getModelIdCandidates(providerId, sessionModelId);
+        if (candidates.isEmpty()) {
+            return "";
+        }
+        Exception lastError = null;
+        Model model = modelFactory.getModel(providerId);
+        for (int i = 0; i < candidates.size(); i++) {
+            String modelId = candidates.get(i);
+            try {
+                Map<String, Object> cfg = new HashMap<>(baseConfig);
+                cfg.put("modelId", modelId);
+                GenerateOptions options = modelFactory.buildGenerateOptions(providerId, cfg);
+                ChatResponse response = com.lengbot.util.LlmTraceContext.callWithoutTrace(() ->
+                        ModelCalls.call(model, promptMessages, options));
+                String title = Msgs.extractText(response).trim();
+                if (!title.isBlank()) {
+                    return title;
+                }
+            } catch (Exception e) {
+                lastError = e;
+                log.warn("[Chat] 标题生成模型 {} 不可用(候选 {}/{}), 尝试下一个: {}",
+                        modelId, i + 1, candidates.size(), e.getMessage());
+            }
+        }
+        if (lastError != null) {
+            throw lastError;
+        }
+        return "";
     }
 
 
