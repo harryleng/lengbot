@@ -48,6 +48,7 @@ import lombok.extern.slf4j.Slf4j;
 import io.agentscope.core.model.Model;
 import com.lengbot.util.ModelCalls;
 import io.agentscope.core.model.ChatResponse;
+import io.agentscope.core.model.GenerateOptions;
 import com.lengbot.util.Msgs;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.cache.annotation.CacheEvict;
@@ -345,12 +346,18 @@ public class AgentServiceImpl extends ServiceImpl<AgentMapper, Agent>
         messages.add(Msgs.system(GENERATE_PROMPT_SYSTEM));
         messages.add(Msgs.user(userMessage));
 
-        // 3. 调用AI生成
-        Long providerId = providerResolver.resolve();
+        // 3. 调用AI生成：provider 跟随 agent 配置（与主对话同源，模型名才匹配供应商）
+        Map<String, Object> runtimeConfig = AgentChatRuntimeConfigUtil.resolveForChat(
+                agent, null, agentVersionService, objectMapper);
+        Long providerId = providerResolver.resolveFromConfig(runtimeConfig);
+        Map<String, Object> genConfig = new HashMap<>();
+        String agentModelId = extractModelId(runtimeConfig);
+        modelFactory.ensureModelIdInConfig(providerId, genConfig, agentModelId);
+        GenerateOptions options = modelFactory.buildGenerateOptions(providerId, genConfig);
         Model model = modelFactory.getModel(providerId);
         String result;
         try {
-            ChatResponse response = LlmTraceContext.callWithoutTrace(() -> ModelCalls.call(model, messages));
+            ChatResponse response = LlmTraceContext.callWithoutTrace(() -> ModelCalls.call(model, messages, options));
             result = Msgs.extractText(response).trim();
         } catch (BizException e) {
             throw e;
@@ -380,12 +387,18 @@ public class AgentServiceImpl extends ServiceImpl<AgentMapper, Agent>
         messages.add(Msgs.system(GENERATE_QUESTIONS_SYSTEM));
         messages.add(Msgs.user(userMessage));
 
-        // 3. 调用AI生成
-        Long providerId = providerResolver.resolve();
+        // 3. 调用AI生成：provider 跟随 agent 配置（与主对话同源，模型名才匹配供应商）
+        Map<String, Object> runtimeConfig = AgentChatRuntimeConfigUtil.resolveForChat(
+                agent, null, agentVersionService, objectMapper);
+        Long providerId = providerResolver.resolveFromConfig(runtimeConfig);
+        Map<String, Object> genConfig = new HashMap<>();
+        String agentModelId = extractModelId(runtimeConfig);
+        modelFactory.ensureModelIdInConfig(providerId, genConfig, agentModelId);
+        GenerateOptions options = modelFactory.buildGenerateOptions(providerId, genConfig);
         Model model = modelFactory.getModel(providerId);
         String json;
         try {
-            ChatResponse response = LlmTraceContext.callWithoutTrace(() -> ModelCalls.call(model, messages));
+            ChatResponse response = LlmTraceContext.callWithoutTrace(() -> ModelCalls.call(model, messages, options));
             json = Msgs.extractText(response).trim();
         } catch (BizException e) {
             throw e;
@@ -412,6 +425,20 @@ public class AgentServiceImpl extends ServiceImpl<AgentMapper, Agent>
 
         log.info("[Agent] AI生成推荐问题: agentId={}", id);
         return json;
+    }
+
+    /**
+     * 从 agent 运行时配置中提取模型 ID（旁路调用时复用 agent 配置的模型，保证与主对话同源）。
+     *
+     * @param runtimeConfig agent 运行时配置（可为 null）
+     * @return 模型 ID；无则返回 null
+     */
+    private String extractModelId(Map<String, Object> runtimeConfig) {
+        if (runtimeConfig == null) {
+            return null;
+        }
+        Object modelId = runtimeConfig.get("modelId");
+        return modelId == null ? null : modelId.toString().trim();
     }
 
     @Override
