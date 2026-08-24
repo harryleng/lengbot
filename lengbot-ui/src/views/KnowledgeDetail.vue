@@ -1353,6 +1353,7 @@ import {
   deleteDocument,
   previewDocument,
   getDocumentDownloadUrl,
+  getDocumentPreviewStreamUrl,
   getChunks,
   searchKnowledge,
   generateMindmap,
@@ -1387,7 +1388,7 @@ import { Transformer } from 'markmap-lib'
 import { Markmap } from 'markmap-view'
 import FilePreview from '../components/FilePreview.vue'
 import FileTypeIcon from '../components/FileTypeIcon.vue'
-import { hasSourceFilePreview } from '../utils/filePreview'
+import { hasSourceFilePreview, isIframeSourcePreviewable } from '../utils/filePreview'
 import RAGEvaluationTab from '../components/eval/RAGEvaluationTab.vue'
 import EvaluationBenchmarks from '../components/eval/EvaluationBenchmarks.vue'
 import KnowledgeGraphTab from '../components/KnowledgeGraphTab.vue'
@@ -2210,7 +2211,11 @@ async function openDocModal(doc) {
     previewContent.value = previewRes.value.data || ''
   }
   previewLoaded.value = true
-  if (downloadRes.status === 'fulfilled') {
+  // iframe 类（pdf/html/htm）走同源 /preview-file 内联端点，规避跨域 MinIO 预签名 URL 被浏览器/插件拦截
+  const ext = (doc.fileType || '').toLowerCase()
+  if (isIframeSourcePreviewable(ext)) {
+    downloadUrl.value = getDocumentPreviewStreamUrl(doc.id)
+  } else if (downloadRes.status === 'fulfilled') {
     downloadUrl.value = downloadRes.value.data?.url || ''
   }
   if (chunksRes.status === 'fulfilled') {

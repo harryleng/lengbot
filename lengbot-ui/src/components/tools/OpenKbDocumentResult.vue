@@ -108,7 +108,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { FileTextOutlined, EyeOutlined, FileOutlined, DownloadOutlined } from '@ant-design/icons-vue'
-import { getDocumentDownloadUrl } from '../../api/knowledge'
+import { getDocumentDownloadUrl, getDocumentPreviewStreamUrl } from '../../api/knowledge'
 import {
   getToolResultModalContainer,
   toolResultModalWrapStyle,
@@ -214,7 +214,11 @@ async function loadFilePreview() {
   try {
     const res = await getDocumentDownloadUrl(docId)
     const vo = res.data || res
-    filePreview.value.url = vo.url || ''
+    const ext = (vo.fileType || '').toLowerCase()
+    // iframe 类（pdf/html/htm）走同源 /preview-file 内联端点，规避跨域 MinIO 预签名 URL 被浏览器/插件拦截
+    filePreview.value.url = isIframeSourcePreviewable(ext)
+      ? getDocumentPreviewStreamUrl(docId)
+      : (vo.url || '')
     filePreview.value.fileName = vo.fileName || data.value.document_name || ''
     filePreview.value.fileType = vo.fileType || ''
 

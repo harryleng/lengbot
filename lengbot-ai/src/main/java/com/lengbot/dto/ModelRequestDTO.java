@@ -29,4 +29,7 @@ public class ModelRequestDTO {
 
     @NotNull(message = "模型类型不能为空")
     private ModelType type;
+
+    /** 向量维度（embedding 模型需要，需与数据库向量列大小一致） */
+    private Integer dimension;
 }

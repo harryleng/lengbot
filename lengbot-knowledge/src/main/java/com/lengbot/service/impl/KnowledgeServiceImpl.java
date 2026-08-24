@@ -112,7 +112,7 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeMapper, Knowledge
         knowledge.setType(request.getType());
         knowledge.setConfig(buildKnowledgeConfig(request, true, null));
         knowledge.setQueryParams(request.getQueryParams());
-        knowledge.setGraphEnabled(request.getType() == KnowledgeType.DIFY ? false : request.getGraphEnabled());
+        knowledge.setGraphEnabled(request.getType() == KnowledgeType.DIFY ? Boolean.FALSE : Boolean.TRUE.equals(request.getGraphEnabled()));
 
         // 3. 初始化内部字段
         knowledge.setUserId(userId);

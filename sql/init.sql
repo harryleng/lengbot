@@ -77,6 +77,7 @@ CREATE TABLE model (
     model_id        VARCHAR(128)    NOT NULL,
     name            VARCHAR(128)    NOT NULL,
     type            VARCHAR(20)     NOT NULL DEFAULT 'llm',
+    dimension       INTEGER,
     status          VARCHAR(20)     NOT NULL DEFAULT 'active',
     create_time     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -86,6 +87,10 @@ CREATE TABLE model (
 CREATE INDEX idx_model_provider_id ON model (provider_id);
 CREATE INDEX idx_model_type ON model (type);
 COMMENT ON TABLE model IS '模型表';
+
+-- 存量库迁移：为 model 表补充向量维度列（embedding 模型专用，需与数据库向量列大小一致）
+-- 新建库已在 CREATE TABLE 中包含该列，此句 IF NOT EXISTS 可安全重复执行。
+ALTER TABLE model ADD COLUMN IF NOT EXISTS dimension INTEGER;
 
 -- ========================================
 -- Agent 表
@@ -380,7 +385,7 @@ CREATE TABLE embedding (
     qa_pair_id      BIGINT,
     model_name      VARCHAR(64)     NOT NULL,
     dimension       INT             NOT NULL DEFAULT 1536,
-    vector          vector(1536)    NOT NULL,
+    vector          vector(1024)    NOT NULL,
     create_time     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
 );
@@ -1075,7 +1080,7 @@ CREATE TABLE user_memory (
     source_message_id   BIGINT,
     confidence          NUMERIC(5,4)    NOT NULL DEFAULT 1.0000,
     status              VARCHAR(32)     NOT NULL DEFAULT 'active',
-    embedding_vector    vector(1536),
+    embedding_vector    vector(1024),
     last_used_at        TIMESTAMP,
     create_time         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1733,7 +1738,7 @@ CREATE TABLE project_memory (
     source_message_id   BIGINT,
     confidence          NUMERIC(5,4)    NOT NULL DEFAULT 1.0000,
     status              VARCHAR(32)     NOT NULL DEFAULT 'active',
-    embedding_vector    vector(1536),
+    embedding_vector    vector(1024),
     last_used_at        TIMESTAMP,
     create_time         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1768,3 +1773,33 @@ COMMENT ON TABLE daily_log IS '每日工作日志表：按 userId + log_date 记
 COMMENT ON COLUMN daily_log.log_date IS '日志日期（按天）';
 COMMENT ON COLUMN daily_log.summary IS '当日要点摘要（可由 LLM 归纳原始记录得到）';
 COMMENT ON COLUMN daily_log.raw_entries IS '原始记录列表：[{time, type, content}]';
+
+-- ============================================================================
+-- 存量库迁移：向量维度 1536 -> 1024（适配 BAAI/bge-large-zh-v1.5 等 1024 维模型）
+-- 背景：bge 等开源嵌入模型原生维度为 1024，且不支持 OpenAI 的 dimensions 参数；
+--       数据库向量列须与模型原生维度一致，否则插入会因维度不匹配失败。
+--       以下脚本幂等，可对新库重复执行（DROP/ALTER 均带 IF EXISTS / 空表无副作用）。
+-- ============================================================================
+
+-- 1. 清空已有向量（1536 与 1024 维度不兼容，旧向量无法强制转换，需重新嵌入）
+DELETE FROM embedding;
+UPDATE user_memory SET embedding_vector = NULL WHERE embedding_vector IS NOT NULL;
+UPDATE project_memory SET embedding_vector = NULL WHERE embedding_vector IS NOT NULL;
+
+-- 2. 删除 HNSW 索引（向量列类型变更需先移除依赖索引）
+DROP INDEX IF EXISTS idx_embedding_vector_hnsw;
+DROP INDEX IF EXISTS idx_user_memory_vector_hnsw;
+DROP INDEX IF EXISTS idx_project_memory_vector_hnsw;
+
+-- 3. 变更向量列维度 1536 -> 1024
+ALTER TABLE embedding ALTER COLUMN vector TYPE vector(1024);
+ALTER TABLE user_memory ALTER COLUMN embedding_vector TYPE vector(1024);
+ALTER TABLE project_memory ALTER COLUMN embedding_vector TYPE vector(1024);
+
+-- 4. 重建 HNSW 索引
+CREATE INDEX idx_embedding_vector_hnsw ON embedding USING hnsw (vector vector_cosine_ops);
+CREATE INDEX idx_user_memory_vector_hnsw ON user_memory USING hnsw (embedding_vector vector_cosine_ops) WHERE embedding_vector IS NOT NULL AND deleted = 0;
+CREATE INDEX idx_project_memory_vector_hnsw ON project_memory USING hnsw (embedding_vector vector_cosine_ops) WHERE embedding_vector IS NOT NULL AND deleted = 0;
+
+-- 5. 兜底：embedding 模型记录未配置维度时，按 1024 维写入（与向量列一致）
+UPDATE model SET dimension = 1024 WHERE type = 'embedding' AND dimension IS NULL;

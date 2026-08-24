@@ -6,7 +6,6 @@ import io.agentscope.core.model.Model;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
@@ -65,15 +64,5 @@ public class AgentScopeConfig {
      */
     public Model getModel(Long providerId) {
         return modelFactory.getModel(providerId);
-    }
-
-    /**
-     * 获取 ModelFactory（供其他组件直接使用）。
-     *
-     * @return ModelFactory 实例
-     */
-    @Bean
-    public ModelFactory modelFactoryBean() {
-        return modelFactory;
     }
 }

@@ -94,6 +94,11 @@ export function getDocumentDownloadUrl(docId) {
   return request.get(`/knowledge/documents/${docId}/download`)
 }
 
+// 同源内联预览地址（供 iframe 渲染，规避跨域 MinIO 预签名 URL 被浏览器/插件拦截）
+export function getDocumentPreviewStreamUrl(docId) {
+  return `/api/knowledge/documents/${docId}/preview-file`
+}
+
 export function getDefaultIngestConfig(knowledgeId) {
   return request.get(`/knowledge/${knowledgeId}/default-ingest-config`)
 }

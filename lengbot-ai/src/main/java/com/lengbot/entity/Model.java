@@ -43,6 +43,10 @@ public class Model {
     @Schema(description = "模型类型")
     private ModelType type;
 
+    @TableField("dimension")
+    @Schema(description = "向量维度（embedding 模型必填，需与数据库向量列大小一致）")
+    private Integer dimension;
+
     @TableField("status")
     @Schema(description = "状态")
     private CommonStatus status;

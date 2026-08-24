@@ -46,6 +46,7 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, Model>
         model.setModelId(request.getModelId());
         model.setName(request.getName());
         model.setType(request.getType());
+        model.setDimension(request.getDimension());
         model.setStatus(CommonStatus.ACTIVE);
         save(model);
         syncCache(model.getProviderId());

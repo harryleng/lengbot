@@ -16,14 +16,17 @@ import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.core.io.InputStreamResource;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 
@@ -142,34 +145,61 @@ public class KnowledgeDocController {
 
     @Operation(summary = "代理下载文档文件（强制下载，文件名正确）")
     @GetMapping("/documents/{docId}/download-file")
-    public ResponseEntity<InputStreamResource> downloadFile(@PathVariable Long docId) {
+    public ResponseEntity<StreamingResponseBody> downloadFile(@PathVariable Long docId) {
         DocumentStreamVO stream = documentService.downloadDocumentAsStream(docId);
         ContentDisposition disposition = ContentDisposition.attachment()
-                .filename(stream.getFileName(), java.nio.charset.StandardCharsets.UTF_8)
+                .filename(stream.getFileName(), StandardCharsets.UTF_8)
                 .build();
-        // InputStreamResource.close() 会自动关闭底层 InputStream，客户端断连时流会被释放
-        InputStreamResource resource = new InputStreamResource(stream.getInputStream()) {
-            @Override
-            public String getFilename() {
-                return stream.getFileName();
+        // StreamingResponseBody 直接把流拷到响应输出，流只被消费一次，规避 InputStreamResource 被重复读取的异常
+        StreamingResponseBody body = outputStream -> {
+            try (InputStream in = stream.getInputStream()) {
+                in.transferTo(outputStream);
             }
         };
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(stream.getContentType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
-                .body(resource);
+                .body(body);
+    }
+
+    @Operation(summary = "同源内联预览文档（供 iframe 渲染，规避跨域 MinIO 预签名 URL 被浏览器/插件拦截）")
+    @GetMapping("/documents/{docId}/preview-file")
+    public ResponseEntity<StreamingResponseBody> previewFile(@PathVariable Long docId) {
+        // 复用下载流（已含权限校验 + 内容类型解析），仅将 Content-Disposition 改为 inline，
+        // 使浏览器内置阅读器可内联渲染，且同源无 X-Frame-Options/插件拦截问题。
+        DocumentStreamVO stream = documentService.downloadDocumentAsStream(docId);
+        ContentDisposition disposition = ContentDisposition.inline()
+                .filename(stream.getFileName(), StandardCharsets.UTF_8)
+                .build();
+        StreamingResponseBody body = outputStream -> {
+            try (InputStream in = stream.getInputStream()) {
+                in.transferTo(outputStream);
+            }
+        };
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(stream.getContentType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .cacheControl(CacheControl.maxAge(Duration.ofHours(1)))
+                .body(body);
     }
 
     @Operation(summary = "代理获取知识库文档图片（供 Markdown 预览）")
     @GetMapping("/images/{knowledgeId}/{filename}")
-    public ResponseEntity<InputStreamResource> getKnowledgeImage(
+    public ResponseEntity<StreamingResponseBody> getKnowledgeImage(
             @PathVariable Long knowledgeId, @PathVariable String filename) {
         // 业务编排（路径拼装 + MinIO stat/download）下沉到 DocumentService，Controller 仅做 Optional → ResponseEntity 的 HTTP 翻译
         return documentService.serveKnowledgeImage(knowledgeId, filename)
-                .map(stream -> ResponseEntity.ok()
-                        .contentType(MediaType.parseMediaType(stream.getContentType()))
-                        .cacheControl(org.springframework.http.CacheControl.maxAge(Duration.ofDays(7)))
-                        .body(new InputStreamResource(stream.getInputStream())))
+                .map(stream -> {
+                    StreamingResponseBody body = outputStream -> {
+                        try (InputStream in = stream.getInputStream()) {
+                            in.transferTo(outputStream);
+                        }
+                    };
+                    return ResponseEntity.ok()
+                            .contentType(MediaType.parseMediaType(stream.getContentType()))
+                            .cacheControl(CacheControl.maxAge(Duration.ofDays(7)))
+                            .body(body);
+                })
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
