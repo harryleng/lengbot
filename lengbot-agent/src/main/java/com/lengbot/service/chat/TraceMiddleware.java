@@ -292,8 +292,10 @@ public class TraceMiddleware implements ChatMiddleware {
                 conversationText.append(role).append("：").append(content).append("\n");
             }
 
-            // 4. 模型四级降级：会话模型 → provider.config.modelId → model表active模型 → cheapest 硬编码
-            Long providerId = providerResolver.resolve();
+            // 4. 模型选择：provider 优先跟随会话（与主对话同源，模型名才匹配供应商），缺失时回退系统默认
+            Long providerId = runtimeConfig != null
+                    ? providerResolver.resolveFromConfig(runtimeConfig)
+                    : providerResolver.resolve();
             Map<String, Object> titleConfig = new HashMap<>();
             String sessionModelId = extractSessionModelId(runtimeConfig);
             // 优先复用会话当前模型（与主对话一致，已验证可用），缺失时逐级降级兜底
@@ -308,7 +310,20 @@ public class TraceMiddleware implements ChatMiddleware {
             promptMessages.add(Msgs.user("对话：\n" + conversationText));
 
             // 5. 调用 AI 生成标题：候选模型逐个重试，失败自动换下一个
-            String title = generateTitleWithRetry(providerId, titleConfig, promptMessages, sessionModelId);
+            String title;
+            try {
+                title = generateTitleWithRetry(providerId, titleConfig, promptMessages, sessionModelId);
+            } catch (Exception e) {
+                // 会话 provider 全部候选失败 → 兜底换系统默认 provider 再试一轮
+                Long defaultProviderId = providerResolver.resolve();
+                if (!defaultProviderId.equals(providerId)) {
+                    log.warn("[Chat] 标题生成 会话provider={} 候选全败，兜底默认provider={}: {}",
+                            providerId, defaultProviderId, e.getMessage());
+                    title = generateTitleWithRetry(defaultProviderId, titleConfig, promptMessages, null);
+                } else {
+                    throw e;
+                }
+            }
 
             // 6. 清理标题
             title = title.replaceAll("^[\"'「」『』]+|[\"'「」『』]+$", "");
