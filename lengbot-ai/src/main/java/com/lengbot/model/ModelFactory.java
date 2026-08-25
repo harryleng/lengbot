@@ -6,6 +6,7 @@ import com.lengbot.common.BizException;
 import com.lengbot.entity.ModelProvider;
 import com.lengbot.enums.ErrorCode;
 import com.lengbot.enums.ModelProviderType;
+import com.lengbot.enums.ModelType;
 import com.lengbot.event.CacheInvalidationBroadcaster;
 import com.lengbot.mapper.ModelMapper;
 import com.lengbot.service.ModelProviderService;
@@ -406,7 +407,7 @@ public class ModelFactory {
         if (configModelId != null) {
             candidates.add(configModelId);
         }
-        for (com.lengbot.entity.Model m : queryActiveModels(providerId)) {
+        for (com.lengbot.entity.Model m : queryActiveModelsByType(providerId, ModelType.LLM)) {
             if (m.getModelId() != null && !m.getModelId().isBlank()) {
                 candidates.add(m.getModelId().trim());
             }
@@ -430,6 +431,18 @@ public class ModelFactory {
             cacheUtil.cacheAllProviders(providers);
         }
         return providers.stream().map(ModelProvider::getId).collect(Collectors.toList());
+    }
+
+    /**
+     * 解析聊天模型提供商 ID（供知识库侧旁路调用使用）。
+     * <p>为空时按「系统默认 → 第一个含 LLM 模型的 active provider」兜底，
+     * 避免选中只有 embedding 模型的 provider（如 SiliconFlow）导致聊天调用 20012。</p>
+     *
+     * @param providerId 传入的 providerId（可为 null）
+     * @return 实际使用的 providerId
+     */
+    public Long resolveChatProviderId(Long providerId) {
+        return resolveProviderIdOrDefault(providerId);
     }
 
     // ==================== 私有方法 ====================
@@ -466,7 +479,9 @@ public class ModelFactory {
         if (configModelId != null) {
             return configModelId;
         }
-        List<com.lengbot.entity.Model> models = queryActiveModels(provider.getId());
+        // 只取 LLM（对话）模型：避免 provider 下仅有 embedding/rerank 等模型时，
+        // 误把 embedding 模型当聊天模型调用（如 SiliconFlow 下只有 BAAI/bge-*，会 20012）
+        List<com.lengbot.entity.Model> models = queryActiveModelsByType(provider.getId(), ModelType.LLM);
         if (!models.isEmpty() && models.get(0).getModelId() != null && !models.get(0).getModelId().isBlank()) {
             return models.get(0).getModelId().trim();
         }
@@ -494,15 +509,19 @@ public class ModelFactory {
     }
 
     /**
-     * 查询 model 表中该 provider 的启用模型（按更新时间倒序，最多 5 条）。
+     * 查询 model 表中该 provider 指定类型的启用模型（按更新时间倒序，最多 5 条）。
+     * <p>type 为 null 时不过滤类型；聊天场景应传 {@link ModelType#LLM}，避免误取 embedding 等模型。</p>
      */
-    private List<com.lengbot.entity.Model> queryActiveModels(Long providerId) {
+    private List<com.lengbot.entity.Model> queryActiveModelsByType(Long providerId, ModelType type) {
         try {
-            return modelMapper.selectList(new LambdaQueryWrapper<com.lengbot.entity.Model>()
+            LambdaQueryWrapper<com.lengbot.entity.Model> wrapper = new LambdaQueryWrapper<com.lengbot.entity.Model>()
                     .eq(com.lengbot.entity.Model::getProviderId, providerId)
-                    .eq(com.lengbot.entity.Model::getStatus, com.lengbot.enums.CommonStatus.ACTIVE)
-                    .orderByDesc(com.lengbot.entity.Model::getUpdateTime)
-                    .last("LIMIT 5"));
+                    .eq(com.lengbot.entity.Model::getStatus, com.lengbot.enums.CommonStatus.ACTIVE);
+            if (type != null) {
+                wrapper.eq(com.lengbot.entity.Model::getType, type);
+            }
+            wrapper.orderByDesc(com.lengbot.entity.Model::getUpdateTime).last("LIMIT 5");
+            return modelMapper.selectList(wrapper);
         } catch (Exception e) {
             log.warn("[ModelFactory] 查询启用模型列表失败: providerId={}, error={}", providerId, e.getMessage());
             return List.of();
@@ -518,9 +537,17 @@ public class ModelFactory {
             log.debug("[ModelFactory] providerId 为空，使用系统默认: {}", defaultId);
             return defaultId;
         }
+        // 兜底：优先选「有 LLM（对话）模型」的 active provider，避免选中只有 embedding
+        // 模型的 provider（如 SiliconFlow 仅有 BAAI/bge-*）导致聊天调用 20012
         List<Long> available = getAvailableProviderIds();
+        for (Long pid : available) {
+            if (!queryActiveModelsByType(pid, ModelType.LLM).isEmpty()) {
+                log.debug("[ModelFactory] 系统默认未配置，使用第一个含 LLM 模型的提供商: {}", pid);
+                return pid;
+            }
+        }
         if (!available.isEmpty()) {
-            log.debug("[ModelFactory] 系统默认未配置，使用第一个可用提供商: {}", available.get(0));
+            log.warn("[ModelFactory] 无含 LLM 模型的提供商，回退到第一个可用提供商: {}", available.get(0));
             return available.get(0);
         }
         throw new BizException(ErrorCode.MODEL_PROVIDER_NOT_FOUND);

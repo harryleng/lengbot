@@ -628,23 +628,9 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeMapper, Knowledge
      * 解析providerId，为空时使用默认提供商（第一个可用的）
      */
     private Long resolveProviderId(Long providerId) {
-        // 1. 优先使用传入的 providerId
-        if (providerId != null) {
-            return providerId;
-        }
-
-        // 2. 其次使用系统默认AI配置
-        var defaultConfig = systemConfigService.getDefaultAiConfig();
-        if (defaultConfig.getProviderId() != null) {
-            return defaultConfig.getProviderId();
-        }
-
-        // 3. 最后使用第一个可用的提供商
-        var providers = modelFactory.getAvailableProviderIds();
-        if (providers.isEmpty()) {
-            throw new BizException(ErrorCode.MODEL_PROVIDER_NOT_FOUND);
-        }
-        return providers.get(0);
+        // 委托 ModelFactory 解析：优先传入 providerId → 系统默认 AI 配置 → 第一个含 LLM 模型的 active provider
+        // （避免选中只有 embedding 模型的 provider 如 SiliconFlow，导致聊天调用 20012）
+        return modelFactory.resolveChatProviderId(providerId);
     }
 
     @Override
