@@ -20,13 +20,14 @@
       </button>
     </div>
 
-    <!-- PDF 预览：sandbox 仅允许同源显示，禁脚本/表单/弹窗，规避 PDF 嵌入式 JS 风险 -->
+    <!-- PDF 预览：Chrome 内置 PDF 阅读器本身是 JS 应用，需 allow-scripts 才能渲染；
+         嵌入式 JS 风险由浏览器内置阅读器的二次沙箱兜底，此处不再额外禁脚本 -->
     <iframe
       v-else-if="isPdf && fileUrl"
       :src="fileUrl"
       class="preview-iframe"
       frameborder="0"
-      sandbox="allow-same-origin"
+      sandbox="allow-same-origin allow-scripts"
     ></iframe>
 
     <!-- HTML 预览：优先用已拉取的正文 srcdoc 内联渲染，绕开 MinIO 预签名 URL 的 attachment/Content-Type 头导致的空白页；无正文时才回退到 :src -->

@@ -68,7 +68,10 @@ export default defineConfig({
         "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
         "connect-src 'self' https: ws: wss:",
         "font-src 'self' data:",
-        "frame-src 'self'",
+        // frame-src 放行 chrome-extension:，否则 Chrome 内置 PDF 阅读器（跑在
+        // chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai 下）会被 CSP 拦截，
+        // iframe 里显示「此页面已被 Chrome 屏蔽」
+        "frame-src 'self' chrome-extension:",
         "object-src 'none'",
         "base-uri 'self'",
       ].join('; '),
