@@ -368,17 +368,17 @@ public class ChatContext {
         } else if (!metaReasoning.isEmpty()) {
             reasoningContent.setLength(0);
             appendReasoningContent(metaReasoning);
-        } else if (!rawText.isEmpty() && fullReply.length() == 0) {
+        } else if (!rawText.isEmpty() && fullReply.isEmpty()) {
             fullReply.append(rawText);
         }
 
-        if (reasoningContent.length() > 0) {
+        if (!reasoningContent.isEmpty()) {
             String normalized = com.lengbot.util.InlineThinkingStreamParser.normalizeReasoningText(
                     reasoningContent.toString());
             reasoningContent.setLength(0);
             reasoningContent.append(normalized);
         }
-        if (fullReply.length() > 0) {
+        if (!fullReply.isEmpty()) {
             String normalized = com.lengbot.util.InlineThinkingStreamParser.normalizeContentText(
                     fullReply.toString());
             fullReply.setLength(0);

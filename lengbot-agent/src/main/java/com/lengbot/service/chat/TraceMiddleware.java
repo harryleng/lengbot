@@ -106,7 +106,7 @@ public class TraceMiddleware implements ChatMiddleware {
 
                     // 4. 追加AI思考内容到spans
                     ctx.finalizeInlineThinking();
-                    if (ctx.getReasoningContent().length() > 0) {
+                    if (!ctx.getReasoningContent().isEmpty()) {
                         ctx.getSpans().add(LlmTraceSpanDTO.of("reasoning", null, "ai_reasoning",
                                 ctx.getStartTime(), tEnd - ctx.getStartTime(), "OK",
                                 Map.of("content", com.lengbot.util.TextNormalizeUtil.sanitizeForDatabase(
