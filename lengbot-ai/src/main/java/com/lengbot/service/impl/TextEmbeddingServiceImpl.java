@@ -15,11 +15,22 @@ import io.agentscope.core.model.ExecutionConfig;
 import io.agentscope.core.embedding.dashscope.DashScopeTextEmbedding;
 import io.agentscope.core.embedding.openai.OpenAITextEmbedding;
 import io.agentscope.core.embedding.ollama.OllamaTextEmbedding;
+import io.agentscope.core.message.ContentBlock;
+import io.agentscope.core.message.TextBlock;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,6 +51,7 @@ public class TextEmbeddingServiceImpl implements TextEmbeddingService {
     private final SystemConfigService systemConfigService;
     private final ModelService modelService;
     private final List<ModelProviderHandler> handlers;
+    private final ObjectMapper objectMapper;
 
     private EmbeddingModel embeddingModel;
     private Map<ModelProviderType, ModelProviderHandler> handlerMap;
@@ -157,13 +169,18 @@ public class TextEmbeddingServiceImpl implements TextEmbeddingService {
             case OPENAI -> {
                 String apiKey = provider.getApiKey();
                 String baseUrl = provider.getBaseUrl();
+                // 不支持 dimensions 的 OpenAI 兼容模型（如 SiliconFlow 的 BAAI/bge-*）：
+                // AgentScope 的 OpenAITextEmbedding 会无条件下发 dimensions（默认 1536），
+                // 而 bge 等固定维度模型不接受该参数 → 400。此处改用 HTTP 直调，不带 dimensions。
+                if (!sendDimensions) {
+                    yield new HttpDirectEmbeddingModel(
+                            apiKey, baseUrl, modelId, dimension, objectMapper);
+                }
                 var builder = OpenAITextEmbedding.builder()
                         .apiKey(apiKey)
                         .modelName(modelId)
-                        .executionConfig(defaultConfig);
-                if (sendDimensions) {
-                    builder.dimensions(dimension);
-                }
+                        .executionConfig(defaultConfig)
+                        .dimensions(dimension);
                 if (baseUrl != null && !baseUrl.isBlank()) {
                     builder.baseUrl(baseUrl);
                 }
@@ -218,6 +235,107 @@ public class TextEmbeddingServiceImpl implements TextEmbeddingService {
             this.embeddingModel = buildEmbeddingModel(embeddingModelEntity);
             log.info("[TextEmbeddingService] 嵌入模型已刷新: modelId={}, dims={}",
                     embeddingModel.getModelName(), embeddingModel.getDimensions());
+        }
+    }
+
+    /**
+     * OpenAI 兼容协议但【不支持 dimensions 参数】的嵌入模型实现。
+     * <p>直接通过 {@code java.net.http.HttpClient} 调用 {@code POST {baseUrl}/embeddings}，
+     * 请求体只含 {@code model} + {@code input}，不下发 {@code dimensions}。
+     * 用于绕开 AgentScope {@code OpenAITextEmbedding} 无条件携带 dimensions（默认 1536）
+     * 导致 SiliconFlow BAAI/bge-* 等固定维度模型返回 400 的问题。</p>
+     */
+    private static class HttpDirectEmbeddingModel implements EmbeddingModel {
+
+        private final String apiKey;
+        private final String baseUrl;
+        private final String modelName;
+        private final int dimensions;
+        private final ObjectMapper objectMapper;
+        private final HttpClient httpClient;
+
+        HttpDirectEmbeddingModel(String apiKey, String baseUrl, String modelName,
+                                 int dimensions, ObjectMapper objectMapper) {
+            this.apiKey = apiKey;
+            this.baseUrl = baseUrl;
+            this.modelName = modelName;
+            this.dimensions = dimensions;
+            this.objectMapper = objectMapper;
+            this.httpClient = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .build();
+        }
+
+        @Override
+        public Mono<double[]> embed(ContentBlock contentBlock) {
+            return Mono.fromCallable(() -> {
+                String text = extractText(contentBlock);
+                String url = (baseUrl != null && !baseUrl.isBlank()
+                        ? baseUrl.replaceAll("/+$", "")
+                        : "https://api.openai.com/v1") + "/embeddings";
+
+                Map<String, Object> body = new LinkedHashMap<>();
+                body.put("model", modelName);
+                body.put("input", text);
+                String jsonBody = objectMapper.writeValueAsString(body);
+
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Content-Type", "application/json")
+                        .header("Authorization", "Bearer " + apiKey)
+                        .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                        .timeout(Duration.ofSeconds(60))
+                        .build();
+
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() != 200) {
+                    throw new IllegalStateException("Embedding API 返回 HTTP " + response.statusCode()
+                            + ": " + response.body());
+                }
+                return parseEmbedding(response.body());
+            });
+        }
+
+        @Override
+        public String getModelName() {
+            return modelName;
+        }
+
+        @Override
+        public int getDimensions() {
+            return dimensions;
+        }
+
+        private String extractText(ContentBlock contentBlock) {
+            if (contentBlock == null) {
+                throw new IllegalArgumentException("ContentBlock cannot be null");
+            }
+            if (contentBlock instanceof TextBlock textBlock) {
+                String text = textBlock.getText();
+                if (text == null || text.isBlank()) {
+                    throw new IllegalArgumentException("TextBlock text cannot be null or empty");
+                }
+                return text;
+            }
+            throw new IllegalArgumentException("不支持的 ContentBlock 类型: "
+                    + contentBlock.getClass().getSimpleName());
+        }
+
+        private double[] parseEmbedding(String responseBody) throws Exception {
+            JsonNode root = objectMapper.readTree(responseBody);
+            JsonNode data = root.path("data");
+            if (!data.isArray() || data.isEmpty()) {
+                throw new IllegalStateException("Embedding API 响应缺少 data 数组");
+            }
+            JsonNode embedding = data.get(0).path("embedding");
+            if (!embedding.isArray() || embedding.isEmpty()) {
+                throw new IllegalStateException("Embedding API 响应缺少 embedding 向量");
+            }
+            double[] vector = new double[embedding.size()];
+            for (int i = 0; i < embedding.size(); i++) {
+                vector[i] = embedding.get(i).asDouble(0.0);
+            }
+            return vector;
         }
     }
 }
