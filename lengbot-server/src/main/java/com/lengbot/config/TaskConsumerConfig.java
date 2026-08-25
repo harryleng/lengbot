@@ -85,10 +85,12 @@ public class TaskConsumerConfig implements TaskInterruptPort {
         heavyPool = Executors.newFixedThreadPool(heavyPoolSize);
 
         for (int i = 0; i < defaultPoolSize; i++) {
-            defaultPool.submit(() -> consumeLoop(TaskType.Group.DEFAULT));
+            final int workerIndex = i;
+            defaultPool.submit(() -> consumeLoop(TaskType.Group.DEFAULT, workerIndex));
         }
         for (int i = 0; i < heavyPoolSize; i++) {
-            heavyPool.submit(() -> consumeLoop(TaskType.Group.HEAVY));
+            final int workerIndex = i;
+            heavyPool.submit(() -> consumeLoop(TaskType.Group.HEAVY, workerIndex));
         }
         log.info("[任务消费者] 启动, defaultPoolSize={}, heavyPoolSize={}", defaultPoolSize, heavyPoolSize);
     }
@@ -189,8 +191,8 @@ public class TaskConsumerConfig implements TaskInterruptPort {
      * <p>同组所有 worker 共享固定 consumer name（host-group），因此 PEL 是共享的：
      * 某个 worker 拉到消息但未 ACK 就崩溃，下个 worker 的 ID-0 拉取会重新拿到。
      */
-    private void consumeLoop(TaskType.Group group) {
-        String consumerName = sharedConsumerName(group);
+    private void consumeLoop(TaskType.Group group, int workerIndex) {
+        String consumerName = sharedConsumerName(group, workerIndex);
         boolean redisWarned = false;
         log.info("[任务消费者] worker 启动, group={}, consumer={}", group, consumerName);
 
@@ -225,10 +227,14 @@ public class TaskConsumerConfig implements TaskInterruptPort {
         log.info("[任务消费者] worker 退出, group={}, consumer={}", group, consumerName);
     }
 
-    /** 同组共享 consumer name，PEL 也是共享的；多实例下加 host 前缀区分 */
-    private String sharedConsumerName(TaskType.Group group) {
+    /**
+     * 每个 worker 线程使用独立的 consumer name，避免同组多线程共享同一 consumer
+     * 导致 XREADGROUP 重复分发同一条消息（Redis 消费组以 consumer name 为分发单位）。
+     * 多实例下加 host 前缀区分。
+     */
+    private String sharedConsumerName(TaskType.Group group, int workerIndex) {
         String host = System.getenv().getOrDefault("HOSTNAME", "local");
-        return host + "-" + group.name().toLowerCase();
+        return host + "-" + group.name().toLowerCase() + "-" + workerIndex;
     }
 
     /**

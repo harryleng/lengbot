@@ -94,6 +94,8 @@ public interface EmbeddingMapper extends BaseMapper<Embedding> {
 
     /**
      * 批量存储向量
+     * <p>加 ON CONFLICT (chunk_id) DO NOTHING 幂等兜底：重复入库/并发消费导致同一 chunk_id
+     * 重复插入时静默跳过，避免触发 uk_embedding_chunk_id 唯一约束异常。</p>
      *
      * @param vectors 向量数据列表，每项包含 [id, chunkId, modelName, dimension, vectorStr]
      */
@@ -102,6 +104,7 @@ public interface EmbeddingMapper extends BaseMapper<Embedding> {
             "<foreach collection='vectors' item='v' separator=','>" +
             "(#{v.id}, #{v.chunkId}, #{v.modelName}, #{v.dimension}, #{v.vector}::vector, NOW())" +
             "</foreach>" +
+            " ON CONFLICT (chunk_id) DO NOTHING" +
             "</script>")
     void batchInsertVectors(@Param("vectors") List<Map<String, Object>> vectors);
 
