@@ -420,13 +420,12 @@ public class ModelFactory {
 
     /**
      * 获取所有可用的 providerId 列表。
+     * <p>仅返回 status=ACTIVE 的提供商。此前未过滤 status，会把 disabled 的
+     * provider 一并返回，导致 {@code resolveProviderId(null)} 兜底选中一个已禁用、
+     * 无 API Key 的提供商（如默认的「通义千问」），进而触发 AI 调用失败（30002）。</p>
      */
     public List<Long> getAvailableProviderIds() {
-        List<ModelProvider> cached = cacheUtil.getAllProviders();
-        if (!cached.isEmpty()) {
-            return cached.stream().map(ModelProvider::getId).collect(Collectors.toList());
-        }
-        List<ModelProvider> providers = modelProviderService.list();
+        List<ModelProvider> providers = modelProviderService.listAllActive();
         if (!providers.isEmpty()) {
             cacheUtil.cacheAllProviders(providers);
         }
