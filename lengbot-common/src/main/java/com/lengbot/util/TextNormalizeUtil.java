@@ -16,6 +16,8 @@ public final class TextNormalizeUtil {
     /** Unicode 特殊空白和格式字符（可能造成存储或展示异常） */
     private static final Pattern UNICODE_SPECIAL = Pattern.compile(
             "[\u200B\u200C\u200D\uFEFF\uFFFE\uFFFF]");
+    /** 目录页的点号引导线（dot leader）：连续大量点号会触发 embedding 服务（SiliconFlow 等）对连续重复字符的 token 限制 → 400 */
+    private static final Pattern DOT_LEADER = Pattern.compile("\\.{16,}");
 
     private TextNormalizeUtil() {
     }
@@ -94,6 +96,10 @@ public final class TextNormalizeUtil {
 
         // 连续 3 行以上空行压缩为 2 行
         text = text.replaceAll("\n{3,}", "\n\n");
+
+        // 折叠目录页的点号引导线（连续 16 个以上点号 → 3 个点），
+        // 避免触发 embedding 服务对连续重复字符的 token 限制（SiliconFlow 400 code=20015）
+        text = DOT_LEADER.matcher(text).replaceAll("...");
 
         // 去掉每行尾部空白
         String[] lines = text.split("\n", -1);
