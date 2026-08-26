@@ -344,7 +344,7 @@ public class McpClientServiceImpl implements McpClientService {
                 log.info("[MCP] 创建MCP客户端: serverId={}, name={}", id, server.getName());
                 return client;
             } catch (Exception e) {
-                log.error("[MCP] 创建MCP客户端失败: serverId={}, name={}, error={}", id, server.getName(), e.getMessage(), e);
+                log.info("[MCP] 创建MCP客户端失败: serverId={}, name={}, error={}", id, server.getName(), e.getMessage(), e);
                 throw new BizException(ErrorCode.MCP_CONNECTION_FAILED, e);
             }
         });
@@ -354,14 +354,49 @@ public class McpClientServiceImpl implements McpClientService {
      * 创建并初始化 McpSyncClient
      */
     private McpSyncClient createAndInitClient(McpServer server) {
-        McpClientTransport transport = createTransport(server);
-        McpSyncClient client = McpClient.sync(transport)
+        McpTransportType transportType = server.getTransport();
+        if (transportType == null) {
+            // 兼容旧数据：从 installType 推断
+            transportType = inferTransportType(server);
+        }
+
+        McpSyncClient client = buildSyncClient(createTransport(server));
+        try {
+            client.initialize();
+            return client;
+        } catch (Exception e) {
+            // 部分 streamable-http 服务器（如企业微信 MCP）禁用 SSE，
+            // 标准传输初始化后会无条件建立 SSE GET 流而被服务器拒绝（405），
+            // 此处回退到纯 POST 传输重试一次
+            closeQuietly(client, server.getId());
+            if (transportType == McpTransportType.STREAMABLE_HTTP) {
+                log.info("[MCP] 标准streamable-http初始化失败，回退纯POST传输: serverId={}, name={}, error={}",
+                        server.getId(), server.getName(), e.getMessage());
+                McpSyncClient fallback = buildSyncClient(new PostOnlyMcpTransport(server.getHost()));
+                try {
+                    fallback.initialize();
+                    log.info("[MCP] 纯POST传输初始化成功: serverId={}, name={}", server.getId(), server.getName());
+                    return fallback;
+                } catch (Exception fe) {
+                    log.warn("[MCP] 纯POST传输回退也失败: serverId={}, name={}, error={}",
+                            server.getId(), server.getName(), fe.getMessage(), fe);
+                    closeQuietly(fallback, server.getId());
+                    throw e;
+                }
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * 构建 McpSyncClient（统一超时配置）
+     */
+    private McpSyncClient buildSyncClient(McpClientTransport transport) {
+        return McpClient.sync(transport)
                 .clientInfo(new McpSchema.Implementation("lengbot", "1.0.0"))
                 .requestTimeout(Duration.ofSeconds(30))
                 .initializationTimeout(Duration.ofSeconds(60))
                 .build();
-        client.initialize();
-        return client;
     }
 
     /**
@@ -543,7 +578,7 @@ public class McpClientServiceImpl implements McpClientService {
         try {
             return objectMapper.readValue(headersJson, new TypeReference<>() {});
         } catch (Exception e) {
-            log.warn("[MCP] 解析headers失败: {}", e.getMessage());
+            log.info("[MCP] 解析headers失败: {}", e.getMessage());
             return Map.of();
         }
     }
