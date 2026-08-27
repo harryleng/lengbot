@@ -75,7 +75,7 @@ public class FindInDocumentTool {
             return "搜索关键词不能为空。";
         }
 
-        int ctxLines = contextLines != null ? Math.max(0, Math.min(contextLines, 5)) : 2;
+        int ctxLines = contextLines != null ? Math.clamp(contextLines, 0, 5) : 2;
 
         // 确定要搜索的文档列表
         List<Document> documents = new ArrayList<>();

@@ -251,7 +251,7 @@ public class WorkspaceMemoryServiceImpl implements WorkspaceMemoryService {
             projectMemoryMapper.updateEmbeddingVector(memory.getId(),
                     VectorUtil.toVectorString(ModelCalls.toFloatArray(vector)));
         } catch (Exception e) {
-            log.debug("[WorkspaceMemory] 记忆向量生成失败，保留文本记忆: memoryId={}, error={}",
+            log.info("[WorkspaceMemory] 记忆向量生成失败，保留文本记忆: memoryId={}, error={}",
                     memory.getId(), e.getMessage());
         }
     }
