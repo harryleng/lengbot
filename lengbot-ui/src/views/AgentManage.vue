@@ -130,6 +130,7 @@
           <a-select v-model:value="form.agentType" style="width: 100%">
             <a-select-option value="chat">对话型</a-select-option>
             <a-select-option value="workflow">工作流型</a-select-option>
+            <a-select-option value="digital_human">数字人型</a-select-option>
           </a-select>
         </a-form-item>
         <!-- 模型：仅新建且非工作流类型显示 -->
@@ -344,7 +345,7 @@ function handleSetDefault(id) {
 
 function agentTypeLabel(t) {
   const code = t?.code || t || ''
-  const map = { chat: '对话型', assistant: '对话型', workflow: '工作流型' }
+  const map = { chat: '对话型', assistant: '对话型', workflow: '工作流型', digital_human: '数字人型' }
   return map[code] || code || '对话型'
 }
 

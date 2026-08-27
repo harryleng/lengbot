@@ -37,7 +37,11 @@ export function useChatAgents({ sessionId, loading, pendingAttachments, voiceLis
     Boolean(chatCapabilities.value?.multimodalEnabled && chatCapabilities.value?.enableAudioInput)
   )
 
-  const showTtsBtn = computed(() => Boolean(chatCapabilities.value?.enableTts))
+  const showTtsBtn = computed(() => {
+    // 朗读走浏览器原生语音合成（Web Speech API），与 Agent 配置 / 后端 TTS 无关，
+    // 任何模型均可用；仅当浏览器不支持时隐藏按钮
+    return typeof window !== 'undefined' && !!window.speechSynthesis
+  })
 
   const fileAcceptTypes = computed(() => buildFileAcceptTypes(chatCapabilities.value))
   const imageAcceptTypes = computed(() => buildImageAcceptTypes(chatCapabilities.value))

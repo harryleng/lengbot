@@ -5,10 +5,7 @@
 spring:
   application:
     name: lengbot-server
-  config:
-    # 显式关闭 Nacos 配置导入校验：本地无 Nacos 时必需，否则 nacos-config starter
-    # 会自动注入 spring.config.import=nacos: 并尝试连接，导致启动报错
-    import: optional:nacos:
+  # Nacos config 已关闭（enabled=false），不再声明 spring.config.import，避免配置中心覆盖本地配置。
   cloud:
     nacos:
       # Nacos 服务注册与发现

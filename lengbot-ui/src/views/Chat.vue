@@ -158,6 +158,16 @@
         />
       </div>
 
+      <!-- 数字人面板：数字人型 agent 时，右侧展示会口播的数字人 -->
+      <DigitalHumanPlayer
+        v-if="isDigitalHumanAgent"
+        class="chat-digital-human"
+        :portrait-url="digitalHumanConfig?.portraitUrl"
+        :mouth-zone="digitalHumanConfig?.mouthZone"
+        :speaking="digitalHumanSpeaking"
+        :agent-name="currentAgent?.name"
+      />
+
       <ChatSessionRuntimePanel
         v-if="sessionId && sessionRuntimePanelOpen"
         :session-id="sessionId"
@@ -246,6 +256,7 @@ import ChatSessionFilesDrawer from '../components/chat/session/ChatSessionFilesD
 import ChatSubAgentRuntimeDrawer from '../components/chat/session/ChatSubAgentRuntimeDrawer.vue'
 import ChatSessionRuntimePanel from '../components/chat/session/ChatSessionRuntimePanel.vue'
 import ChatStreamingPlaceholder from '../components/chat/session/ChatStreamingPlaceholder.vue'
+import DigitalHumanPlayer from '../components/DigitalHumanPlayer.vue'
 import { buildSubagentLiveStatusBadges } from '../components/capabilities/subagentEventUtils.js'
 import { useChatAgents } from '../composables/useChatAgents'
 import { useChatAttachments } from '../composables/useChatAttachments'
@@ -443,6 +454,9 @@ const {
   toggleVoiceInput,
   stopVoiceInput,
   speakMessage,
+  speakText,
+  speaking,
+  messagePlainText,
   cleanup: voiceCleanup,
 } = useVoiceIO({
   input,
@@ -451,6 +465,44 @@ const {
   autoResize,
   voiceListening,
   speakingMsgKey,
+})
+
+// ===================== 数字人面板 =====================
+function resolveDigitalHuman(agent) {
+  if (!agent) return null
+  let cfg = agent.config
+  if (typeof cfg === 'string') {
+    try {
+      cfg = JSON.parse(cfg)
+    } catch {
+      return null
+    }
+  }
+  return cfg?.digitalHuman || null
+}
+
+const digitalHumanConfig = computed(() => resolveDigitalHuman(currentAgent.value))
+const isDigitalHumanAgent = computed(
+  () => !!digitalHumanConfig.value?.portraitUrl && currentAgent.value?.agentType === 'digital_human'
+)
+const digitalHumanSpeaking = computed(() => isDigitalHumanAgent.value && speaking.value)
+
+// 回复生成结束后，数字人型 agent 自动朗读最新一条 assistant 消息
+function onReplyFinished() {
+  if (!isDigitalHumanAgent.value) return
+  if (userStoppedStream.value) return
+  const msgs = messages.value
+  if (!msgs.length) return
+  const last = msgs[msgs.length - 1]
+  if (!last || last.role !== 'assistant' || last._autoSpoken) return
+  const text = messagePlainText(last.content)
+  if (!text) return
+  last._autoSpoken = true
+  speakText(text, { voice: digitalHumanConfig.value?.voice })
+}
+
+watch(streaming, (now, prev) => {
+  if (prev && !now) onReplyFinished()
 })
 
 const {
@@ -885,6 +937,17 @@ watch(sessionId, (newVal, oldVal) => {
   min-height: 0;
   flex: 1;
   flex-direction: column;
+}
+
+.chat-digital-human {
+  flex-shrink: 0;
+  width: 380px;
+  max-width: 42vw;
+  margin: 12px 12px 12px 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--color-border, #2a3348);
+  background: #0d1322;
 }
 
 .chat-messages {

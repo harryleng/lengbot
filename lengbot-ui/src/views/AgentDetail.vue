@@ -158,9 +158,78 @@
                     >
                       <a-select-option value="chat">对话型</a-select-option>
                       <a-select-option value="workflow">工作流型</a-select-option>
+                      <a-select-option value="digital_human">数字人型</a-select-option>
                     </a-select>
                     <div v-if="agentId" class="param-hint">Agent 类型创建后不可修改</div>
                   </a-form-item>
+                  <!-- 数字人配置：仅数字人型显示 -->
+                  <template v-if="agent.agentType === 'digital_human'">
+                    <a-form-item label="数字人形象">
+                      <div class="avatar-upload" :class="{ 'is-readonly': isVersionPreview }">
+                        <div class="avatar-preview" :class="{ 'has-avatar': digitalHuman.portraitUrl }">
+                          <img v-if="digitalHuman.portraitUrl" :src="digitalHuman.portraitUrl" alt="portrait" class="avatar-img" />
+                          <span v-else class="avatar-placeholder">形象</span>
+                          <div v-if="!isVersionPreview" class="avatar-overlay" @click="triggerPortraitUpload">
+                            <UploadOutlined />
+                          </div>
+                        </div>
+                        <input ref="portraitInputRef" type="file" accept="image/*" style="display:none" @change="onPortraitFileChange" />
+                        <div class="param-hint">上传人物照片 / 肖像，对话时数字人将以此形象出镜（轻量占位版使用前端口型动画）</div>
+                      </div>
+                      <a-button
+                        class="dh-generate-btn"
+                        type="primary"
+                        ghost
+                        :disabled="!digitalHuman.portraitUrl || isVersionPreview"
+                        @click="openPreview"
+                      >
+                        <PlayCircleOutlined />
+                        生成 / 预览数字人
+                      </a-button>
+                    </a-form-item>
+
+                    <!-- 嘴部定位：在形象图上拖拽 / 缩放出嘴巴区域 -->
+                    <a-form-item v-if="digitalHuman.portraitUrl && !isVersionPreview" label="嘴部定位">
+                      <div ref="mouthBoxEl" class="dh-mouth-editor">
+                        <img :src="digitalHuman.portraitUrl" class="dh-mouth-editor-img" @load="onEditorImgLoad" alt="定位嘴部" />
+                        <div class="dh-mouth-rect" :style="mouthRectStyle" @pointerdown="onMouthPointerDown($event, 'move')">
+                          <span class="dh-mouth-hint">拖拽移动 · 右下角缩放</span>
+                          <div class="dh-mouth-handle" @pointerdown.stop="onMouthPointerDown($event, 'resize')"></div>
+                        </div>
+                      </div>
+                      <div class="param-hint">在照片上框出嘴巴位置，对话时嘴部会在此区域做口型动画</div>
+                    </a-form-item>
+
+                    <a-form-item label="驱动引擎">
+                      <a-select v-model:value="digitalHuman.engine" style="width: 100%" :disabled="isVersionPreview">
+                        <a-select-option value="placeholder">轻量占位版（前端口型动画）</a-select-option>
+                      </a-select>
+                      <div class="param-hint">当前为占位引擎，后续可接入商业数字人 API 或本地开源模型生成真实口型视频</div>
+                    </a-form-item>
+
+                    <!-- 音色：可选，决定数字人朗读声音 -->
+                    <a-form-item label="音色">
+                      <a-select
+                        v-model:value="digitalHuman.voice.voiceURI"
+                        style="width: 100%"
+                        :disabled="isVersionPreview"
+                        placeholder="默认系统语音"
+                        allow-clear
+                      >
+                        <a-select-option v-for="v in voiceOptions" :key="v.voiceURI" :value="v.voiceURI">
+                          {{ v.name }}（{{ v.lang }}）
+                        </a-select-option>
+                      </a-select>
+                      <div class="dh-voice-row">
+                        <span>语速 {{ digitalHuman.voice.rate.toFixed(1) }}</span>
+                        <a-slider v-model:value="digitalHuman.voice.rate" :min="0.5" :max="2" :step="0.1" :disabled="isVersionPreview" />
+                      </div>
+                      <div class="dh-voice-row">
+                        <span>音调 {{ digitalHuman.voice.pitch.toFixed(1) }}</span>
+                        <a-slider v-model:value="digitalHuman.voice.pitch" :min="0" :max="2" :step="0.1" :disabled="isVersionPreview" />
+                      </div>
+                    </a-form-item>
+                  </template>
                   <!-- 欢迎语和推荐问题：对话页展示，工作流型也可配置 -->
                   <a-form-item label="欢迎语">
                     <a-textarea
@@ -1953,6 +2022,22 @@
       </div>
     </a-modal>
 
+    <!-- 数字人预览 -->
+    <a-modal v-model:open="previewVisible" title="数字人预览" :footer="null" width="420px" :mask-closable="true">
+      <div class="dh-preview-box">
+        <DigitalHumanPlayer
+          :portrait-url="digitalHuman.portraitUrl"
+          :mouth-zone="digitalHuman.mouthZone"
+          :speaking="previewSpeaking"
+          :agent-name="agent.name"
+        />
+      </div>
+      <div class="dh-preview-actions">
+        <a-button type="primary" :disabled="previewSpeaking" @click="previewPlay">试播一段话</a-button>
+        <a-button :disabled="!previewSpeaking" @click="previewStop">停止</a-button>
+      </div>
+    </a-modal>
+
     <!-- 保存/发布同步遮罩 -->
     <div v-if="saving || publishing" class="sync-overlay">
       <div class="sync-overlay-content">
@@ -2042,6 +2127,7 @@ import {
 import DynamicToolDrawer from '../components/DynamicToolDrawer.vue'
 import DynamicIcon from '../components/DynamicIcon.vue'
 import LbDetailHeader from '../components/common/LbDetailHeader.vue'
+import DigitalHumanPlayer from '../components/DigitalHumanPlayer.vue'
 import { useBinding } from '../composables/useBinding'
 const route = useRoute()
 const router = useRouter()
@@ -2049,6 +2135,8 @@ const agentId = route.params.id
 
 const pageLoading = ref(false)
 const avatarInputRef = ref(null)
+const portraitInputRef = ref(null)
+const portraitUploading = ref(false)
 
 const BIND_LIMITS = { knowledge: 10, mcp: 5, tool: 10, subAgent: 5, skill: 10 }
 /** 右侧配置卡片：模型参数 / 对话配置 */
@@ -2230,6 +2318,14 @@ const agentConfig = reactive({
   summaryToolResultTokenLimit: 500,
   maxExecutionSteps: 20,
   modelRetryTimes: 2,
+})
+
+// 数字人配置（仅数字人型 agent 使用），持久化到 agent.config.digitalHuman
+const digitalHuman = reactive({
+  portraitUrl: '',
+  engine: 'placeholder',
+  mouthZone: null, // { x, y, w, h } 百分比，嘴部定位
+  voice: { voiceURI: '', rate: 1, pitch: 1 },
 })
 
 const userSensitiveWords = ref([''])
@@ -2944,6 +3040,10 @@ async function loadAgent() {
           stripBindingKeysFromConfig(parsed)
           Object.assign(agentConfig, parsed)
           stripBindingKeysFromConfig(agentConfig)
+          if (parsed.digitalHuman) {
+            Object.assign(digitalHuman, parsed.digitalHuman)
+            syncMouthEditorFromConfig()
+          }
         }
         syncPromptVariablesFromConfig(parsed || {})
         syncSensitiveWordsFromConfig(parsed || {})
@@ -3309,6 +3409,148 @@ async function onAvatarFileChange(e) {
   }
 }
 
+function triggerPortraitUpload() {
+  if (isVersionPreview.value) return
+  if (!agentId) {
+    message.warning('请先保存 Agent 后再上传数字人形象')
+    return
+  }
+  portraitInputRef.value?.click()
+}
+
+async function onPortraitFileChange(e) {
+  if (isVersionPreview.value) return
+  const file = e.target.files[0]
+  if (!file) return
+  portraitUploading.value = true
+  try {
+    const res = await uploadAgentAvatar(agentId, file)
+    digitalHuman.portraitUrl = res.data
+    message.success('数字人形象上传成功')
+  } catch (err) {
+    // interceptor已处理错误提示
+  } finally {
+    portraitUploading.value = false
+    if (portraitInputRef.value) portraitInputRef.value.value = ''
+  }
+}
+
+// ===================== 数字人：嘴部定位编辑器 =====================
+const mouthBoxEl = ref(null)
+const mouthEditor = reactive({ x: 38, y: 60, w: 24, h: 14 })
+const mouthRectStyle = computed(() => ({
+  left: `${mouthEditor.x}%`,
+  top: `${mouthEditor.y}%`,
+  width: `${mouthEditor.w}%`,
+  height: `${mouthEditor.h}%`,
+}))
+const mouthDrag = { active: false, mode: 'move', startX: 0, startY: 0, orig: null }
+
+function clamp(v, min, max) {
+  return Math.min(max, Math.max(min, v))
+}
+
+function syncMouthEditorFromConfig() {
+  if (digitalHuman.mouthZone) {
+    mouthEditor.x = digitalHuman.mouthZone.x
+    mouthEditor.y = digitalHuman.mouthZone.y
+    mouthEditor.w = digitalHuman.mouthZone.w
+    mouthEditor.h = digitalHuman.mouthZone.h
+  }
+}
+
+function onMouthPointerDown(e, mode) {
+  mouthDrag.active = true
+  mouthDrag.mode = mode
+  mouthDrag.startX = e.clientX
+  mouthDrag.startY = e.clientY
+  mouthDrag.orig = { ...mouthEditor }
+  window.addEventListener('pointermove', onMouthPointerMove)
+  window.addEventListener('pointerup', onMouthPointerUp)
+  e.preventDefault()
+}
+
+function onMouthPointerMove(e) {
+  if (!mouthDrag.active) return
+  const box = mouthBoxEl.value
+  if (!box) return
+  const rect = box.getBoundingClientRect()
+  const dxPct = ((e.clientX - mouthDrag.startX) / rect.width) * 100
+  const dyPct = ((e.clientY - mouthDrag.startY) / rect.height) * 100
+  if (mouthDrag.mode === 'move') {
+    mouthEditor.x = clamp(mouthDrag.orig.x + dxPct, 0, 100 - mouthEditor.w)
+    mouthEditor.y = clamp(mouthDrag.orig.y + dyPct, 0, 100 - mouthEditor.h)
+  } else {
+    mouthEditor.w = clamp(mouthDrag.orig.w + dxPct, 6, 100 - mouthEditor.x)
+    mouthEditor.h = clamp(mouthDrag.orig.h + dyPct, 5, 100 - mouthEditor.y)
+  }
+}
+
+function onMouthPointerUp() {
+  mouthDrag.active = false
+  window.removeEventListener('pointermove', onMouthPointerMove)
+  window.removeEventListener('pointerup', onMouthPointerUp)
+  digitalHuman.mouthZone = {
+    x: Math.round(mouthEditor.x),
+    y: Math.round(mouthEditor.y),
+    w: Math.round(mouthEditor.w),
+    h: Math.round(mouthEditor.h),
+  }
+}
+
+function onEditorImgLoad() {
+  syncMouthEditorFromConfig()
+}
+
+// ===================== 数字人：预览弹窗 =====================
+const previewVisible = ref(false)
+const previewSpeaking = ref(false)
+function openPreview() {
+  previewVisible.value = true
+}
+function previewPlay() {
+  if (!window.speechSynthesis) {
+    message.warning('当前浏览器不支持语音朗读')
+    return
+  }
+  window.speechSynthesis.cancel()
+  const utter = new SpeechSynthesisUtterance('你好，我是你的数字人助手，下面开始为你播报。')
+  utter.lang = 'zh-CN'
+  if (digitalHuman.voice?.voiceURI) {
+    const v = window.speechSynthesis.getVoices().find((x) => x.voiceURI === digitalHuman.voice.voiceURI)
+    if (v) utter.voice = v
+  }
+  utter.rate = digitalHuman.voice?.rate ?? 1
+  utter.pitch = digitalHuman.voice?.pitch ?? 1
+  previewSpeaking.value = true
+  utter.onend = () => (previewSpeaking.value = false)
+  utter.onerror = () => (previewSpeaking.value = false)
+  window.speechSynthesis.speak(utter)
+}
+function previewStop() {
+  window.speechSynthesis?.cancel()
+  previewSpeaking.value = false
+}
+
+// ===================== 数字人：可选音色列表 =====================
+const voiceOptions = ref([])
+function loadVoiceOptions() {
+  if (!window.speechSynthesis) return
+  const list = window.speechSynthesis.getVoices()
+  if (list && list.length) {
+    voiceOptions.value = list.map((v) => ({ voiceURI: v.voiceURI, name: v.name, lang: v.lang }))
+  }
+  if (typeof window.speechSynthesis.onvoiceschanged !== 'undefined') {
+    window.speechSynthesis.onvoiceschanged = () => {
+      const l = window.speechSynthesis.getVoices()
+      if (l && l.length) {
+        voiceOptions.value = l.map((v) => ({ voiceURI: v.voiceURI, name: v.name, lang: v.lang }))
+      }
+    }
+  }
+}
+loadVoiceOptions()
+
 async function handleSaveWorkflowBasic() {
   if (!agent.name?.trim()) {
     message.warning('请输入 Agent 名称')
@@ -3500,6 +3742,7 @@ async function handleSave(options = {}) {
     const serializedSensitiveWords = sensitiveWords.value.map((w) => (w || '').trim()).filter(Boolean)
     const configObj = {
       ...agentConfig,
+      digitalHuman: { ...digitalHuman },
       promptVariables: serializedVars,
       userSensitiveWords: serializedUserSensitiveWords,
       sensitiveWords: serializedSensitiveWords,
@@ -5305,6 +5548,80 @@ onMounted(async () => {
 .avatar-tip {
   font-size: 12px;
   color: var(--color-mute);
+}
+
+/* 数字人：生成按钮 / 嘴部编辑器 / 音色 / 预览 */
+.dh-generate-btn {
+  margin-top: 12px;
+}
+.dh-mouth-editor {
+  position: relative;
+  width: 280px;
+  max-width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0d1322;
+  line-height: 0;
+  touch-action: none;
+  user-select: none;
+}
+.dh-mouth-editor-img {
+  width: 100%;
+  height: auto;
+  display: block;
+  -webkit-user-drag: none;
+}
+.dh-mouth-rect {
+  position: absolute;
+  border: 2px dashed #4f9bff;
+  background: rgba(79, 155, 255, 0.18);
+  cursor: move;
+  box-sizing: border-box;
+}
+.dh-mouth-hint {
+  position: absolute;
+  top: -20px;
+  left: 0;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #4f9bff;
+  line-height: 1;
+}
+.dh-mouth-handle {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #4f9bff;
+  border: 2px solid #fff;
+  cursor: nwse-resize;
+}
+.dh-voice-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+.dh-voice-row > span {
+  width: 96px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-mute);
+}
+.dh-voice-row .ant-slider {
+  flex: 1;
+  margin: 0;
+}
+.dh-preview-box {
+  height: 360px;
+}
+.dh-preview-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 16px;
 }
 
 /* 工具绑定样式 */

@@ -800,6 +800,9 @@ watch(sessionLoadMoreRef, (el) => {
   gap: 2px;
   padding: 0 8px;
   margin-bottom: 12px;
+  /* 关键：侧边栏空间不足时导航菜单不能收缩，否则末两项（Dashboard/可观测）
+     会溢出到会话区被覆盖，导致偶尔点击无响应 */
+  flex-shrink: 0;
 }
 .nav-item {
   display: flex;
@@ -828,6 +831,9 @@ watch(sessionLoadMoreRef, (el) => {
   display: flex;
   flex-direction: column;
   flex: 1;
+  /* 关键：允许会话区在空间不足时收缩并在内部滚动，
+     否则会顶高导航菜单、盖住末两项（Dashboard/可观测） */
+  min-height: 0;
   overflow-y: auto;
   padding: 0 8px;
 }

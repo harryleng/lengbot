@@ -17,7 +17,8 @@ import lombok.Getter;
 public enum AgentType {
 
     CHAT("chat", "对话型"),
-    WORKFLOW("workflow", "工作流型");
+    WORKFLOW("workflow", "工作流型"),
+    DIGITAL_HUMAN("digital_human", "数字人型");
 
     /** 已废弃类型，兼容旧数据 */
     private static final String LEGACY_ASSISTANT = "assistant";

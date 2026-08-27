@@ -12,10 +12,7 @@ spring:
   # 因此 bootstrap.yml 在 Spring Boot 3 下不会被加载。
   # Nacos 开关必须写在这里（application.yml）才会生效。
   # ========================================
-  config:
-    # 显式声明可选 Nacos 导入，关闭 import 校验（避免 "No spring.config.import" 报错）
-    # 注意值含冒号必须加引号，否则 YAML 把冒号当嵌套映射分隔符
-    import: "optional:nacos:"
+  # Nacos config 已关闭（enabled=false），不再声明 spring.config.import，避免配置中心覆盖本地配置。
   cloud:
     nacos:
       discovery:
@@ -36,9 +33,9 @@ spring:
   # 需要安装 pgvector 扩展用于向量存储
   # ========================================
   datasource:
-    url: jdbc:postgresql://localhost:5432/${LENGBOT_DB_NAME:lengbot}
+    url: jdbc:postgresql://lizhongcun.com:5432/${LENGBOT_DB_NAME:lengbot}
     username: 'postgres'
-    password: 'postgres'
+    password: 'difyai123456'
     driver-class-name: org.postgresql.Driver
 
   # ========================================
@@ -46,9 +43,9 @@ spring:
   # 限定权限：仅 SELECT，无 DML/DDL
   # ========================================
   datasource-readonly:
-    url: jdbc:postgresql://localhost:5432/${LENGBOT_DB_NAME:lengbot}
+    url: jdbc:postgresql://lizhongcun.com:5432/${LENGBOT_DB_NAME:lengbot}
     username: 'postgres'
-    password: 'postgres'
+    password: 'difyai123456'
     driver-class-name: org.postgresql.Driver
 
   # ========================================
@@ -56,10 +53,13 @@ spring:
   # ========================================
   data:
     redis:
-      host: 'localhost'
-      port: '6379'
-      password: '123456'
+      # 复用现有 redis 容器（redis:latest，Redis 7.4）：容器内部端口 6379 映射到宿主机 9736
+      # 密码为容器 redis.conf 中的 requirepass，与默认的 123456 不同
+      host: 'lizhongcun.com'
+      port: '9736'
+      password: 'wc@961029'
       database: '9'
+
 
 # ========================================
 # MyBatis-Plus 配置
@@ -93,7 +93,8 @@ sa-token:
 # MinIO 对象存储配置
 # ========================================
 minio:
-  endpoint: 'http://localhost:9000'
+  # 容器 lengbot-minio：API 端口 9100（宿主机 9000 被 portainer 占用），控制台 9101
+  endpoint: 'http://lizhongcun.com:9100'
   access-key: 'minioadmin'
   secret-key: 'minioadmin'
   bucket: 'lengbot'
@@ -212,7 +213,7 @@ lengbot:
   # 局域网 IP 访问 dev server（如 http://10.10.13.163:5174）时也需加进白名单，
   # 否则 CorsFilter 返回 403 "Invalid CORS request"，前端登录提示"无权访问"。
   cors:
-    allowed-origins: http://localhost:5173,http://localhost:5174,http://localhost:3000,http://10.10.13.163:5173,http://10.10.13.163:5174
+    allowed-origins: http://localhost:5173,http://localhost:5174,http://localhost:3000,http://10.10.13.163:5173,http://10.10.13.163:5174,http://lizhongcun.com:5174,http://lizhongcun.com
     allowed-methods: GET,POST,PUT,DELETE,OPTIONS
     allow-credentials: true
     max-age: 3600
