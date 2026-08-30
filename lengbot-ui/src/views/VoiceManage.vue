@@ -20,7 +20,7 @@
         placeholder="引擎"
         allow-clear
         :options="providerOptions"
-        @change="loadVoices"
+        @change="onProviderChange"
       />
       <a-select
         v-model:value="filters.locale"
@@ -144,6 +144,7 @@ const loading = ref(false)
 const syncing = ref(false)
 const previewing = ref('')
 const voices = ref([])
+const allVoices = ref([]) // 仅受引擎过滤的全集，用于构建语言/性别下拉选项，避免筛选后选项塌陷
 const groups = ref([])
 const providerOptions = ref([])
 
@@ -169,11 +170,11 @@ const columns = [
 ]
 
 const localeOptions = computed(() => {
-  const set = new Set(voices.value.map((v) => v.locale).filter(Boolean))
+  const set = new Set(allVoices.value.map((v) => v.locale).filter(Boolean))
   return [...set].sort().map((l) => ({ label: l, value: l }))
 })
 const genderOptions = computed(() => {
-  const set = new Set(voices.value.map((v) => v.gender).filter(Boolean))
+  const set = new Set(allVoices.value.map((v) => v.gender).filter(Boolean))
   return [...set].sort().map((g) => ({ label: g, value: g }))
 })
 const groupOptions = computed(() =>
@@ -196,6 +197,18 @@ async function loadVoices() {
     // 拦截器已提示
   } finally {
     loading.value = false
+  }
+}
+
+// 仅按引擎加载全集，用于下拉选项（不受语言/性别/分组/关键字筛选影响）
+async function loadBaseVoices() {
+  try {
+    const params = {}
+    if (filters.provider) params.provider = filters.provider
+    const res = await getTtsVoices(params)
+    allVoices.value = res.data || []
+  } catch {
+    allVoices.value = []
   }
 }
 
@@ -285,9 +298,14 @@ function onKeywordChange() {
   if (!filters.keyword) loadVoices()
 }
 
+async function onProviderChange() {
+  await Promise.all([loadBaseVoices(), loadVoices()])
+}
+
 onMounted(() => {
   loadProviders()
   loadGroups()
+  loadBaseVoices()
   loadVoices()
 })
 </script>
