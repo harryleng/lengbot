@@ -1,235 +1,255 @@
 <template>
   <div class="layout">
     <!-- 左侧边栏 -->
-    <aside :class="['sidebar', { collapsed: sidebarCollapsed && !sidebarHidden, hidden: sidebarHidden }]">
-      <!-- Logo + 收起按钮 -->
-      <div class="sidebar-header">
-        <div class="sidebar-logo" @click="sidebarCollapsed ? toggleSidebar() : router.push('/')">
-          <img src="/lengbot-logo.png" alt="LengBot" class="logo-img logo-full" />
-          <img src="/lengbot-logo-single.png" alt="LengBot" class="logo-img logo-single" />
+    <div class="sidebar-wrap" :class="{ 'is-hidden': sidebarHidden }">
+      <aside :class="['sidebar', { collapsed: sidebarCollapsed }]">
+        <!-- 品牌块（AgentScope 风格：主色圆角方块 + 图标 + 双行文字） -->
+        <div class="sidebar-brand" @click="onBrandClick">
+          <div class="brand-mark">
+            <ClusterOutlined />
+          </div>
+          <div class="sidebar-text brand-text">
+            <span class="brand-name">LengBot</span>
+            <span class="brand-sub">Studio</span>
+          </div>
           <div class="logo-unfold-icon">
             <MenuUnfoldOutlined />
           </div>
         </div>
-        <div v-if="!sidebarCollapsed" class="sidebar-header-actions">
-          <div class="sidebar-toggle" @click="toggleSidebar">
-            <MenuFoldOutlined />
-          </div>
-        </div>
-      </div>
 
-      <!-- 新建对话按钮 -->
-      <a-tooltip v-if="sidebarCollapsed && !sidebarHidden" title="新建对话" placement="right">
-        <button class="btn-new-chat" @click="newChat">
+        <!-- 新建对话按钮 -->
+        <a-tooltip v-if="sidebarCollapsed && !sidebarHidden" title="新建对话" placement="right">
+          <button class="btn-new-chat" @click="newChat">
+            <PlusOutlined />
+            <span class="sidebar-text">新建对话</span>
+          </button>
+        </a-tooltip>
+        <button v-else class="btn-new-chat" @click="newChat">
           <PlusOutlined />
           <span class="sidebar-text">新建对话</span>
         </button>
-      </a-tooltip>
-      <button v-else class="btn-new-chat" @click="newChat">
-        <PlusOutlined />
-        <span class="sidebar-text">新建对话</span>
-      </button>
 
-      <!-- 导航菜单 -->
-      <nav class="nav-menu">
-        <template v-for="item in navItems" :key="item.path">
-          <a-tooltip v-if="sidebarCollapsed && !sidebarHidden" :title="item.label" placement="right">
-            <router-link :to="item.path" :class="['nav-item', { active: isActive(item.path) }]">
-              <component :is="item.icon" />
-              <span class="sidebar-text">{{ item.label }}</span>
-            </router-link>
-          </a-tooltip>
-          <router-link v-else :to="item.path" :class="['nav-item', { active: isActive(item.path) }]">
-            <component :is="item.icon" />
-            <span class="sidebar-text">{{ item.label }}</span>
-          </router-link>
-        </template>
-      </nav>
-
-      <!-- 对话历史 -->
-      <div v-show="!sidebarCollapsed" class="session-section">
-        <div class="section-title" @click="sessionsCollapsed = !sessionsCollapsed">
-          <span class="section-title-label" @click.stop="sessionsCollapsed = !sessionsCollapsed">最近对话</span>
-          <div class="section-title-actions">
-            <a-tooltip title="搜索历史对话" placement="bottom">
-              <span class="section-title-search" @click.stop="openConversationSearch">
-                <SearchOutlined />
-              </span>
-            </a-tooltip>
-            <DownOutlined class="collapse-icon" :class="{ 'is-expanded': !sessionsCollapsed }" />
-          </div>
-        </div>
-        <CollapseTransition :open="!sessionsCollapsed">
-          <div class="session-list" ref="sessionListRef">
-            <TransitionGroup name="lb-list">
-              <div
-                v-for="s in sessions"
-                :key="s.id"
-                :class="['session-item', { active: currentSessionId === s.id, 'session-item--pinned': s.pinned }]"
-                @click="switchSession(s)"
-              >
-                <span class="session-title">{{ s.title || '新对话' }}</span>
-                <span v-if="s.lastMessageAt" class="session-time">{{ formatRelativeTime(s.lastMessageAt) }}</span>
-                <PushpinFilled v-if="s.pinned" class="session-pin-icon" aria-label="已置顶" />
-                <a-dropdown :trigger="['click']" placement="bottomRight">
-                  <EllipsisOutlined class="session-more" @click.stop />
-                  <template #overlay>
-                    <a-menu @click="({ key }) => handleSessionMenu(key, s)">
-                      <a-menu-item key="pin">{{ s.pinned ? '取消置顶' : '置顶' }}</a-menu-item>
-                      <a-menu-item key="rename">重命名</a-menu-item>
-                      <a-menu-item key="export">导出</a-menu-item>
-                      <a-menu-divider />
-                      <a-menu-item key="delete" class="menu-danger">删除</a-menu-item>
-                    </a-menu>
-                  </template>
-                </a-dropdown>
-              </div>
-            </TransitionGroup>
-            <div v-if="sessionLoading" class="session-loading-more">
-              <LoadingOutlined spin style="font-size: 12px; color: var(--color-mute)" />
-              <span v-if="sessions.length === 0" class="session-loading-text">加载中...</span>
-            </div>
-            <div
-              v-if="sessionHasMore && !sessionLoading"
-              ref="sessionLoadMoreRef"
-              class="session-load-more-sentinel"
-            ></div>
-            <div v-if="sessions.length === 0 && !sessionLoading" class="session-empty">暂无对话</div>
-          </div>
-        </CollapseTransition>
-      </div>
-
-      <!-- 重命名弹窗 -->
-      <a-modal
-        v-model:open="renameVisible"
-        title="重命名对话"
-        :width="400"
-        @ok="confirmRename"
-        @cancel="renameVisible = false"
-      >
-        <a-input v-model:value="renameValue" placeholder="请输入新名称" @press-enter="confirmRename" :maxlength="50" />
-      </a-modal>
-
-      <!-- 跨会话搜索弹窗 -->
-      <ConversationSearchModal v-model:open="conversationSearchOpen" @pick="handleConversationSearchPick" />
-
-      <!-- 用户信息 -->
-      <div class="sidebar-footer">
-        <a-dropdown
-          v-model:open="userDropdownOpen"
-          :trigger="['click']"
-          :get-popup-container="getPopupContainer"
-          overlay-class-name="sidebar-user-dropdown"
-          :overlay-style="{ width: '160px' }"
-        >
-          <div class="user-info">
-            <AvatarFrame :frame="userStore.user?.avatarFrame" :size="28">
-              <div class="user-avatar">
-                <img
-                  v-if="userStore.user?.avatar"
-                  :src="userStore.user.avatar"
-                  alt="avatar"
-                  class="user-avatar-img"
-                  @error="userStore.user?.avatar && (userStore.user.avatar = '')"
-                />
-                <span v-else>{{ (userStore.user?.username || userStore.user?.nickname || 'U')[0] }}</span>
-              </div>
-            </AvatarFrame>
-            <span class="sidebar-text user-name">
-              {{ userStore.user?.username || userStore.user?.nickname || '用户' }}
-            </span>
-            <LevelTag v-show="!sidebarCollapsed" :level="userStore.user?.level" size="small" />
-            <a-badge
-              v-if="taskBadgeCount"
-              :count="taskBadgeCount"
-              :number-style="taskBadgeStyle"
-              :class="['sidebar-task-badge-inline', taskBadgePopClass]"
-              @click.stop="router.push('/app/tasks')"
-            />
-            <span class="sidebar-text">
-              <UpOutlined v-if="userDropdownOpen" />
-              <DownOutlined v-else />
-            </span>
-          </div>
-          <template #overlay>
-            <a-menu @click="handleCommand">
-              <a-menu-item key="user-info" class="menu-user-info" @click="router.push('/app/profile')">
-                <div class="user-info-display">
-                  <div class="user-info-name-row">
-                    <span class="user-info-name">
-                      {{ userStore.user?.username || userStore.user?.nickname || '用户' }}
-                    </span>
-                    <span class="user-info-role">{{ userRoleText }}</span>
-                  </div>
-                  <div class="user-info-meta">
-                    <span class="user-info-id">ID: {{ userStore.user?.id }}</span>
-                  </div>
-                </div>
-              </a-menu-item>
-              <a-menu-divider />
-              <a-menu-item key="tasks">
-                <div class="menu-item-with-badge">
-                  <span class="menu-item-content">
-                    <CheckSquareOutlined />
-                    <span>任务中心</span>
-                  </span>
-                  <a-badge
-                    v-if="taskBadgeCount"
-                    :count="taskBadgeCount"
-                    :number-style="{ fontSize: '10px', boxShadow: 'none', backgroundColor: '#f5222d' }"
-                  />
-                </div>
-              </a-menu-item>
-              <a-menu-item key="sessions">
-                <span class="menu-item-content">
-                  <MessageOutlined />
-                  <span>会话管理</span>
-                </span>
-              </a-menu-item>
-              <a-menu-item v-if="userStore.user?.role === 'admin'" key="settings">
-                <span class="menu-item-content">
-                  <SettingOutlined />
-                  <span>系统管理</span>
-                </span>
-              </a-menu-item>
-              <a-menu-item v-if="userStore.user?.role === 'admin'" key="model-providers">
-                <span class="menu-item-content">
-                  <ApiOutlined />
-                  <span>模型管理</span>
-                </span>
-              </a-menu-item>
-              <a-menu-item v-if="userStore.user?.role === 'admin'" key="logs">
-                <span class="menu-item-content">
-                  <FileTextOutlined />
-                  <span>日志</span>
-                </span>
-              </a-menu-item>
-              <a-menu-divider />
-              <a-menu-item key="about">
-                <span class="menu-item-content">
-                  <InfoCircleOutlined />
-                  <span>关于</span>
-                </span>
-              </a-menu-item>
-              <a-menu-item key="theme" @click="toggleTheme">
-                <span class="menu-item-content">
-                  <BulbFilled v-if="isDark" />
-                  <BulbOutlined v-else />
-                  <span>{{ isDark ? '浅色模式' : '深色模式' }}</span>
-                </span>
-              </a-menu-item>
-              <a-menu-divider />
-              <a-menu-item key="logout">
-                <span class="menu-item-content">
-                  <LogoutOutlined />
-                  <span>退出登录</span>
-                </span>
-              </a-menu-item>
-            </a-menu>
+        <!-- 导航菜单（AgentScope 风格：分组 + 分组标题） -->
+        <nav class="nav-menu">
+          <template v-for="group in navGroups" :key="group.title">
+            <div v-if="!sidebarCollapsed" class="nav-group-label">{{ group.title }}</div>
+            <div v-else class="nav-group-divider"></div>
+            <template v-for="item in group.items" :key="item.path">
+              <a-tooltip v-if="sidebarCollapsed && !sidebarHidden" :title="item.label" placement="right">
+                <router-link :to="item.path" :class="['nav-item', { active: isActive(item.path) }]">
+                  <component :is="item.icon" />
+                  <span class="sidebar-text">{{ item.label }}</span>
+                </router-link>
+              </a-tooltip>
+              <router-link v-else :to="item.path" :class="['nav-item', { active: isActive(item.path) }]">
+                <component :is="item.icon" />
+                <span class="sidebar-text">{{ item.label }}</span>
+              </router-link>
+            </template>
           </template>
-        </a-dropdown>
-      </div>
-    </aside>
+        </nav>
+
+        <!-- 对话历史 -->
+        <div v-show="!sidebarCollapsed" class="session-section">
+          <div class="section-title" @click="sessionsCollapsed = !sessionsCollapsed">
+            <span class="section-title-label" @click.stop="sessionsCollapsed = !sessionsCollapsed">最近对话</span>
+            <div class="section-title-actions">
+              <a-tooltip title="搜索历史对话" placement="bottom">
+                <span class="section-title-search" @click.stop="openConversationSearch">
+                  <SearchOutlined />
+                </span>
+              </a-tooltip>
+              <DownOutlined class="collapse-icon" :class="{ 'is-expanded': !sessionsCollapsed }" />
+            </div>
+          </div>
+          <CollapseTransition :open="!sessionsCollapsed">
+            <div class="session-list" ref="sessionListRef">
+              <TransitionGroup name="lb-list">
+                <div
+                  v-for="s in sessions"
+                  :key="s.id"
+                  :class="['session-item', { active: currentSessionId === s.id, 'session-item--pinned': s.pinned }]"
+                  @click="switchSession(s)"
+                >
+                  <span class="session-title">{{ s.title || '新对话' }}</span>
+                  <span v-if="s.lastMessageAt" class="session-time">{{ formatRelativeTime(s.lastMessageAt) }}</span>
+                  <PushpinFilled v-if="s.pinned" class="session-pin-icon" aria-label="已置顶" />
+                  <a-dropdown :trigger="['click']" placement="bottomRight">
+                    <EllipsisOutlined class="session-more" @click.stop />
+                    <template #overlay>
+                      <a-menu @click="({ key }) => handleSessionMenu(key, s)">
+                        <a-menu-item key="pin">{{ s.pinned ? '取消置顶' : '置顶' }}</a-menu-item>
+                        <a-menu-item key="rename">重命名</a-menu-item>
+                        <a-menu-item key="export">导出</a-menu-item>
+                        <a-menu-divider />
+                        <a-menu-item key="delete" class="menu-danger">删除</a-menu-item>
+                      </a-menu>
+                    </template>
+                  </a-dropdown>
+                </div>
+              </TransitionGroup>
+              <div v-if="sessionLoading" class="session-loading-more">
+                <LoadingOutlined spin style="font-size: 12px; color: var(--color-mute)" />
+                <span v-if="sessions.length === 0" class="session-loading-text">加载中...</span>
+              </div>
+              <div
+                v-if="sessionHasMore && !sessionLoading"
+                ref="sessionLoadMoreRef"
+                class="session-load-more-sentinel"
+              ></div>
+              <div v-if="sessions.length === 0 && !sessionLoading" class="session-empty">暂无对话</div>
+            </div>
+          </CollapseTransition>
+        </div>
+
+        <!-- 重命名弹窗 -->
+        <a-modal
+          v-model:open="renameVisible"
+          title="重命名对话"
+          :width="400"
+          @ok="confirmRename"
+          @cancel="renameVisible = false"
+        >
+          <a-input
+            v-model:value="renameValue"
+            placeholder="请输入新名称"
+            @press-enter="confirmRename"
+            :maxlength="50"
+          />
+        </a-modal>
+
+        <!-- 跨会话搜索弹窗 -->
+        <ConversationSearchModal v-model:open="conversationSearchOpen" @pick="handleConversationSearchPick" />
+
+        <!-- 用户信息 -->
+        <div class="sidebar-footer">
+          <a-dropdown
+            v-model:open="userDropdownOpen"
+            :trigger="['click']"
+            :get-popup-container="getPopupContainer"
+            overlay-class-name="sidebar-user-dropdown"
+            :overlay-style="{ width: '160px' }"
+          >
+            <div class="user-info">
+              <AvatarFrame :frame="userStore.user?.avatarFrame" :size="28">
+                <div class="user-avatar">
+                  <img
+                    v-if="userStore.user?.avatar"
+                    :src="userStore.user.avatar"
+                    alt="avatar"
+                    class="user-avatar-img"
+                    @error="userStore.user?.avatar && (userStore.user.avatar = '')"
+                  />
+                  <span v-else>{{ (userStore.user?.username || userStore.user?.nickname || 'U')[0] }}</span>
+                </div>
+              </AvatarFrame>
+              <span class="sidebar-text user-name">
+                {{ userStore.user?.username || userStore.user?.nickname || '用户' }}
+              </span>
+              <LevelTag v-show="!sidebarCollapsed" :level="userStore.user?.level" size="small" />
+              <a-badge
+                v-if="taskBadgeCount"
+                :count="taskBadgeCount"
+                :number-style="taskBadgeStyle"
+                :class="['sidebar-task-badge-inline', taskBadgePopClass]"
+                @click.stop="router.push('/app/tasks')"
+              />
+              <span class="sidebar-text">
+                <UpOutlined v-if="userDropdownOpen" />
+                <DownOutlined v-else />
+              </span>
+            </div>
+            <template #overlay>
+              <a-menu @click="handleCommand">
+                <a-menu-item key="user-info" class="menu-user-info" @click="router.push('/app/profile')">
+                  <div class="user-info-display">
+                    <div class="user-info-name-row">
+                      <span class="user-info-name">
+                        {{ userStore.user?.username || userStore.user?.nickname || '用户' }}
+                      </span>
+                      <span class="user-info-role">{{ userRoleText }}</span>
+                    </div>
+                    <div class="user-info-meta">
+                      <span class="user-info-id">ID: {{ userStore.user?.id }}</span>
+                    </div>
+                  </div>
+                </a-menu-item>
+                <a-menu-divider />
+                <a-menu-item key="tasks">
+                  <div class="menu-item-with-badge">
+                    <span class="menu-item-content">
+                      <CheckSquareOutlined />
+                      <span>任务中心</span>
+                    </span>
+                    <a-badge
+                      v-if="taskBadgeCount"
+                      :count="taskBadgeCount"
+                      :number-style="{ fontSize: '10px', boxShadow: 'none', backgroundColor: '#f5222d' }"
+                    />
+                  </div>
+                </a-menu-item>
+                <a-menu-item key="sessions">
+                  <span class="menu-item-content">
+                    <MessageOutlined />
+                    <span>会话管理</span>
+                  </span>
+                </a-menu-item>
+                <a-menu-item v-if="userStore.user?.role === 'admin'" key="settings">
+                  <span class="menu-item-content">
+                    <SettingOutlined />
+                    <span>系统管理</span>
+                  </span>
+                </a-menu-item>
+                <a-menu-item v-if="userStore.user?.role === 'admin'" key="model-providers">
+                  <span class="menu-item-content">
+                    <ApiOutlined />
+                    <span>模型管理</span>
+                  </span>
+                </a-menu-item>
+                <a-menu-item v-if="userStore.user?.role === 'admin'" key="logs">
+                  <span class="menu-item-content">
+                    <FileTextOutlined />
+                    <span>日志</span>
+                  </span>
+                </a-menu-item>
+                <a-menu-divider />
+                <a-menu-item key="about">
+                  <span class="menu-item-content">
+                    <InfoCircleOutlined />
+                    <span>关于</span>
+                  </span>
+                </a-menu-item>
+                <a-menu-item key="theme" @click="toggleTheme">
+                  <span class="menu-item-content">
+                    <BulbFilled v-if="isDark" />
+                    <BulbOutlined v-else />
+                    <span>{{ isDark ? '浅色模式' : '深色模式' }}</span>
+                  </span>
+                </a-menu-item>
+                <a-menu-divider />
+                <a-menu-item key="logout">
+                  <span class="menu-item-content">
+                    <LogoutOutlined />
+                    <span>退出登录</span>
+                  </span>
+                </a-menu-item>
+              </a-menu>
+            </template>
+          </a-dropdown>
+        </div>
+      </aside>
+      <!-- 边缘悬浮折叠触发器（AgentScope 风格：右边缘垂直居中，hover 才出现） -->
+      <button
+        v-show="!sidebarHidden"
+        class="sidebar-edge-trigger"
+        :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+        :aria-label="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+        @click="toggleSidebar"
+      >
+        <LeftOutlined v-if="!sidebarCollapsed" />
+        <RightOutlined v-else />
+      </button>
+    </div>
 
     <!-- 主内容区 -->
     <main class="main-content">
@@ -267,8 +287,10 @@ import {
   DashboardOutlined,
   AudioOutlined,
   EyeOutlined,
-  MenuFoldOutlined,
   MenuUnfoldOutlined,
+  LeftOutlined,
+  RightOutlined,
+  ClusterOutlined,
   FileTextOutlined,
   ExperimentOutlined,
   CheckSquareOutlined,
@@ -338,6 +360,35 @@ const SSE_BASE_DELAY = 3000
 
 const { isDark, toggleTheme } = useTheme()
 
+// 侧边栏导航（AgentScope 风格）：分组渲染，每组带 SidebarGroupLabel 式小标题
+const navGroups = [
+  {
+    title: '智能体',
+    items: [
+      { path: '/app/agents', label: 'Agent', icon: markRaw(RobotOutlined) },
+      { path: '/app/knowledge', label: '知识库', icon: markRaw(DatabaseOutlined) },
+      { path: '/app/extensions', label: '扩展', icon: markRaw(ToolOutlined) },
+      { path: '/app/tts-voices', label: '音色', icon: markRaw(AudioOutlined) },
+    ],
+  },
+  {
+    title: '开发',
+    items: [
+      { path: '/app/prompts', label: 'Prompt', icon: markRaw(FileTextOutlined) },
+      { path: '/app/eval', label: '评测', icon: markRaw(ExperimentOutlined) },
+    ],
+  },
+  {
+    title: '观测',
+    items: [
+      { path: '/app/dashboard', label: 'Dashboard', icon: markRaw(DashboardOutlined) },
+      { path: '/app/observability', label: '可观测', icon: markRaw(EyeOutlined) },
+    ],
+  },
+]
+// 拍平后的导航项：供页面标题兜底、快捷键等按路径查找使用
+const navItems = navGroups.flatMap((g) => g.items)
+
 // 顶部页面标题栏（AgentScope 风格）：从 route.meta.title / navItems 前缀匹配 / route.name 解析当前页标题
 const hidePageHeader = computed(() => route.meta?.hidePageHeader === true)
 const pageTitle = computed(() => {
@@ -358,17 +409,6 @@ const taskBadgePopClass = useCountPop(() => taskStore.active)
 
 const taskBadgeStyle = { fontSize: '10px', boxShadow: 'none', backgroundColor: '#f5222d' }
 
-const navItems = [
-  { path: '/app/agents', label: 'Agent', icon: markRaw(RobotOutlined) },
-  { path: '/app/knowledge', label: '知识库', icon: markRaw(DatabaseOutlined) },
-  { path: '/app/extensions', label: '扩展', icon: markRaw(ToolOutlined) },
-  { path: '/app/prompts', label: 'Prompt', icon: markRaw(FileTextOutlined) },
-  { path: '/app/eval', label: '评测', icon: markRaw(ExperimentOutlined) },
-  { path: '/app/tts-voices', label: '音色', icon: markRaw(AudioOutlined) },
-  { path: '/app/dashboard', label: 'Dashboard', icon: markRaw(DashboardOutlined) },
-  { path: '/app/observability', label: '可观测', icon: markRaw(EyeOutlined) },
-]
-
 function isActive(path) {
   return route.path.startsWith(path)
 }
@@ -376,6 +416,15 @@ function isActive(path) {
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
   localStorage.setItem('sidebar-collapsed', sidebarCollapsed.value)
+}
+
+// 品牌块：收起时点击展开，展开时回首页（沿用原 logo 的点击语义）
+function onBrandClick() {
+  if (sidebarCollapsed.value) {
+    toggleSidebar()
+  } else {
+    router.push('/')
+  }
 }
 
 function handleGlobalKeydown(e) {
@@ -690,6 +739,19 @@ watch(sessionLoadMoreRef, (el) => {
 }
 
 /* ===== 侧边栏 ===== */
+/* 外层包裹：承载贴在右边缘的悬浮折叠触发器。
+   触发器必须放在 .sidebar 之外——sidebar 有 overflow:hidden 会把它裁掉 */
+.sidebar-wrap {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+}
+.sidebar-wrap.is-hidden {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
 .sidebar {
   width: 260px;
   background: var(--sidebar-bg);
@@ -704,19 +766,8 @@ watch(sessionLoadMoreRef, (el) => {
 .sidebar.collapsed {
   width: 60px;
 }
-.sidebar.hidden {
-  width: 0 !important;
-  min-width: 0;
-  padding: 0;
-  border: none;
-  overflow: hidden;
-  pointer-events: none;
-}
 .sidebar.collapsed .sidebar-text {
   display: none;
-}
-.sidebar.collapsed .logo-img {
-  height: 32px;
 }
 .sidebar.collapsed .btn-new-chat {
   margin: 0 8px 12px;
@@ -748,34 +799,52 @@ watch(sessionLoadMoreRef, (el) => {
   padding: 12px 6px;
 }
 
-.sidebar-header {
+/* 品牌块（AgentScope 风格）：主色圆角方块 + 图标 + 双行文字 */
+.sidebar-brand {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 12px 8px 8px;
+  gap: 10px;
+  padding: 14px 10px 14px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.sidebar.collapsed .sidebar-brand {
+  padding: 14px 6px;
+  justify-content: center;
+}
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--color-link);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
   flex-shrink: 0;
 }
-.sidebar.collapsed .sidebar-header {
-  padding: 12px 6px 8px;
-  justify-content: center;
-}
-.sidebar-logo {
+.brand-text {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex: 1;
-  position: relative;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
 }
-.logo-single,
+.brand-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sidebar-text-bright);
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+.brand-sub {
+  font-size: 11px;
+  color: var(--sidebar-text);
+  white-space: nowrap;
+}
 .logo-unfold-icon {
   display: none;
-}
-.sidebar.collapsed .logo-full {
-  display: none;
-}
-.sidebar.collapsed .logo-single {
-  display: block;
 }
 .sidebar.collapsed .logo-unfold-icon {
   position: absolute;
@@ -786,13 +855,45 @@ watch(sessionLoadMoreRef, (el) => {
   color: var(--color-mute);
   font-size: 18px;
   background: var(--sidebar-bg);
+  border-radius: 8px;
 }
-.sidebar.collapsed .sidebar-logo:hover .logo-unfold-icon {
+.sidebar.collapsed .sidebar-brand:hover .logo-unfold-icon {
   display: flex;
 }
-.logo-img {
-  height: 56px;
-  object-fit: contain;
+
+/* 边缘悬浮折叠触发器：默认隐藏，hover 侧边栏才浮出 */
+.sidebar-edge-trigger {
+  position: absolute;
+  right: -9px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 20;
+  width: 18px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  color: var(--color-mute);
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s,
+    color 0.15s,
+    background 0.15s;
+}
+.sidebar-wrap:hover .sidebar-edge-trigger {
+  opacity: 1;
+  pointer-events: auto;
+}
+.sidebar-edge-trigger:hover {
+  color: var(--color-link);
+  background: var(--color-canvas-soft-2);
 }
 .btn-new-chat {
   display: flex;
@@ -823,6 +924,28 @@ watch(sessionLoadMoreRef, (el) => {
   /* 关键：侧边栏空间不足时导航菜单不能收缩，否则末两项（Dashboard/可观测）
      会溢出到会话区被覆盖，导致偶尔点击无响应 */
   flex-shrink: 0;
+}
+/* 分组标题（对应 shadcn 的 SidebarGroupLabel） */
+.nav-group-label {
+  padding: 10px 12px 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: var(--sidebar-text);
+  opacity: 0.7;
+  white-space: nowrap;
+}
+.nav-group-label:first-child {
+  padding-top: 2px;
+}
+/* 收起态没有标题文字，改用细分隔线维持分组感 */
+.nav-group-divider {
+  height: 1px;
+  margin: 8px 10px;
+  background: var(--sidebar-border);
+}
+.nav-group-divider:first-child {
+  display: none;
 }
 .nav-item {
   display: flex;
@@ -1114,32 +1237,6 @@ watch(sessionLoadMoreRef, (el) => {
   display: flex;
   gap: 10px;
   font-size: 12px;
-  color: var(--color-mute);
-}
-
-/* 收起/展开按钮 */
-.sidebar-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.sidebar-toggle {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: var(--sidebar-text);
-  font-size: 14px;
-  border-radius: 6px;
-  flex-shrink: 0;
-  transition:
-    background 0.15s,
-    color 0.15s;
-}
-.sidebar-toggle:hover {
-  background: var(--sidebar-bg-hover);
   color: var(--color-mute);
 }
 
