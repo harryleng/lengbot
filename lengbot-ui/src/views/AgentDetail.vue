@@ -3620,7 +3620,11 @@ async function onTtsProviderChange(val) {
 }
 async function loadVoiceOptions() {
   try {
-    const r = await fetch('/api/tts/voices')
+    // 只加载当前生效引擎的音色，避免 edge-tts 下混入 mock 等不兼容音色
+    const url = ttsProvider.value
+      ? `/api/tts/voices?provider=${encodeURIComponent(ttsProvider.value)}`
+      : '/api/tts/voices'
+    const r = await fetch(url)
     if (r.ok) {
       const data = await r.json()
       const list = data?.data || []
@@ -3629,6 +3633,7 @@ async function loadVoiceOptions() {
           voiceURI: v.name,
           name: v.friendlyName || v.name,
           lang: v.locale,
+          provider: v.provider,
         }))
         return
       }
@@ -3651,8 +3656,7 @@ async function loadVoiceOptions() {
     }
   }
 }
-loadVoiceOptions()
-loadTtsProvider()
+loadTtsProvider().finally(loadVoiceOptions)
 
 /**
  * 试听当前选中的数字人音色：调用后端 /api/tts/synthesize 合成一段固定文本并播放。
@@ -3664,8 +3668,11 @@ async function previewTtsVoice() {
   ttsPreviewing.value = true
   try {
     const text = '你好，这是数字人音色试听。'
+    // 用音色自身所属引擎合成：edge 音色走 edge-tts，mock 音色走 mock，避免错配导致 1007
+    const sel = voiceOptions.value.find((v) => v.voiceURI === digitalHuman.voice.voiceURI)
     const audio = await backendTtsClient.synthesize(text, {
       voice: digitalHuman.voice.voiceURI || undefined,
+      provider: sel?.provider,
       rate: digitalHuman.voice.rate,
       pitch: digitalHuman.voice.pitch,
     })

@@ -25,7 +25,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.HexFormat;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -73,6 +75,11 @@ public class EdgeTtsProvider implements TtsProvider {
     /** Sec-MS-GEC 令牌缓存（含过期时间） */
     private volatile TokenCache tokenCache;
 
+    /** 可用 neural 音色名缓存（含过期时间），用于合成前校验，避免把非 neural 音色发给微软导致 1007 */
+    private volatile Set<String> validVoiceNames;
+    private volatile long validVoiceExpireAt;
+    private static final long VOICE_CACHE_TTL_MS = 10 * 60 * 1000L;
+
     @Override
     public TtsAudio synthesize(TtsRequest request) {
         String text = request.getText();
@@ -87,6 +94,17 @@ public class EdgeTtsProvider implements TtsProvider {
                 ? request.getFormat() : properties.getFormat();
 
         TtsProperties.EdgeTts cfg = properties.getEdgeTts();
+        // 防御：若请求的音色并非 edge-tts 的 neural 音色（如 mock 音色、标准音色或拼写错误），
+        // 微软会返回 1007「standard voices no longer supported for new users」。
+        // 校验不通过则回退到默认 neural 音色，保证 synthesize 永不因非法音色名而 1007。
+        Set<String> valid = getValidVoiceNames();
+        boolean known = valid != null && valid.contains(voice);
+        boolean looksNeural = voice != null && voice.toLowerCase().endsWith("neural");
+        if (!known && !looksNeural) {
+            log.warn("[EdgeTTS] 请求音色 '{}' 非有效 edge-tts neural 音色，回退默认 '{}'",
+                    voice, properties.getDefaultVoice());
+            voice = properties.getDefaultVoice();
+        }
         String secMsGec = getSecMsGec(cfg);
         String wsUrl = buildWsUrl(cfg, secMsGec);
         String configMsg = buildConfigMessage(format);
@@ -231,6 +249,39 @@ public class EdgeTtsProvider implements TtsProvider {
     private String buildVoicesUrl(TtsProperties.EdgeTts cfg) {
         return "https://" + cfg.getHost() + cfg.getVoicesPath()
                 + "?trustedclienttoken=" + cfg.getTrustedClientToken();
+    }
+
+    /**
+     * 取得当前 edge-tts 可用音色名集合（带缓存）。
+     * 用于合成前校验请求音色是否合法；若清单暂时无法加载（网络异常）则返回 null，
+     * 调用方退化为「是否以 Neural 结尾」的启发式判断，避免阻断合法合成。
+     */
+    private Set<String> getValidVoiceNames() {
+        long now = System.currentTimeMillis();
+        Set<String> cached = validVoiceNames;
+        if (cached != null && validVoiceExpireAt > now) {
+            return cached;
+        }
+        synchronized (this) {
+            if (validVoiceNames != null && validVoiceExpireAt > now) {
+                return validVoiceNames;
+            }
+            try {
+                List<TtsVoice> live = listVoices();
+                if (live != null && !live.isEmpty()) {
+                    Set<String> set = live.stream()
+                            .map(TtsVoice::getName)
+                            .filter(n -> n != null && !n.isBlank())
+                            .collect(Collectors.toSet());
+                    validVoiceNames = set;
+                    validVoiceExpireAt = now + VOICE_CACHE_TTL_MS;
+                    return set;
+                }
+            } catch (Exception e) {
+                log.warn("[EdgeTTS] 音色清单加载失败，跳过音色校验: {}", e.getMessage());
+            }
+            return null;
+        }
     }
 
     private String getSecMsGec(TtsProperties.EdgeTts cfg) {

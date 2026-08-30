@@ -268,7 +268,10 @@ async function onPreview(record) {
   if (previewing.value) return
   previewing.value = record.voiceURI
   try {
-    const audio = await backendTts.synthesize('你好，这是数字人音色试听。', { voice: record.voiceURI })
+    const audio = await backendTts.synthesize('你好，这是数字人音色试听。', {
+      voice: record.voiceURI,
+      provider: record.provider,
+    })
     await audio.play()
   } catch {
     message.error('试听失败，请检查 TTS 引擎连通性')
