@@ -121,6 +121,27 @@ lengbot:
   # 对话内核：harness（AgentScope HarnessAgent，默认）/ legacy（手搓工具循环，回滚用）
   chat:
     engine: 'harness'
+
+  # ========================================
+  # TTS 语音合成配置（后端可插拔 Provider 架构）
+  # provider: mock（开发/兜底，生成测试音频）| edge-tts（纯 Java 复刻微软在线 TTS）
+  # 数字人播报与消息朗读均走后端 /api/tts/synthesize
+  # ========================================
+  tts:
+    provider: edge-tts
+    default-voice: zh-CN-XiaoxiaoNeural
+    default-rate: "+0%"
+    default-pitch: "+0Hz"
+    format: audio-24khz-48kbitrate-mono-mp3
+    max-text-length: 2000
+    edge-tts:
+      # 区域影响 WebSocket 接入点；token/voices 地址一般无需改动
+      region: eastus
+      token-url: https://edge.microsoft.com/tts/cognitiveservices/voices/list
+      voices-url: https://dev.microsofttranslator.com/voices/list?api-version=1.0
+      connect-timeout-ms: 10000
+      read-timeout-ms: 30000
+      token-ttl-seconds: 300
   # AgentScope AI 引擎配置（替代原 Spring AI 配置）
   agentscope:
     # 默认模型（AgentScope ModelRegistry 中的模型名称）

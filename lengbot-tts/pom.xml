@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.lengbot</groupId>
+        <artifactId>lengbot</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>lengbot-tts</artifactId>
+    <name>LengBot TTS</name>
+    <description>语音合成(TTS)后端模块：可插拔 Provider 架构，内置 Mock 与 EdgeTTS(纯 Java 复刻微软在线 TTS 协议)实现</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.lengbot</groupId>
+            <artifactId>lengbot-common</artifactId>
+        </dependency>
+
+        <!-- Spring Boot 基础（@Component / @ConfigurationProperties / Jackson） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+</project>

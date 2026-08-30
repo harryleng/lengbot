@@ -257,6 +257,7 @@ import {
   DatabaseOutlined,
   ToolOutlined,
   DashboardOutlined,
+  AudioOutlined,
   EyeOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -345,6 +346,7 @@ const navItems = [
   { path: '/app/extensions', label: '扩展', icon: markRaw(ToolOutlined) },
   { path: '/app/prompts', label: 'Prompt', icon: markRaw(FileTextOutlined) },
   { path: '/app/eval', label: '评测', icon: markRaw(ExperimentOutlined) },
+  { path: '/app/tts-voices', label: '音色', icon: markRaw(AudioOutlined) },
   { path: '/app/dashboard', label: 'Dashboard', icon: markRaw(DashboardOutlined) },
   { path: '/app/observability', label: '可观测', icon: markRaw(EyeOutlined) },
 ]

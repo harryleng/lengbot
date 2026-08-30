@@ -28,6 +28,7 @@
         <module>lengbot-workflow</module>
         <module>lengbot-agent</module>
         <module>lengbot-server</module>
+        <module>lengbot-tts</module>
     </modules>
 
     <properties>
@@ -133,6 +134,11 @@
             <dependency>
                 <groupId>com.lengbot</groupId>
                 <artifactId>lengbot-agent</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.lengbot</groupId>
+                <artifactId>lengbot-tts</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

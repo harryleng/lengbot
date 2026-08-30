@@ -42,6 +42,10 @@
             <groupId>com.lengbot</groupId>
             <artifactId>lengbot-agent</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.lengbot</groupId>
+            <artifactId>lengbot-tts</artifactId>
+        </dependency>
 
         <!-- ============================================ -->
         <!-- Spring Cloud Alibaba — Nacos 服务注册与配置中心 -->

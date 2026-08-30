@@ -165,7 +165,14 @@
         :portrait-url="digitalHumanConfig?.portraitUrl"
         :mouth-zone="digitalHumanConfig?.mouthZone"
         :speaking="digitalHumanSpeaking"
+        :state="digitalHumanState"
+        :muted="dhMuted"
         :agent-name="currentAgent?.name"
+        :engine-value="chatTtsProvider"
+        :engine-options="chatTtsProviders"
+        @toggle-mute="onToggleMute"
+        @stop="onStopBroadcast"
+        @update:engine="onChatEngineChange"
       />
 
       <ChatSessionRuntimePanel
@@ -261,6 +268,7 @@ import { buildSubagentLiveStatusBadges } from '../components/capabilities/subage
 import { useChatAgents } from '../composables/useChatAgents'
 import { useChatAttachments } from '../composables/useChatAttachments'
 import { useVoiceIO } from '../composables/useVoiceIO'
+import { useBackendTts } from '../composables/useBackendTts'
 import { useAskUser } from '../composables/useAskUser'
 import { useStreamSmoother } from '../composables/useStreamSmoother'
 import {
@@ -450,6 +458,10 @@ const { getAttThumbUrl, openAttachmentPreview, onFileSelected, removeAttachment 
   attachmentPreviewAtt,
 })
 
+// 后端 TTS 实例与开关（数字人播报 / 消息朗读统一走后端 /api/tts/synthesize）
+const useBackendTtsEnabled = ref(true)
+const backendTts = useBackendTts()
+
 const {
   toggleVoiceInput,
   stopVoiceInput,
@@ -457,6 +469,11 @@ const {
   speakText,
   speaking,
   messagePlainText,
+  startStreamBroadcast,
+  feedStreamingText,
+  flushStreamBroadcast,
+  stopStreamBroadcast,
+  setBroadcastMuted,
   cleanup: voiceCleanup,
 } = useVoiceIO({
   input,
@@ -465,6 +482,9 @@ const {
   autoResize,
   voiceListening,
   speakingMsgKey,
+  // 后端 TTS：数字人播报 / 消息朗读统一走 /api/tts/synthesize（无浏览器语音也能发声）
+  useBackendTts: useBackendTtsEnabled,
+  backendTts,
 })
 
 // ===================== 数字人面板 =====================
@@ -482,27 +502,90 @@ function resolveDigitalHuman(agent) {
 }
 
 const digitalHumanConfig = computed(() => resolveDigitalHuman(currentAgent.value))
-const isDigitalHumanAgent = computed(
-  () => !!digitalHumanConfig.value?.portraitUrl && currentAgent.value?.agentType === 'digital_human'
-)
+const isDigitalHumanAgent = computed(() => currentAgent.value?.agentType === 'digital_human')
 const digitalHumanSpeaking = computed(() => isDigitalHumanAgent.value && speaking.value)
 
-// 回复生成结束后，数字人型 agent 自动朗读最新一条 assistant 消息
+// 数字人面板状态：播报中 / 思考中 / 空闲
+const dhMuted = ref(false)
+const digitalHumanState = computed(() => {
+  if (isDigitalHumanAgent.value && speaking.value) return 'speaking'
+  if (isDigitalHumanAgent.value && loading.value) return 'thinking'
+  return 'idle'
+})
+
+function onToggleMute() {
+  dhMuted.value = !dhMuted.value
+  setBroadcastMuted(dhMuted.value)
+}
+
+function onStopBroadcast() {
+  stopStreamBroadcast()
+}
+
+// 数字人面板底部的 TTS 引擎（Provider）运行时切换：当前生效项 + 全部可选项。
+const chatTtsProvider = ref('')
+const chatTtsProviders = ref([])
+async function loadChatTtsProvider() {
+  if (!isDigitalHumanAgent.value) return
+  try {
+    const info = await backendTts.provider()
+    chatTtsProvider.value = info.active || ''
+    chatTtsProviders.value = info.available || []
+  } catch (e) {
+    chatTtsProviders.value = []
+  }
+}
+async function onChatEngineChange(val) {
+  try {
+    const info = await backendTts.setProvider(val)
+    chatTtsProvider.value = info.active || val
+    chatTtsProviders.value = info.available || chatTtsProviders.value
+    message.success('已切换 TTS 引擎：' + info.active)
+  } catch (e) {
+    message.error('切换 TTS 引擎失败：' + (e?.message || e))
+    loadChatTtsProvider()
+  }
+}
+
+// 回复生成结束后，数字人型 agent 补读句末残留文本（主体已在流式过程中逐句播报）。
+// 中止 / 出错 / 敏感拦截的回复不播报。
 function onReplyFinished() {
   if (!isDigitalHumanAgent.value) return
   if (userStoppedStream.value) return
-  const msgs = messages.value
-  if (!msgs.length) return
-  const last = msgs[msgs.length - 1]
-  if (!last || last.role !== 'assistant' || last._autoSpoken) return
-  const text = messagePlainText(last.content)
-  if (!text) return
-  last._autoSpoken = true
-  speakText(text, { voice: digitalHumanConfig.value?.voice })
+  const last = messages.value[messages.value.length - 1]
+  if (!last || last.role !== 'assistant') return
+  if (last._error || last._sensitiveBlock || last._terminated) return
+  flushStreamBroadcast()
 }
 
+// 流式正文（仅 assistant 且正在生成时）：逐句喂给数字人播报
+const streamingContent = computed(() => {
+  const m = messages.value[messages.value.length - 1]
+  return m && m.role === 'assistant' && m._streaming ? m.content : null
+})
+
+watch(streamingContent, (txt) => {
+  if (txt != null) feedStreamingText(txt)
+})
+
+// streaming 开关：开始→开启数字人播报会话；结束→收尾补读
 watch(streaming, (now, prev) => {
-  if (prev && !now) onReplyFinished()
+  if (!prev && now) {
+    startStreamBroadcast(isDigitalHumanAgent.value ? digitalHumanConfig.value?.voice || {} : null)
+  }
+  if (prev && !now) {
+    onReplyFinished()
+  }
+})
+
+// 用户主动停止生成时，立即取消数字人播报
+watch(userStoppedStream, (v) => {
+  if (v) stopStreamBroadcast()
+})
+
+// 切换到数字人 agent（或反之）时，按需刷新 TTS 引擎可选项
+watch(isDigitalHumanAgent, (active) => {
+  if (active) loadChatTtsProvider()
 })
 
 const {
@@ -854,11 +937,14 @@ onMounted(async () => {
   }
   document.addEventListener('keydown', handleChatKeydown)
   window.addEventListener('beforeunload', abortActiveStreamOnUnload)
+  // 数字人 agent 时加载 TTS 引擎可选项，供面板底部实时切换
+  loadChatTtsProvider()
 })
 
 onUnmounted(() => {
   stopRuntimePanelResize?.()
   abortActiveStreamOnUnload()
+  stopStreamBroadcast()
   voiceCleanup()
   cleanupPollTitleTimer()
   cleanupEditClickOutside()
@@ -881,6 +967,7 @@ watch(
       abortController.value.abort()
       abortController.value = null
     }
+    stopStreamBroadcast()
     expandedRefsMap.value = new Map()
     refsSectionExpandedMap.value = new Map()
     liveSubagentEvents.value = []
@@ -940,9 +1027,9 @@ watch(sessionId, (newVal, oldVal) => {
 }
 
 .chat-digital-human {
-  flex-shrink: 0;
-  width: 380px;
-  max-width: 42vw;
+  flex: 1 1 40%;
+  min-width: 340px;
+  max-width: 560px;
   margin: 12px 12px 12px 0;
   border-radius: 12px;
   overflow: hidden;

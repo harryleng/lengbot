@@ -207,6 +207,29 @@
                       <div class="param-hint">当前为占位引擎，后续可接入商业数字人 API 或本地开源模型生成真实口型视频</div>
                     </a-form-item>
 
+                    <!-- TTS 引擎：运行时切换后端 Provider（edge-tts / mock），无需重启服务 -->
+                    <a-form-item label="TTS 引擎">
+                      <a-select
+                        v-model:value="ttsProvider"
+                        style="width: 100%"
+                        :disabled="isVersionPreview || ttsProviders.length === 0"
+                        placeholder="加载中…"
+                        @change="onTtsProviderChange"
+                      >
+                        <a-select-option v-for="p in ttsProviders" :key="p" :value="p">{{ p }}</a-select-option>
+                      </a-select>
+                      <div class="param-hint">
+                        切换后端 TTS 引擎，立即生效；edge-tts 不通时可切 mock 兜底发声。
+                        <a-button
+                          size="small"
+                          type="link"
+                          :loading="ttsChecking"
+                          style="padding: 0 4px"
+                          @click="onTtsHealthCheck"
+                        >连通性自检</a-button>
+                      </div>
+                    </a-form-item>
+
                     <!-- 音色：可选，决定数字人朗读声音 -->
                     <a-form-item label="音色">
                       <a-select
@@ -220,6 +243,16 @@
                           {{ v.name }}（{{ v.lang }}）
                         </a-select-option>
                       </a-select>
+                      <a-button
+                        size="small"
+                        type="link"
+                        :loading="ttsPreviewing"
+                        :disabled="isVersionPreview"
+                        @click="previewTtsVoice"
+                      >
+                        试听音色
+                      </a-button>
+                      <router-link to="/app/tts-voices" style="margin-left: 8px; font-size: 13px">管理音色</router-link>
                       <div class="dh-voice-row">
                         <span>语速 {{ digitalHuman.voice.rate.toFixed(1) }}</span>
                         <a-slider v-model:value="digitalHuman.voice.rate" :min="0.5" :max="2" :step="0.1" :disabled="isVersionPreview" />
@@ -2129,6 +2162,8 @@ import DynamicIcon from '../components/DynamicIcon.vue'
 import LbDetailHeader from '../components/common/LbDetailHeader.vue'
 import DigitalHumanPlayer from '../components/DigitalHumanPlayer.vue'
 import { useBinding } from '../composables/useBinding'
+import { useBackendTts } from '../composables/useBackendTts'
+
 const route = useRoute()
 const router = useRouter()
 const agentId = route.params.id
@@ -3533,8 +3568,75 @@ function previewStop() {
 }
 
 // ===================== 数字人：可选音色列表 =====================
+// 优先从后端 TTS（/api/tts/voices，如 edge-tts 音色）加载，失败则回退浏览器自带语音。
+// 注意：数字人播报已统一走后端 TTS，这里列出的必须是后端能识别的音色名（voiceURI 字段即音色名）。
 const voiceOptions = ref([])
-function loadVoiceOptions() {
+const ttsPreviewing = ref(false)
+const backendTtsClient = useBackendTts()
+// 后端 TTS 引擎（Provider）运行时切换：当前生效项 + 全部可选项
+const ttsProvider = ref('')
+const ttsProviders = ref([])
+const ttsChecking = ref(false)
+async function loadTtsProvider() {
+  try {
+    const info = await backendTtsClient.provider()
+    ttsProvider.value = info.active || ''
+    ttsProviders.value = info.available || []
+  } catch (e) {
+    ttsProviders.value = []
+  }
+}
+async function onTtsHealthCheck() {
+  if (ttsChecking.value) return
+  ttsChecking.value = true
+  try {
+    const data = await backendTtsClient.health()
+    const providers = data?.providers || {}
+    const parts = Object.keys(providers).map((name) => {
+      const h = providers[name]
+      return `${name}: ${h.available ? '✅ ' + (h.detail || '可用') : '❌ ' + (h.detail || '不可用')}`
+    })
+    if (!parts.length) parts.push('（无已注册引擎）')
+    message.info({ content: 'TTS 自检\n' + parts.join('\n'), duration: 6 })
+  } catch (e) {
+    message.error('TTS 自检失败：' + (e?.message || e))
+  } finally {
+    ttsChecking.value = false
+  }
+}
+async function onTtsProviderChange(val) {
+  try {
+    const info = await backendTtsClient.setProvider(val)
+    ttsProvider.value = info.active || val
+    ttsProviders.value = info.available || ttsProviders.value
+    message.success('已切换 TTS 引擎：' + info.active)
+    // 切换引擎后音色列表可能变化，刷新下拉
+    await loadVoiceOptions()
+  } catch (e) {
+    message.error('切换 TTS 引擎失败：' + (e?.message || e))
+    // 回滚到服务端真实状态
+    loadTtsProvider()
+  }
+}
+async function loadVoiceOptions() {
+  try {
+    const r = await fetch('/api/tts/voices')
+    if (r.ok) {
+      const data = await r.json()
+      const list = data?.data || []
+      if (list.length) {
+        voiceOptions.value = list.map((v) => ({
+          voiceURI: v.name,
+          name: v.friendlyName || v.name,
+          lang: v.locale,
+        }))
+        return
+      }
+    }
+  } catch (e) {
+    // 忽略，走浏览器兜底
+  }
+  // 浏览器兜底
   if (!window.speechSynthesis) return
   const list = window.speechSynthesis.getVoices()
   if (list && list.length) {
@@ -3550,6 +3652,33 @@ function loadVoiceOptions() {
   }
 }
 loadVoiceOptions()
+loadTtsProvider()
+
+/**
+ * 试听当前选中的数字人音色：调用后端 /api/tts/synthesize 合成一段固定文本并播放。
+ * 后端会按 UI 的 rate/pitch（0.5~2 乘数）映射为 SSML 的 +X% / +XHz，
+ * 因此试听效果与正式播报一致。失败时给出错误提示，不抛出。
+ */
+async function previewTtsVoice() {
+  if (ttsPreviewing.value) return
+  ttsPreviewing.value = true
+  try {
+    const text = '你好，这是数字人音色试听。'
+    const audio = await backendTtsClient.synthesize(text, {
+      voice: digitalHuman.voice.voiceURI || undefined,
+      rate: digitalHuman.voice.rate,
+      pitch: digitalHuman.voice.pitch,
+    })
+    const p = audio.play()
+    if (p && p.catch) {
+      p.catch(() => message.error('试听播放失败，请检查浏览器音频权限'))
+    }
+  } catch (e) {
+    message.error('试听合成失败：' + (e?.message || e))
+  } finally {
+    ttsPreviewing.value = false
+  }
+}
 
 async function handleSaveWorkflowBasic() {
   if (!agent.name?.trim()) {

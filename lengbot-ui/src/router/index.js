@@ -126,6 +126,12 @@ const routes = [
         component: () => import('../views/DashboardView.vue'),
       },
       {
+        path: 'tts-voices',
+        name: 'TtsVoices',
+        component: () => import('../views/VoiceManage.vue'),
+        meta: { title: '音色管理' },
+      },
+      {
         path: 'observability',
         name: 'Observability',
         component: () => import('../views/Observability.vue'),
