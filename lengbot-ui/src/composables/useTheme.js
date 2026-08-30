@@ -8,9 +8,10 @@ export function useTheme() {
   const themeConfig = computed(() => ({
     algorithm: isDark.value ? theme.darkAlgorithm : theme.defaultAlgorithm,
     token: {
-      colorPrimary: '#171717',
-      colorLink: '#0070f3',
-      colorLinkHover: '#0761d1',
+      // AgentScope 绿作为品牌主色：antd primary 按钮 / 链接 / 选中高亮统一走绿
+      colorPrimary: '#10a37f',
+      colorLink: '#10a37f',
+      colorLinkHover: '#0d8a6a',
       borderRadius: 8,
       borderRadiusLG: 12,
       borderRadiusSM: 6,
@@ -21,8 +22,8 @@ export function useTheme() {
       // controlItemBgActive 是 Select / Cascader / DatePicker / Menu 等组件的"选中态背景"全局别名，
       // 默认从 colorPrimaryBg 派生。本项目 colorPrimary=#171717 会导致派生色为暗灰，
       // 下拉项选中态在浅色模式下也会变成深色。显式覆盖为蓝色淡背景，与配色一致。
-      controlItemBgActive: isDark.value ? '#0c1a3d' : '#e8f4ff',
-      controlItemBgActiveHover: isDark.value ? '#1e3a5f' : '#d3e5ff',
+      controlItemBgActive: isDark.value ? '#064e3b' : '#d1fae5',
+      controlItemBgActiveHover: isDark.value ? '#0a5c43' : '#a7f3d0',
       controlItemBgHover: isDark.value ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
       ...(isDark.value
         ? {
@@ -47,9 +48,9 @@ export function useTheme() {
       },
       Tabs: {
         // 浅色模式用近黑高亮，深色模式切到浅色保证对比度
-        inkBarColor: isDark.value ? '#e4e4e7' : '#171717',
-        itemSelectedColor: isDark.value ? '#e4e4e7' : '#171717',
-        itemHoverColor: isDark.value ? '#a1a1aa' : '#27272a',
+        inkBarColor: isDark.value ? '#e4e4e7' : '#10a37f',
+        itemSelectedColor: isDark.value ? '#e4e4e7' : '#10a37f',
+        itemHoverColor: isDark.value ? '#a1a1aa' : '#0d9488',
         itemActiveColor: isDark.value ? '#e4e4e7' : '#171717',
         titleFontSize: 14,
       },
@@ -71,7 +72,7 @@ export function useTheme() {
       DatePicker: { borderRadius: 6 },
       Pagination: {
         // 浅色激活态用近黑底，深色用中灰底；文字始终为反色
-        itemActiveBg: isDark.value ? '#3f3f46' : '#171717',
+        itemActiveBg: isDark.value ? '#3f3f46' : '#10a37f',
         itemActiveColor: isDark.value ? '#e4e4e7' : '#ffffff',
         itemActiveColorDisabled: 'rgba(255,255,255,0.35)',
       },

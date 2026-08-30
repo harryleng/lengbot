@@ -52,11 +52,13 @@ const routes = [
         path: 'chat',
         name: 'Chat',
         component: () => import('../views/Chat.vue'),
+        meta: { hidePageHeader: true },
       },
       {
         path: 'chat/:sessionId',
         name: 'ChatSession',
         component: () => import('../views/Chat.vue'),
+        meta: { hidePageHeader: true },
       },
       {
         path: 'knowledge',
@@ -93,7 +95,7 @@ const routes = [
         path: 'workflow/:agentId',
         name: 'WorkflowEdit',
         component: () => import('../views/WorkflowEdit.vue'),
-        meta: { hideSidebar: true },
+        meta: { hideSidebar: true, hidePageHeader: true },
       },
       {
         path: 'mcp',

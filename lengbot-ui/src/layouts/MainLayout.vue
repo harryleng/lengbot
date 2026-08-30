@@ -233,13 +233,21 @@
 
     <!-- 主内容区 -->
     <main class="main-content">
-      <router-view v-slot="{ Component, route: r }">
-        <transition name="lb-route" mode="out-in">
-          <keep-alive :include="cachedRouteNames">
-            <component :is="Component" :key="r.path.startsWith('/app/chat') ? '/app/chat' : r.path" />
-          </keep-alive>
-        </transition>
-      </router-view>
+      <header v-if="!hidePageHeader" class="page-header">
+        <div class="page-header-inner">
+          <div v-if="breadcrumb" class="page-breadcrumb">{{ breadcrumb }}</div>
+          <h1 class="page-title">{{ pageTitle }}</h1>
+        </div>
+      </header>
+      <div class="page-body" :class="{ 'page-body--flush': hidePageHeader }">
+        <router-view v-slot="{ Component, route: r }">
+          <transition name="lb-route" mode="out-in">
+            <keep-alive :include="cachedRouteNames">
+              <component :is="Component" :key="r.path.startsWith('/app/chat') ? '/app/chat' : r.path" />
+            </keep-alive>
+          </transition>
+        </router-view>
+      </div>
     </main>
   </div>
 </template>
@@ -329,6 +337,16 @@ let sseRetries = 0
 const SSE_BASE_DELAY = 3000
 
 const { isDark, toggleTheme } = useTheme()
+
+// 顶部页面标题栏（AgentScope 风格）：从 route.meta.title / navItems 前缀匹配 / route.name 解析当前页标题
+const hidePageHeader = computed(() => route.meta?.hidePageHeader === true)
+const pageTitle = computed(() => {
+  if (route.meta?.title) return route.meta.title
+  const nav = navItems.find((n) => route.path.startsWith(n.path))
+  if (nav) return nav.label
+  return typeof route.name === 'string' ? route.name : 'LengBot'
+})
+const breadcrumb = computed(() => 'LengBot')
 
 const taskBadgeCount = computed(() => {
   if (taskStore.active <= 0) return 0
@@ -675,7 +693,7 @@ watch(sessionLoadMoreRef, (el) => {
 .sidebar {
   width: 260px;
   background: var(--sidebar-bg);
-  color: var(--color-mute);
+  color: var(--sidebar-text);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -812,7 +830,7 @@ watch(sessionLoadMoreRef, (el) => {
   gap: 10px;
   padding: 8px 12px;
   border-radius: 6px;
-  color: var(--color-mute);
+  color: var(--sidebar-text);
   text-decoration: none;
   font-size: 14px;
   transition:
@@ -824,8 +842,9 @@ watch(sessionLoadMoreRef, (el) => {
   color: var(--sidebar-text-bright);
 }
 .nav-item.active {
-  background: var(--sidebar-bg-hover);
-  color: var(--sidebar-text-bright);
+  background: rgba(16, 163, 127, 0.22);
+  color: #ffffff;
+  box-shadow: inset 3px 0 0 0 #10a37f;
 }
 
 /* 对话历史 */
@@ -849,7 +868,7 @@ watch(sessionLoadMoreRef, (el) => {
   justify-content: space-between;
   font-size: 12px;
   font-weight: 500;
-  color: var(--color-mute);
+  color: var(--sidebar-text);
   padding: 8px 12px 4px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -873,7 +892,7 @@ watch(sessionLoadMoreRef, (el) => {
   height: 22px;
   border-radius: 4px;
   font-size: 12px;
-  color: var(--color-mute);
+  color: var(--sidebar-text);
   transition:
     background 0.15s,
     color 0.15s;
@@ -883,11 +902,11 @@ watch(sessionLoadMoreRef, (el) => {
   color: var(--sidebar-text-bright);
 }
 .section-title:hover {
-  color: var(--color-mute);
+  color: var(--sidebar-text);
 }
 .collapse-icon {
   font-size: 10px;
-  color: var(--color-mute);
+  color: var(--sidebar-text);
   transition: transform 0.24s ease;
 }
 .collapse-icon.is-expanded {
@@ -944,7 +963,7 @@ watch(sessionLoadMoreRef, (el) => {
 .session-time {
   flex-shrink: 0;
   font-size: 11px;
-  color: var(--color-mute);
+  color: var(--sidebar-text);
   white-space: nowrap;
 }
 .session-pin-icon {
@@ -955,7 +974,7 @@ watch(sessionLoadMoreRef, (el) => {
 }
 .session-more {
   opacity: 0;
-  color: var(--color-mute);
+  color: var(--sidebar-text);
   font-size: 14px;
   transition: opacity 0.15s;
   cursor: pointer;
@@ -972,7 +991,7 @@ watch(sessionLoadMoreRef, (el) => {
 .session-empty {
   padding: 12px;
   font-size: 13px;
-  color: var(--color-body);
+  color: var(--sidebar-text);
   text-align: center;
 }
 .session-loading-more {
@@ -984,7 +1003,7 @@ watch(sessionLoadMoreRef, (el) => {
 }
 .session-loading-text {
   font-size: 12px;
-  color: var(--color-mute);
+  color: var(--sidebar-text);
 }
 .session-load-more-sentinel {
   height: 1px;
@@ -1111,7 +1130,7 @@ watch(sessionLoadMoreRef, (el) => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: var(--color-body);
+  color: var(--sidebar-text);
   font-size: 14px;
   border-radius: 6px;
   flex-shrink: 0;
@@ -1127,7 +1146,45 @@ watch(sessionLoadMoreRef, (el) => {
 /* ===== 主内容区 ===== */
 .main-content {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+  background: var(--color-canvas-soft);
+}
+/* 顶部页面标题栏（AgentScope 风格）：浅色卡片浮起于灰底之上 */
+.page-header {
+  flex-shrink: 0;
   background: var(--color-canvas);
+  border-bottom: 1px solid var(--color-hairline);
+  padding: 14px 24px 12px;
+}
+.page-header-inner {
+  max-width: 1320px;
+  width: 100%;
+  margin: 0 auto;
+}
+.page-breadcrumb {
+  font-size: 12px;
+  color: var(--color-mute);
+  margin-bottom: 2px;
+  letter-spacing: 0.3px;
+}
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-ink);
+  margin: 0;
+  line-height: 1.3;
+}
+/* 内容区统一卡片化：灰底 + 统一内边距，白色 Card 自然浮起 */
+.page-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px;
+}
+.page-body--flush {
+  padding: 0;
+  overflow: hidden;
 }
 </style>

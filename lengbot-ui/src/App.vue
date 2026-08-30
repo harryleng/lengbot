@@ -145,22 +145,10 @@ body {
   border-color: rgba(255, 255, 255, 0.15) !important;
 }
 
-/* Button hover/active 深色模式兜底：
-   colorPrimary=#171717 经 darkAlgorithm 派生的 colorPrimaryHover/colorPrimaryActive 趋近 #000，
-   和 colorBgLayout=#111 画布重合导致 primary 按钮 hover/active 时"消失"。
-   显式提升 hover/active 亮度到中灰区间，并加强白色描边保证可见性。
-   default 按钮 hover 的边框色派生自 colorPrimaryHover（同样趋黑），同步覆盖为浅灰。 */
-[data-theme='dark'] .ant-btn-primary:not(.ant-btn-disabled):not(:disabled):hover,
-[data-theme='dark'] .ant-btn-primary:not(.ant-btn-disabled):not(:disabled):focus {
-  background: #2a2a2a !important;
-  border-color: rgba(255, 255, 255, 0.3) !important;
-  color: #fff !important;
-}
-[data-theme='dark'] .ant-btn-primary:not(.ant-btn-disabled):not(:disabled):active {
-  background: #3f3f46 !important;
-  border-color: rgba(255, 255, 255, 0.35) !important;
-  color: #fff !important;
-}
+/* Button hover/active 深色模式：
+   品牌主色已改为 AgentScope 绿（colorPrimary=#10a37f），darkAlgorithm 会自动派生出
+   可见的深绿 hover/active，无需像原黑色 primary 那样手动提亮，故删除原覆盖规则。
+   default 按钮 hover/active 的兜底保留（与 primary 无关）。 */
 [data-theme='dark'] .ant-btn-default:not(.ant-btn-disabled):not(:disabled):hover,
 [data-theme='dark'] .ant-btn-default:not(.ant-btn-disabled):not(:disabled):focus {
   background: rgba(255, 255, 255, 0.06) !important;
