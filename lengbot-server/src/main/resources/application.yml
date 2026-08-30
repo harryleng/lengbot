@@ -211,7 +211,7 @@ lengbot:
   # Milvus 向量数据库配置
   milvus:
     enabled: 'true'
-    uri: 'http://localhost:19530'
+    uri: 'http://lizhongcun.com:19530'
     token: ''
     connect-timeout-ms: 10000
     wait-timeout-ms: 30000
