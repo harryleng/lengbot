@@ -12,6 +12,8 @@ import './styles/provider-card.css'
 import './styles/ui-utils.css'
 import './styles/modal-scroll.css'
 import './styles/lb-components.css'
+// 深空科技风主题：最后引入，层叠优先级最高
+import './styles/deepspace-theme.css'
 
 import App from './App.vue'
 import router from './router'

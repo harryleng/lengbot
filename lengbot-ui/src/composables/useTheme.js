@@ -6,12 +6,12 @@ const isDark = ref(saved === 'dark' || (!saved && window.matchMedia('(prefers-co
 
 export function useTheme() {
   const themeConfig = computed(() => ({
-    algorithm: isDark.value ? theme.darkAlgorithm : theme.defaultAlgorithm,
+    algorithm: theme.darkAlgorithm,
     token: {
       // AgentScope 绿作为品牌主色：antd primary 按钮 / 链接 / 选中高亮统一走绿
-      colorPrimary: '#10a37f',
-      colorLink: '#10a37f',
-      colorLinkHover: '#0d8a6a',
+      colorPrimary: '#6366F1',
+      colorLink: '#22D3EE',
+      colorLinkHover: '#0EA5C4',
       borderRadius: 8,
       borderRadiusLG: 12,
       borderRadiusSM: 6,
@@ -22,19 +22,17 @@ export function useTheme() {
       // controlItemBgActive 是 Select / Cascader / DatePicker / Menu 等组件的"选中态背景"全局别名，
       // 默认从 colorPrimaryBg 派生。本项目 colorPrimary=#171717 会导致派生色为暗灰，
       // 下拉项选中态在浅色模式下也会变成深色。显式覆盖为蓝色淡背景，与配色一致。
-      controlItemBgActive: isDark.value ? '#064e3b' : '#d1fae5',
-      controlItemBgActiveHover: isDark.value ? '#0a5c43' : '#a7f3d0',
-      controlItemBgHover: isDark.value ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
-      ...(isDark.value
-        ? {
-            colorBgContainer: '#1a1a1a',
-            colorBgElevated: '#222222',
-            colorBgLayout: '#111111',
-            colorBorder: '#333333',
-            colorText: '#e4e4e7',
-            colorTextSecondary: '#a1a1aa',
+      controlItemBgActive: 'rgba(34, 211, 238, 0.14)',
+      controlItemBgActiveHover: 'rgba(34, 211, 238, 0.22)',
+      controlItemBgHover: 'rgba(34, 211, 238, 0.08)',
+      ...{
+            colorBgContainer: '#0C1024',
+            colorBgElevated: '#11162E',
+            colorBgLayout: '#070A18',
+            colorBorder: 'rgba(34, 211, 238, 0.16)',
+            colorText: '#E6EDFF',
+            colorTextSecondary: '#9CAAC9',
           }
-        : {}),
     },
     components: {
       Button: {
@@ -48,10 +46,10 @@ export function useTheme() {
       },
       Tabs: {
         // 浅色模式用近黑高亮，深色模式切到浅色保证对比度
-        inkBarColor: isDark.value ? '#e4e4e7' : '#10a37f',
-        itemSelectedColor: isDark.value ? '#e4e4e7' : '#10a37f',
-        itemHoverColor: isDark.value ? '#a1a1aa' : '#0d9488',
-        itemActiveColor: isDark.value ? '#e4e4e7' : '#171717',
+        inkBarColor: '#22D3EE',
+        itemSelectedColor: '#22D3EE',
+        itemHoverColor: '#A78BFA',
+        itemActiveColor: '#E6EDFF',
         titleFontSize: 14,
       },
       Table: {
@@ -72,8 +70,8 @@ export function useTheme() {
       DatePicker: { borderRadius: 6 },
       Pagination: {
         // 浅色激活态用近黑底，深色用中灰底；文字始终为反色
-        itemActiveBg: isDark.value ? '#3f3f46' : '#10a37f',
-        itemActiveColor: isDark.value ? '#e4e4e7' : '#ffffff',
+        itemActiveBg: '#6366F1',
+        itemActiveColor: '#ffffff',
         itemActiveColorDisabled: 'rgba(255,255,255,0.35)',
       },
       Tooltip: {

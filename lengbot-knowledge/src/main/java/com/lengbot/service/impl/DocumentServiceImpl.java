@@ -337,15 +337,26 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             knowledgeServiceProvider.getObject().updateStats(doc.getKnowledgeId(), 1, chunks.size(), (int) totalTokens);
             log.info("[文档入库] 分块完成, documentId={}, chunks={}, strategy={}", documentId, chunks.size(), strategyName);
 
-            // 6. 向量化
-            vectorizeChunksWithProgress(doc.getId(), doc.getKnowledgeId(), (vectorProgress, msg) -> {
-                // 向量化进度占 40%-95%
-                int overallProgress = 40 + (int) (vectorProgress * 0.55);
-                progressCallback.accept(overallProgress, msg);
-            });
+            // 6. 向量化（单独归因：向量化失败不再被外层 catch 误报为"分块失败"）
+            try {
+                vectorizeChunksWithProgress(doc.getId(), doc.getKnowledgeId(), (vectorProgress, msg) -> {
+                    // 向量化进度占 40%-95%
+                    int overallProgress = 40 + (int) (vectorProgress * 0.55);
+                    progressCallback.accept(overallProgress, msg);
+                });
+            } catch (Exception ve) {
+                throw new BizException(ErrorCode.DOCUMENT_VECTORIZE_FAILED, buildErrorMessage(ve));
+            }
 
             String doneMsg = dupWarning != null ? "入库完成（" + dupWarning + "）" : "入库完成";
             progressCallback.accept(100, doneMsg);
+        } catch (BizException e) {
+            // 保留已具备精准语义的业务异常（分块过短、向量化失败等），透传而非统一吞成"分块失败"
+            log.error("[文档入库] 失败, documentId={}", documentId, e);
+            doc.setStatus(DocumentStatus.FAILED);
+            doc.setErrorMessage(e.getMessage());
+            updateById(doc);
+            throw e;
         } catch (Exception e) {
             log.error("[文档入库] 失败, documentId={}", documentId, e);
             doc.setStatus(DocumentStatus.FAILED);

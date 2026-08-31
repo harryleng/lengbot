@@ -2,7 +2,6 @@ package com.lengbot.util;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import io.milvus.common.clientenum.FunctionType;
 import io.milvus.v2.client.ConnectConfig;
 import io.milvus.v2.client.MilvusClientV2;
 import io.milvus.v2.common.DataType;
@@ -155,7 +154,7 @@ public class MilvusUtil {
 
     /**
      * 为知识库创建 Collection
-     * <p>包含向量字段（HNSW+COSINE）和 BM25 稀疏向量字段</p>
+     * <p>包含向量字段（HNSW+COSINE）和稀疏向量字段（SPARSE_INVERTED_INDEX/IP）</p>
      *
      * @param knowledgeId 知识库ID
      * @param dimension   向量维度（由 Embedding 模型决定）
@@ -201,18 +200,10 @@ public class MilvusUtil {
                 .name("content_sparse").dataType(DataType.SparseFloatVector)
                 .build());
 
-        // 2. 创建 BM25 Function（content → content_sparse 自动转换）
-        CreateCollectionReq.Function bm25Function = CreateCollectionReq.Function.builder()
-                .functionType(FunctionType.BM25)
-                .name("bm25_sparse")
-                .inputFieldNames(List.of("content"))
-                .outputFieldNames(List.of("content_sparse"))
-                .build();
-
-        // 3. 构建 CollectionSchema（含字段 + Function）
+        // 2. 构建 CollectionSchema（无 BM25 Function：server 2.4.12 部署缺 FTS 组件，
+        //    content_sparse 由 insertVectors 手动写入，与检索路径 sparseFromString 保持一致）
         CreateCollectionReq.CollectionSchema schema = CreateCollectionReq.CollectionSchema.builder()
                 .fieldSchemaList(fieldSchemas)
-                .functionList(List.of(bm25Function))
                 .build();
 
         // 4. 创建 Collection
@@ -230,11 +221,11 @@ public class MilvusUtil {
                 .extraParams(Map.of("M", 16, "efConstruction", 200))
                 .build();
 
-        // 6. 创建 BM25 稀疏向量索引
+        // 6. 创建稀疏向量索引（SPARSE_INVERTED_INDEX + IP）
         IndexParam sparseIndex = IndexParam.builder()
                 .fieldName("content_sparse")
                 .indexType(IndexParam.IndexType.SPARSE_INVERTED_INDEX)
-                .metricType(IndexParam.MetricType.BM25)
+                .metricType(IndexParam.MetricType.IP)
                 .extraParams(Map.of("drop_ratio_search", 0.0))
                 .build();
 
@@ -293,7 +284,7 @@ public class MilvusUtil {
 
     /**
      * 为知识库创建 Entity Collection
-     * <p>字段: id(VarChar PK), content(VarChar+BM25), embedding(FloatVector), content_sparse(SparseFloatVector)</p>
+     * <p>字段: id(VarChar PK), content(VarChar), embedding(FloatVector), content_sparse(SparseFloatVector)</p>
      *
      * @param knowledgeId 知识库ID
      * @param dimension   向量维度
@@ -305,7 +296,7 @@ public class MilvusUtil {
 
     /**
      * 为知识库创建 Triple Collection
-     * <p>字段: id(VarChar PK), content(VarChar+BM25), source_id(VarChar), target_id(VarChar),
+     * <p>字段: id(VarChar PK), content(VarChar), source_id(VarChar), target_id(VarChar),
      * embedding(FloatVector), content_sparse(SparseFloatVector)</p>
      *
      * @param knowledgeId 知识库ID
@@ -358,16 +349,9 @@ public class MilvusUtil {
                 .name("content_sparse").dataType(DataType.SparseFloatVector)
                 .build());
 
-        CreateCollectionReq.Function bm25Function = CreateCollectionReq.Function.builder()
-                .functionType(FunctionType.BM25)
-                .name("bm25_sparse")
-                .inputFieldNames(List.of("content"))
-                .outputFieldNames(List.of("content_sparse"))
-                .build();
-
+        // 注：server 2.4.12 缺 FTS 组件，BM25 Function 不可用，sparse 由写入方手动构造
         CreateCollectionReq.CollectionSchema schema = CreateCollectionReq.CollectionSchema.builder()
                 .fieldSchemaList(fieldSchemas)
-                .functionList(List.of(bm25Function))
                 .build();
 
         getClient().createCollection(CreateCollectionReq.builder()
@@ -383,7 +367,7 @@ public class MilvusUtil {
         IndexParam sparseIndex = IndexParam.builder()
                 .fieldName("content_sparse")
                 .indexType(IndexParam.IndexType.SPARSE_INVERTED_INDEX)
-                .metricType(IndexParam.MetricType.BM25)
+                .metricType(IndexParam.MetricType.IP)
                 .extraParams(Map.of("drop_ratio_search", 0.0))
                 .build();
 
@@ -417,6 +401,8 @@ public class MilvusUtil {
             row.addProperty("id", String.valueOf(entityIds.get(i)));
             row.addProperty("content", contents.get(i));
             row.add("embedding", GSON.toJsonTree(vectors.get(i)));
+            // 方案B：server 无 FTS/BM25 Function，sparse 与检索路径同源（sparseFromString 字符级 hash）
+            row.add("content_sparse", GSON.toJsonTree(sparseFromString(contents.get(i))));
             rows.add(row);
         }
         getClient().insert(InsertReq.builder().collectionName(collName).data(rows).build());
@@ -445,6 +431,8 @@ public class MilvusUtil {
             row.addProperty("source_id", String.valueOf(sourceIds.get(i)));
             row.addProperty("target_id", String.valueOf(targetIds.get(i)));
             row.add("embedding", GSON.toJsonTree(vectors.get(i)));
+            // 方案B：server 无 FTS/BM25 Function，sparse 与检索路径同源（sparseFromString 字符级 hash）
+            row.add("content_sparse", GSON.toJsonTree(sparseFromString(contents.get(i))));
             rows.add(row);
         }
         getClient().insert(InsertReq.builder().collectionName(collName).data(rows).build());
@@ -578,6 +566,8 @@ public class MilvusUtil {
             row.addProperty("document_id", String.valueOf(documentIds.get(i)));
             row.addProperty("content", contents.get(i));
             row.add("embedding", GSON.toJsonTree(vectors.get(i)));
+            // 方案B：server 无 FTS/BM25 Function，sparse 与检索路径同源（sparseFromString 字符级 hash）
+            row.add("content_sparse", GSON.toJsonTree(sparseFromString(contents.get(i))));
             rows.add(row);
         }
 
@@ -670,7 +660,7 @@ public class MilvusUtil {
                 .data(List.of(new SparseFloatVec(sparseFromString(queryText))))
                 .annsField("content_sparse")
                 .topK(topK)
-                .metricType(IndexParam.MetricType.BM25)
+                .metricType(IndexParam.MetricType.IP)
                 .searchParams(Map.of("drop_ratio_search", dropRatioSearch))
                 .outputFields(List.of("id", "document_id", "content"))
                 .build();
@@ -713,7 +703,7 @@ public class MilvusUtil {
                 .vectorFieldName("content_sparse")
                 .vectors(List.of(new SparseFloatVec(sparseFromString(queryText))))
                 .topK(bm25TopK)
-                .metricType(IndexParam.MetricType.BM25)
+                .metricType(IndexParam.MetricType.IP)
                 .params(bm25Params)
                 .build();
 
@@ -762,9 +752,9 @@ public class MilvusUtil {
     }
 
     /**
-     * 将文本转为 BM25 稀疏向量
-     * <p>Milvus 的 BM25 Function 会在 Insert 时自动将 content 转为 content_sparse，
-     * 检索时需要手动构造稀疏向量输入</p>
+     * 将文本转为稀疏向量（字符级 hash）
+     * <p>方案B：server 缺 FTS/BM25 Function，插入与检索均需手动构造 content_sparse，
+     * 与检索路径保持一致</p>
      */
     private SortedMap<Long, Float> sparseFromString(String text) {
         SortedMap<Long, Float> sparse = new TreeMap<>();

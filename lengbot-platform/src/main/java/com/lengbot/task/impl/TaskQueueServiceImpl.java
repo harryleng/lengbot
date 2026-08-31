@@ -45,8 +45,10 @@ public class TaskQueueServiceImpl implements TaskQueueService {
 
     private final StringRedisTemplate redis;
 
-    /** 主队列 Stream key */
-    private static final String KEY_MAIN_STREAM = "lengbot:task:stream:main";
+    /** 默认组主队列 Stream key（短任务） */
+    private static final String KEY_STREAM_DEFAULT = "lengbot:task:stream:default";
+    /** 重型组主队列 Stream key（长任务：图谱抽取、问答对生成） */
+    private static final String KEY_STREAM_HEAVY = "lengbot:task:stream:heavy";
     /** 死信 Stream key */
     private static final String KEY_DEAD_LETTER_STREAM = "lengbot:task:stream:deadletter";
     /** 延迟队列 ZSet key（score=触发时间戳毫秒） */
@@ -85,12 +87,14 @@ public class TaskQueueServiceImpl implements TaskQueueService {
 
     @Override
     public String enqueue(Task task) {
-        // XADD main * task_id type ts v attempts
+        // XADD <stream> * task_id type ts v attempts
+        // 按任务分组路由到独立 Stream（default/heavy），避免双消费组对同一消息重复消费
+        String streamKey = streamKeyFor(task);
         Map<String, String> fields = baseFields(task);
         RecordId recordId = redis.opsForStream()
-                .add(StreamRecords.string(fields).withStreamKey(KEY_MAIN_STREAM));
+                .add(StreamRecords.string(fields).withStreamKey(streamKey));
         String streamId = recordId.getValue();
-        log.debug("[TaskQueue] XADD main, taskId={}, streamId={}", task.getId(), streamId);
+        log.debug("[TaskQueue] XADD {}, taskId={}, streamId={}", streamKey, task.getId(), streamId);
         return streamId;
     }
 
@@ -160,12 +164,12 @@ public class TaskQueueServiceImpl implements TaskQueueService {
 
     @Override
     public void ack(String streamId) {
-        // XACK main cg:default <streamId>  —— 默认组与重型组都在同一个 main stream 上
-        // 这里统一对两个组都尝试 ACK（XACK 对未消费的组返回 0，无副作用）
+        // 两个组各自独立 Stream：对 default/heavy 两个 stream 都尝试 ACK
+        // （XACK 对未消费的 stream 返回 0，无副作用），无需感知消息归属组
         RecordId recordId = RecordId.of(streamId);
-        redis.opsForStream().acknowledge(KEY_MAIN_STREAM, GROUP_DEFAULT, recordId);
-        redis.opsForStream().acknowledge(KEY_MAIN_STREAM, GROUP_HEAVY, recordId);
-        log.debug("[TaskQueue] XACK main, streamId={}", streamId);
+        redis.opsForStream().acknowledge(KEY_STREAM_DEFAULT, GROUP_DEFAULT, recordId);
+        redis.opsForStream().acknowledge(KEY_STREAM_HEAVY, GROUP_HEAVY, recordId);
+        log.debug("[TaskQueue] XACK, streamId={}", streamId);
     }
 
     @Override
@@ -198,7 +202,7 @@ public class TaskQueueServiceImpl implements TaskQueueService {
         List<MapRecord<String, Object, Object>> records = redis.opsForStream().read(
                 consumer,
                 options,
-                StreamOffset.create(KEY_MAIN_STREAM, ReadOffset.lastConsumed()));
+                StreamOffset.create(streamKey(group), ReadOffset.lastConsumed()));
 
         return toMessages(records);
     }
@@ -211,7 +215,7 @@ public class TaskQueueServiceImpl implements TaskQueueService {
         List<MapRecord<String, Object, Object>> records = redis.opsForStream().read(
                 consumer,
                 options,
-                StreamOffset.create(KEY_MAIN_STREAM, ReadOffset.from("0")));
+                StreamOffset.create(streamKey(group), ReadOffset.from("0")));
 
         return toMessages(records);
     }
@@ -235,7 +239,7 @@ public class TaskQueueServiceImpl implements TaskQueueService {
     public List<StaleMessage> scanStale(TaskType.Group group, Duration idleThreshold, int count) {
         // XPENDING main <group> - + <count> —— Spring Data Redis 提供封装版
         PendingMessages pending = redis.opsForStream().pending(
-                KEY_MAIN_STREAM,
+                streamKey(group),
                 groupName(group),
                 Range.unbounded(),
                 (long) count);
@@ -270,7 +274,7 @@ public class TaskQueueServiceImpl implements TaskQueueService {
                 .toArray(RecordId[]::new);
 
         List<MapRecord<String, Object, Object>> claimed = redis.opsForStream().claim(
-                KEY_MAIN_STREAM,
+                streamKey(group),
                 groupName(group),
                 consumerName,
                 minIdle == null ? Duration.ZERO : minIdle,
@@ -317,23 +321,25 @@ public class TaskQueueServiceImpl implements TaskQueueService {
 
     @Override
     public void ensureGroups() {
-        // XGROUP CREATE main cg:default $ MKSTREAM  —— 幂等
-        // 忽略 BUSYGROUP 错误（组已存在）
-        tryCreateGroup(KEY_MAIN_STREAM, GROUP_DEFAULT);
-        tryCreateGroup(KEY_MAIN_STREAM, GROUP_HEAVY);
+        // XGROUP CREATE <stream> <group> $ MKSTREAM  —— 幂等
+        // 每组绑定独立 Stream，忽略 BUSYGROUP 错误（组已存在）
+        tryCreateGroup(KEY_STREAM_DEFAULT, GROUP_DEFAULT);
+        tryCreateGroup(KEY_STREAM_HEAVY, GROUP_HEAVY);
         // 死信 Stream 不需要消费组（人工运维读取）
     }
 
     @Override
     public QueueMetrics snapshotMetrics() {
         // 采集队列关键计数，单次接口调用对 Redis 压力可控（5 个 O(1)/O(logN) 命令）
-        Long mainLen = redis.opsForStream().size(KEY_MAIN_STREAM);
+        Long defaultLen = redis.opsForStream().size(KEY_STREAM_DEFAULT);
+        Long heavyLen = redis.opsForStream().size(KEY_STREAM_HEAVY);
+        long mainLen = (defaultLen == null ? 0 : defaultLen) + (heavyLen == null ? 0 : heavyLen);
         Long deadLetterLen = redis.opsForStream().size(KEY_DEAD_LETTER_STREAM);
-        Long defaultPending = pendingCount(GROUP_DEFAULT);
-        Long heavyPending = pendingCount(GROUP_HEAVY);
+        Long defaultPending = pendingCount(KEY_STREAM_DEFAULT, GROUP_DEFAULT);
+        Long heavyPending = pendingCount(KEY_STREAM_HEAVY, GROUP_HEAVY);
         Long delaySize = redis.opsForZSet().zCard(KEY_DELAY_ZSET);
         return new QueueMetrics(
-                mainLen == null ? 0 : mainLen,
+                mainLen,
                 deadLetterLen == null ? 0 : deadLetterLen,
                 defaultPending == null ? 0 : defaultPending,
                 heavyPending == null ? 0 : heavyPending,
@@ -341,10 +347,10 @@ public class TaskQueueServiceImpl implements TaskQueueService {
     }
 
     /** 取指定消费组 PEL 中未 ACK 消息数（XPENDING - + 1 的 count 部分） */
-    private Long pendingCount(String group) {
+    private Long pendingCount(String streamKey, String group) {
         try {
             org.springframework.data.redis.connection.stream.PendingMessagesSummary summary =
-                    redis.opsForStream().pending(KEY_MAIN_STREAM, group);
+                    redis.opsForStream().pending(streamKey, group);
             return summary == null ? 0L : summary.getTotalPendingMessages();
         } catch (Exception e) {
             // 组尚未创建或 Redis 异常时返回 0，不影响监控端点
@@ -363,6 +369,23 @@ public class TaskQueueServiceImpl implements TaskQueueService {
             case HEAVY -> GROUP_HEAVY;
             default -> GROUP_DEFAULT;
         };
+    }
+
+    /** Stream key 映射：DEFAULT -> stream:default, HEAVY -> stream:heavy */
+    private String streamKey(TaskType.Group group) {
+        return switch (group) {
+            case HEAVY -> KEY_STREAM_HEAVY;
+            default -> KEY_STREAM_DEFAULT;
+        };
+    }
+
+    /** 任务 → Stream key：按任务类型分组路由；type 缺失时按默认组处理 */
+    private String streamKeyFor(Task task) {
+        TaskType type = task.getType();
+        if (type != null && type.getGroup() == TaskType.Group.HEAVY) {
+            return KEY_STREAM_HEAVY;
+        }
+        return KEY_STREAM_DEFAULT;
     }
 
     /** 基础消息字段（除 attempts 外其他都必填） */

@@ -1,0 +1,583 @@
+/* ==========================================================================
+ * LengBot · 深空科技风 (Deep-Space Tech) 主题
+ * --------------------------------------------------------------------------
+ * 设计参考：深空科技风 HTML（青 #22D3EE / 紫 #A78BFA / 靛 #6366F1 + 近黑深空底）
+ * 作用域：仅覆写颜色与装饰层，不改变任何组件结构 / 接口 / 交互逻辑。
+ * 加载顺序：main.js 中最后引入，保证层叠优先级高于 variables.css 等。
+ * ========================================================================== */
+
+:root,
+[data-theme='light'],
+[data-theme='dark'] {
+  /* ===== 深空科技风 调色板 ===== */
+  --cyan: #22D3EE;
+  --violet: #A78BFA;
+  --indigo: #6366F1;
+
+  /* 文字 */
+  --color-ink: #E6EDFF;          /* 主文字（亮） */
+  --color-body: #B9C5E6;
+  --color-mute: #8EA0C9;         /* 次级文字（雾蓝） */
+
+  /* 画布（近黑深空底） */
+  --color-canvas: #0A0E20;       /* 主画布：侧栏/顶栏/弹层背景 */
+  --color-canvas-soft: #070A18;  /* 最底背景：html/body/主内容区 */
+  --color-canvas-soft-2: #11162E;
+  --color-canvas-soft-3: #161C38;
+
+  /* 主交互色：靛蓝（参考色板 --blue） */
+  --color-primary: #6366F1;
+  --color-on-primary: #FFFFFF;
+  --color-link: #22D3EE;         /* 链接 / 聚焦 / 选中高亮：青 */
+  --color-link-deep: #0EA5C4;
+  --color-link-bg-soft: rgba(34, 211, 238, 0.14);
+
+  /* 边框 / 分隔线（半透青） */
+  --color-hairline: rgba(34, 211, 238, 0.16);
+  --color-hairline-strong: rgba(167, 139, 250, 0.32);
+
+  /* 玻璃卡片（半透蓝紫 + 青描边） */
+  --card: rgba(148, 163, 235, 0.06);
+  --card-bd: rgba(34, 211, 238, 0.28);
+
+  /* 侧边栏（深空玻璃） */
+  --sidebar-bg: rgba(12, 16, 38, 0.72);
+  --sidebar-bg-hover: rgba(34, 211, 238, 0.10);
+  --sidebar-border: rgba(34, 211, 238, 0.18);
+  --sidebar-text: #8EA0C9;
+  --sidebar-text-bright: #FFFFFF;
+
+  /* 滚动条 */
+  --scrollbar-thumb: rgba(167, 139, 250, 0.35);
+  --scrollbar-thumb-hover: rgba(34, 211, 238, 0.55);
+  --scrollbar-track: transparent;
+
+  /* 语义状态色（在深空底上保持清晰） */
+  --color-success: #22C55E;
+  --color-error: #F87171;
+  --color-error-soft: rgba(248, 113, 113, 0.16);
+  --color-warning: #F5A623;
+
+  /* Ant Design 兼容变量 */
+  --color-bg-container: #0C1024;
+  --color-bg-elevated: #11162E;
+  --color-text-secondary: #9CAAC9;
+  --color-trans-light: rgba(0, 0, 0, 0.82);
+  --color-trans-dark: rgba(230, 237, 255, 0.88);
+
+  /* 实体图标渐变（保留参考的青→靛视觉） */
+  --gradient-entity-default: linear-gradient(135deg, #22D3EE, #6366F1);
+  --gradient-entity-tool: linear-gradient(135deg, #34D399, #0EA5C4);
+  --gradient-entity-knowledge: linear-gradient(135deg, #6366F1, #4F46E5);
+  --gradient-entity-mcp: linear-gradient(135deg, #A78BFA, #7C3AED);
+  --gradient-entity-skill: linear-gradient(135deg, #F59E0B, #D97706);
+  --gradient-entity-subagent: linear-gradient(135deg, #EC4899, #DB2777);
+
+  /* 阴影（深空：低对比，靠辉光） */
+  --shadow-1: 0 0 0 1px rgba(34, 211, 238, 0.10);
+  --shadow-2: 0 2px 12px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(34, 211, 238, 0.10);
+  --shadow-3: 0 6px 24px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(34, 211, 238, 0.12);
+  --shadow-4: 0 10px 32px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(34, 211, 238, 0.14);
+  --shadow-5: 0 18px 48px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(34, 211, 238, 0.16);
+
+  /* 思维导图 / 知识图谱 */
+  --mindmap-text: #E6EDFF;
+  --mindmap-stroke: rgba(34, 211, 238, 0.30);
+  --kg-canvas-bg: #070A18;
+
+  /* 字体 */
+  --font-sans: "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* ==========================================================================
+ * 深空背景层（星空 / 网格 / 辉光 / 轨道）
+ * 全局固定铺底，所有深空卡片都半透明地浮在上面。
+ * ========================================================================== */
+html,
+body,
+#app {
+  background: transparent !important;
+}
+
+/* 兜底：即便伪元素背景未生效，html 也保持深空底色，避免白屏 */
+html {
+  background: #05060F !important;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(1100px 750px at 12% 8%, rgba(35, 60, 140, 0.42) 0%, transparent 55%),
+    radial-gradient(950px 700px at 88% 92%, rgba(109, 40, 217, 0.34) 0%, transparent 55%),
+    linear-gradient(160deg, #05060F 0%, #0A1026 45%, #0D1230 100%);
+}
+
+/* 网格 + 星点 + 辉光 + 轨道，统一挂在一个固定层上避免重复 paint */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    /* 网格 */
+    linear-gradient(rgba(34, 211, 238, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.06) 1px, transparent 1px),
+    /* 星点 */
+    radial-gradient(1.5px 1.5px at 12% 22%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 31% 68%, #cfe9ff 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 47% 12%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 63% 42%, #d9f6ff 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 78% 19%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 87% 63%, #e3dcff 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 22% 88%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 56% 76%, #d9f6ff 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 93% 88%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 8% 56%, #e3dcff 50%, transparent 51%);
+  background-size: 54px 54px, 54px 54px, 420px 420px, 420px 420px, 420px 420px, 420px 420px, 420px 420px, 420px 420px, 420px 420px, 420px 420px, 420px 420px, 420px 420px;
+  -webkit-mask-image: radial-gradient(ellipse at 50% 40%, #000 25%, transparent 80%);
+          mask-image: radial-gradient(ellipse at 50% 40%, #000 25%, transparent 80%);
+  opacity: 0.9;
+}
+
+/* 让主内容区透出星空（不覆盖其内容，仅背景透明 + 玻璃感） */
+.main-content {
+  background:
+    linear-gradient(180deg, rgba(10, 14, 32, 0.55) 0%, rgba(7, 10, 24, 0.35) 100%) !important;
+  backdrop-filter: blur(2px);
+  position: relative;
+}
+
+/* ==========================================================================
+ * 侧边栏 · 深空玻璃
+ * ========================================================================== */
+.sidebar {
+  background: var(--sidebar-bg) !important;
+  backdrop-filter: blur(16px) !important;
+  border-right: 1px solid var(--sidebar-border) !important;
+  box-shadow: 0 0 40px rgba(5, 10, 30, 0.6);
+}
+
+/* 品牌块 */
+.brand-mark {
+  background: linear-gradient(135deg, var(--cyan), var(--indigo)) !important;
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.5);
+}
+.brand-name {
+  background: linear-gradient(90deg, #ffffff, var(--cyan)) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+.brand-sub {
+  color: var(--mute) !important;
+}
+
+/* 新建对话按钮：青描边玻璃 */
+.btn-new-chat {
+  border: 1px solid var(--card-bd) !important;
+  background: rgba(34, 211, 238, 0.06) !important;
+  color: var(--sidebar-text-bright) !important;
+  backdrop-filter: blur(6px);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.btn-new-chat:hover {
+  border-color: var(--cyan) !important;
+  background: rgba(34, 211, 238, 0.14) !important;
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.35);
+  transform: translateY(-1px);
+}
+
+/* 分组标题 */
+.nav-group-label {
+  color: var(--violet) !important;
+  opacity: 0.85 !important;
+}
+.nav-group-divider {
+  background: var(--sidebar-border) !important;
+}
+
+/* 导航项 */
+.nav-item {
+  color: var(--sidebar-text) !important;
+}
+.nav-item:hover {
+  background: var(--sidebar-bg-hover) !important;
+  color: #ffffff !important;
+}
+/* 激活态：青描边 + 左侧光条 + 辉光 */
+.nav-item.active {
+  background: rgba(34, 211, 238, 0.12) !important;
+  color: #ffffff !important;
+  box-shadow: inset 3px 0 0 0 var(--cyan), 0 0 18px rgba(34, 211, 238, 0.25) !important;
+}
+
+/* 边缘悬浮折叠触发器：青描边 */
+.sidebar-edge-trigger {
+  background: var(--color-canvas) !important;
+  border: 1px solid var(--sidebar-border) !important;
+  color: var(--mute) !important;
+}
+.sidebar-edge-trigger:hover {
+  color: var(--cyan) !important;
+  border-color: var(--cyan) !important;
+  background: rgba(34, 211, 238, 0.1) !important;
+}
+
+/* ==========================================================================
+ * 对话历史
+ * ========================================================================== */
+.section-title {
+  background: transparent !important;
+  color: var(--mute) !important;
+}
+.section-title-search:hover {
+  background: var(--sidebar-bg-hover) !important;
+  color: #ffffff !important;
+}
+.session-item:hover {
+  background: var(--sidebar-bg-hover) !important;
+}
+.session-item.active {
+  background: rgba(34, 211, 238, 0.10) !important;
+}
+.session-item--pinned {
+  background: rgba(99, 102, 241, 0.14) !important;
+  border-left-color: var(--indigo) !important;
+}
+.session-item--pinned:hover {
+  background: rgba(99, 102, 241, 0.22) !important;
+}
+.session-item--pinned.active {
+  background: rgba(99, 102, 241, 0.26) !important;
+}
+.session-title {
+  color: var(--sidebar-text) !important;
+}
+.session-item--pinned .session-title {
+  color: #ffffff !important;
+}
+.session-time {
+  color: var(--mute) !important;
+}
+.session-pin-icon {
+  color: #818cf8 !important;
+}
+.session-more:hover {
+  background: rgba(167, 139, 250, 0.18) !important;
+  color: #ffffff !important;
+}
+
+/* ==========================================================================
+ * 用户区
+ * ========================================================================== */
+.sidebar-footer {
+  background: transparent !important;
+  border-top: 1px solid var(--sidebar-border) !important;
+}
+.user-info:hover {
+  background: var(--sidebar-bg-hover) !important;
+}
+.user-avatar {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.5), rgba(139, 92, 246, 0.5)) !important;
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.4);
+}
+.user-name {
+  color: var(--sidebar-text) !important;
+}
+.user-info-name {
+  color: var(--color-ink) !important;
+}
+.user-info-role {
+  color: var(--mute) !important;
+  background: var(--color-canvas-soft-2) !important;
+}
+
+/* ==========================================================================
+ * 顶栏（页面标题栏）· 玻璃浮起
+ * ========================================================================== */
+.page-header {
+  background: rgba(12, 16, 38, 0.6) !important;
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--card-bd) !important;
+}
+.page-title {
+  color: #ffffff !important;
+  text-shadow: 0 0 18px rgba(34, 211, 238, 0.25);
+}
+.page-breadcrumb {
+  color: var(--mute) !important;
+}
+
+/* ==========================================================================
+ * Ant Design 弹层 · 深空皮肤覆盖（浅/深色都套用深空底，保证一致）
+ * ========================================================================== */
+.ant-config-provider,
+.ant-btn,
+.ant-card,
+.ant-modal-content,
+.ant-drawer-content,
+.ant-dropdown-menu,
+.ant-select-dropdown,
+.ant-picker-dropdown,
+.ant-menu,
+.ant-table,
+.ant-table-container,
+.ant-tabs,
+.ant-layout {
+  color: var(--color-ink) !important;
+}
+
+.ant-card {
+  background: rgba(17, 22, 46, 0.72) !important;
+  border-color: var(--card-bd) !important;
+  backdrop-filter: blur(10px);
+}
+
+.ant-modal-content,
+.ant-drawer-content,
+.ant-dropdown-menu {
+  background: #11162E !important;
+  border: 1px solid var(--card-bd) !important;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6) !important;
+}
+
+.ant-modal-header {
+  background: transparent !important;
+  border-bottom: 1px solid var(--card-bd) !important;
+}
+.ant-modal-title,
+.ant-drawer-title {
+  color: #ffffff !important;
+}
+
+.ant-select-dropdown,
+.ant-tree-select-dropdown,
+.ant-cascader-menu,
+.ant-cascader-menus,
+.ant-picker-dropdown,
+.ant-time-picker-panel,
+.ant-autocomplete-dropdown {
+  background: #11162E !important;
+  border: 1px solid var(--card-bd) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6) !important;
+}
+.ant-select-item,
+.ant-cascader-menu-item,
+.ant-picker-cell-inner {
+  color: var(--color-body) !important;
+}
+
+/* 输入控件：深空玻璃 + 青聚焦 */
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-number,
+.ant-input-number-affix-wrapper,
+.ant-picker,
+.ant-select-selector {
+  background: rgba(10, 14, 32, 0.7) !important;
+  border-color: var(--card-bd) !important;
+  color: var(--color-ink) !important;
+}
+.ant-input::placeholder,
+.ant-input-affix-wrapper input::placeholder {
+  color: var(--mute) !important;
+}
+
+/* Table 深空 */
+.ant-table {
+  background: transparent !important;
+}
+.ant-table-thead > tr > th {
+  background: rgba(34, 211, 238, 0.08) !important;
+  color: var(--violet) !important;
+  border-bottom: 1px solid var(--card-bd) !important;
+}
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(34, 211, 238, 0.10) !important;
+  color: var(--color-body) !important;
+}
+.ant-table-tbody > tr:hover > td {
+  background: rgba(34, 211, 238, 0.06) !important;
+}
+
+/* Tabs 深空 */
+.ant-tabs-tab-btn {
+  color: var(--mute) !important;
+}
+.ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--cyan) !important;
+}
+.ant-tabs-ink-bar {
+  background: var(--cyan) !important;
+}
+.ant-tabs-nav::before {
+  border-bottom-color: var(--card-bd) !important;
+}
+
+/* Tag 深空 */
+.ant-tag {
+  color: #c7d5f5 !important;
+  border-color: var(--card-bd) !important;
+  background: rgba(34, 211, 238, 0.08) !important;
+}
+
+/* Message 深空 */
+.ant-message .ant-message-notice-content {
+  background: #11162E !important;
+  border: 1px solid var(--card-bd) !important;
+  color: #e6edff !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* ==========================================================================
+ * Landing 落地页 · 深空科技风化（不改结构/逻辑，仅覆盖配色与背景）
+ * Landing.vue 自身是 scoped 浅色蓝调主题，这里用 !important 强制套用深空底。
+ * ========================================================================== */
+
+/* 整个落地页背景改为深空渐变（覆盖 scoped 浅色渐变） */
+.landing-container {
+  background:
+    radial-gradient(1100px 750px at 12% 8%, rgba(35, 60, 140, 0.42) 0%, transparent 55%),
+    radial-gradient(950px 700px at 88% 92%, rgba(109, 40, 217, 0.34) 0%, transparent 55%),
+    linear-gradient(160deg, #05060F 0%, #0A1026 45%, #0D1230 100%) !important;
+  color: var(--color-ink) !important;
+}
+
+/* 背景光球：青 + 紫，呼应参考 */
+.orb-1 {
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.22), rgba(99, 102, 241, 0.05) 70%) !important;
+}
+.orb-2 {
+  background: radial-gradient(circle, rgba(167, 139, 250, 0.20), rgba(109, 40, 217, 0.04) 70%) !important;
+}
+.orb-3 {
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.16), rgba(99, 102, 241, 0.04) 70%) !important;
+}
+/* 网格线改为青 */
+.grid-mesh {
+  background-image:
+    linear-gradient(to right, rgba(34, 211, 238, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(34, 211, 238, 0.06) 1px, transparent 1px) !important;
+}
+
+/* 顶栏玻璃：深空玻璃 */
+.glass-header {
+  background: rgba(10, 14, 32, 0.6) !important;
+  backdrop-filter: blur(20px) saturate(1.2);
+  border-bottom: 1px solid var(--card-bd) !important;
+}
+.logo-text {
+  color: #ffffff !important;
+  text-shadow: 0 0 18px rgba(34, 211, 238, 0.3);
+}
+.github-link:hover,
+.theme-toggle-landing:hover {
+  color: var(--cyan) !important;
+  background: rgba(34, 211, 238, 0.08) !important;
+}
+.btn-login-header {
+  border: 1px solid var(--card-bd) !important;
+  background: rgba(34, 211, 238, 0.06) !important;
+  color: var(--color-ink) !important;
+}
+.btn-login-header:hover {
+  border-color: var(--cyan) !important;
+  background: rgba(34, 211, 238, 0.12) !important;
+  color: var(--cyan) !important;
+}
+.header-avatar {
+  background: linear-gradient(135deg, var(--cyan), var(--indigo)) !important;
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.4);
+}
+.header-avatar:hover {
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.4) !important;
+}
+
+/* 标题渐变：白 → 青（覆盖 scoped 深色渐变，深空底上更亮更清晰） */
+.title {
+  background: linear-gradient(135deg, #ffffff 10%, #22D3EE 60%, #6366F1) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  text-shadow: 0 0 40px rgba(34, 211, 238, 0.25);
+}
+.subtitle {
+  color: #B9C5E6 !important;
+}
+.description {
+  color: var(--mute) !important;
+}
+
+/* 主 CTA：青→靛 渐变，辉光 */
+.button-base.primary {
+  background: linear-gradient(135deg, var(--cyan), var(--indigo)) !important;
+  color: #051022 !important;
+  box-shadow:
+    0 8px 24px -6px rgba(34, 211, 238, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+}
+.button-base.primary:hover {
+  background: linear-gradient(135deg, #4fe3f7, #7c83f5) !important;
+  box-shadow:
+    0 14px 32px -6px rgba(34, 211, 238, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+}
+
+/* 右侧功能卡片：深空玻璃 */
+.visual-card {
+  background: rgba(17, 22, 46, 0.72) !important;
+  border: 1px solid var(--card-bd) !important;
+  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.6), var(--shadow-4) !important;
+  backdrop-filter: blur(10px);
+}
+.visual-glow {
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.14), rgba(99, 102, 241, 0.04) 60%, transparent 80%) !important;
+}
+.feature-item:hover {
+  background: rgba(34, 211, 238, 0.06) !important;
+}
+.feature-item.active {
+  background: rgba(34, 211, 238, 0.12) !important;
+  border-color: var(--card-bd) !important;
+}
+.feature-icon-wrap {
+  background: rgba(10, 14, 32, 0.6) !important;
+  border: 1px solid var(--card-bd) !important;
+  color: var(--cyan) !important;
+}
+.feature-item.active .feature-icon-wrap {
+  background: linear-gradient(135deg, var(--cyan), var(--indigo)) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+  box-shadow: 0 4px 16px -2px rgba(34, 211, 238, 0.45) !important;
+}
+.feature-title {
+  color: #B9C5E6 !important;
+}
+.feature-item.active .feature-title {
+  color: #ffffff !important;
+}
+.feature-desc-area {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.06), rgba(99, 102, 241, 0.05)) !important;
+  border: 1px solid rgba(34, 211, 238, 0.12) !important;
+}
+.feature-desc-title {
+  color: #ffffff !important;
+}
+.feature-desc-text {
+  color: var(--mute) !important;
+}
+
+/* 页脚 */
+.footer {
+  border-top: 1px solid rgba(34, 211, 238, 0.1) !important;
+  background: linear-gradient(180deg, transparent, rgba(34, 211, 238, 0.03)) !important;
+}
+.copyright {
+  color: var(--mute) !important;
+}

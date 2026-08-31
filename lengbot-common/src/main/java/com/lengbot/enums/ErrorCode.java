@@ -88,6 +88,7 @@ public enum ErrorCode {
     DOCUMENT_EDIT_CONFLICT(60014, "文档已被其他人修改，请刷新后重试", HttpStatus.CONFLICT),
     DOCUMENT_EDIT_UNSUPPORTED(60015, "该文件类型暂不支持在线编辑", HttpStatus.BAD_REQUEST),
     DOCUMENT_SCAN_MODEL_ERROR(60016, "内容安全扫描模型配置异常，请在知识库设置中重新选择扫描模型", HttpStatus.BAD_REQUEST),
+    DOCUMENT_VECTORIZE_FAILED(60018, "文档向量化失败: %s", HttpStatus.INTERNAL_SERVER_ERROR),
 
     // ========== 任务模块 ==========
     TASK_NOT_FOUND(61001, "任务不存在", HttpStatus.BAD_REQUEST),
