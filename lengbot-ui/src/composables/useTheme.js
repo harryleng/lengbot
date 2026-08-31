@@ -6,84 +6,78 @@ const isDark = ref(saved === 'dark' || (!saved && window.matchMedia('(prefers-co
 
 export function useTheme() {
   const themeConfig = computed(() => ({
-    algorithm: theme.darkAlgorithm,
+    // 双主题：浅色奶油用 defaultAlgorithm，深色拿铁用 darkAlgorithm（token 覆写为暖棕）
+    algorithm: isDark.value ? theme.darkAlgorithm : theme.defaultAlgorithm,
     token: {
-      // AgentScope 绿作为品牌主色：antd primary 按钮 / 链接 / 选中高亮统一走绿
-      colorPrimary: '#6366F1',
-      colorLink: '#22D3EE',
-      colorLinkHover: '#0EA5C4',
-      borderRadius: 8,
-      borderRadiusLG: 12,
-      borderRadiusSM: 6,
+      // 品牌主色：焦糖 #C98A5E（浅/深共用暖调）
+      colorPrimary: '#C98A5E',
+      colorLink: isDark.value ? '#E0A878' : '#B5754A',
+      colorLinkHover: '#9A5E38',
+      borderRadius: 10,
+      borderRadiusLG: 16,
+      borderRadiusSM: 8,
       fontFamily: 'var(--font-sans)',
       fontSize: 14,
-      controlHeight: 32,
+      controlHeight: 34,
       wireframe: false,
-      // controlItemBgActive 是 Select / Cascader / DatePicker / Menu 等组件的"选中态背景"全局别名，
-      // 默认从 colorPrimaryBg 派生。本项目 colorPrimary=#171717 会导致派生色为暗灰，
-      // 下拉项选中态在浅色模式下也会变成深色。显式覆盖为蓝色淡背景，与配色一致。
-      controlItemBgActive: 'rgba(34, 211, 238, 0.14)',
-      controlItemBgActiveHover: 'rgba(34, 211, 238, 0.22)',
-      controlItemBgHover: 'rgba(34, 211, 238, 0.08)',
-      ...{
-            colorBgContainer: '#0C1024',
-            colorBgElevated: '#11162E',
-            colorBgLayout: '#070A18',
-            colorBorder: 'rgba(34, 211, 238, 0.16)',
-            colorText: '#E6EDFF',
-            colorTextSecondary: '#9CAAC9',
+      // 下拉项选中态背景（焦糖淡底）
+      controlItemBgActive: isDark.value ? 'rgba(216, 154, 110, 0.20)' : 'rgba(201, 138, 94, 0.14)',
+      controlItemBgActiveHover: isDark.value ? 'rgba(216, 154, 110, 0.28)' : 'rgba(201, 138, 94, 0.20)',
+      controlItemBgHover: isDark.value ? 'rgba(216, 154, 110, 0.12)' : 'rgba(201, 138, 94, 0.08)',
+      ...(isDark.value
+        ? {
+            // 拿铁棕深色
+            colorBgContainer: '#2E281F',
+            colorBgElevated: '#362F24',
+            colorBgLayout: '#1E1A15',
+            colorBorder: 'rgba(230, 210, 180, 0.18)',
+            colorText: '#F2E9DA',
+            colorTextSecondary: '#B6A488',
           }
+        : {
+            // 奶油浅色
+            colorBgContainer: '#FFFDF7',
+            colorBgElevated: '#FFFDF7',
+            colorBgLayout: '#F6EFE2',
+            colorBorder: 'rgba(201, 138, 94, 0.20)',
+            colorText: '#5A4A38',
+            colorTextSecondary: '#8A7558',
+          })
     },
     components: {
       Button: {
-        borderRadius: 100,
+        borderRadius: 999,
         fontWeight: 500,
         primaryShadow: 'none',
         defaultShadow: 'none',
       },
-      Modal: {
-        borderRadiusLG: 12,
-      },
+      Modal: { borderRadiusLG: 16 },
       Tabs: {
-        // 浅色模式用近黑高亮，深色模式切到浅色保证对比度
-        inkBarColor: '#22D3EE',
-        itemSelectedColor: '#22D3EE',
-        itemHoverColor: '#A78BFA',
-        itemActiveColor: '#E6EDFF',
+        inkBarColor: '#C98A5E',
+        itemSelectedColor: '#C98A5E',
+        itemHoverColor: '#B5754A',
+        itemActiveColor: '#5A4A38',
         titleFontSize: 14,
       },
       Table: {
         headerBg: 'transparent',
         headerSplitColor: 'transparent',
-        // 浅色用黑色 2% 半透，深色用白色 4% 半透
-        rowHoverBg: isDark.value ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
+        rowHoverBg: isDark.value ? 'rgba(216, 154, 110, 0.10)' : 'rgba(201, 138, 94, 0.08)',
       },
-      Card: {
-        borderRadiusLG: 12,
-      },
-      Input: { borderRadius: 6 },
-      InputNumber: { borderRadius: 6 },
-      // Select 下拉项选中态：由根 token controlItemBgActive 统一覆盖（见上方 token 块）
-      // 选中项的勾选图标 colorPrimary 会保持近黑，文字色由 colorText 派生即可。
-      Select: { borderRadius: 6 },
-      Cascader: { borderRadius: 6 },
-      DatePicker: { borderRadius: 6 },
+      Card: { borderRadiusLG: 16 },
+      Input: { borderRadius: 10 },
+      InputNumber: { borderRadius: 10 },
+      Select: { borderRadius: 10 },
+      Cascader: { borderRadius: 10 },
+      DatePicker: { borderRadius: 10 },
       Pagination: {
-        // 浅色激活态用近黑底，深色用中灰底；文字始终为反色
-        itemActiveBg: '#6366F1',
+        itemActiveBg: '#C98A5E',
         itemActiveColor: '#ffffff',
-        itemActiveColorDisabled: 'rgba(255,255,255,0.35)',
+        itemActiveColorDisabled: 'rgba(255,255,255,0.6)',
       },
-      Tooltip: {
-        borderRadius: 6,
-        fontSize: 12,
-      },
-      Notification: {
-        borderRadiusLG: 8,
-      },
-      Drawer: {
-        borderRadiusLG: 12,
-      },
+      Tooltip: { borderRadius: 8, fontSize: 12 },
+      Notification: { borderRadiusLG: 12 },
+      Drawer: { borderRadiusLG: 16 },
     },
   }))
 

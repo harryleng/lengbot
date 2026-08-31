@@ -1,11 +1,12 @@
 <template>
   <div class="page">
     <LbManageHeader
-      title="Agent"
+      title="Agent 列表"
       v-model="searchText"
       search-placeholder="搜索 Agent 名称..."
       :refresh-disabled="loading"
       create-text="新建 Agent"
+      create-variant="neon"
       @refresh="refresh"
       @create="openDialog()"
     >
@@ -23,21 +24,60 @@
       </template>
       <template #searchPrefix><SearchOutlined /></template>
       <template #actions>
+        <div class="view-switch" role="group" aria-label="视图切换">
+          <button
+            type="button"
+            class="view-switch__btn"
+            :class="{ active: viewMode === 'card' }"
+            title="卡片视图"
+            @click="viewMode = 'card'"
+          >
+            <AppstoreOutlined />
+          </button>
+          <button
+            type="button"
+            class="view-switch__btn"
+            :class="{ active: viewMode === 'list' }"
+            title="列表视图"
+            @click="viewMode = 'list'"
+          >
+            <UnorderedListOutlined />
+          </button>
+        </div>
         <a-tooltip title="示例工作流">
-          <button class="lb-btn lb-btn--accent lb-btn--accent--subagent" @click="openExampleModal">
+          <button class="lb-btn lb-btn--ghost" @click="openExampleModal">
             <ExperimentOutlined />
           </button>
         </a-tooltip>
         <a-tooltip title="消息反馈记录">
-          <button class="lb-btn" @click="feedbackOpen = true">
+          <button class="lb-btn lb-btn--ghost" @click="feedbackOpen = true">
             <LikeOutlined />
           </button>
         </a-tooltip>
       </template>
     </LbManageHeader>
 
+    <!-- 统计条：让页面有信息价值 -->
+    <div class="stat-bar">
+      <div class="stat-bar__item">
+        <span class="stat-bar__num">{{ totalCount }}</span>
+        <span class="stat-bar__label">共 Agent</span>
+      </div>
+      <div class="stat-bar__divider" />
+      <div class="stat-bar__item">
+        <span class="stat-bar__num stat-bar__num--green">{{ publishedCount }}</span>
+        <span class="stat-bar__label">已发布</span>
+      </div>
+      <div class="stat-bar__divider" />
+      <div class="stat-bar__item">
+        <span class="stat-bar__num stat-bar__num--amber">{{ draftCount }}</span>
+        <span class="stat-bar__label">草稿</span>
+      </div>
+    </div>
+
     <a-spin :spinning="loading" style="min-height: 300px; display: block">
-      <div class="agent-grid">
+      <!-- 卡片视图 -->
+      <div v-show="viewMode === 'card'" class="agent-grid">
         <EntityCard
           v-for="a in list"
           :key="a.id"
@@ -90,16 +130,108 @@
           <p v-else class="card-desc">暂无描述</p>
           <template #meta>
             <span class="card-status" :class="(a.status?.code || a.status || 'draft').toLowerCase()">
+              <span class="card-status__dot" />
               {{ statusText(a.status?.code || a.status, a.version) }}
             </span>
             <span class="card-time">{{ formatTime(a.createTime) }}</span>
           </template>
+          <!-- 卡片底部操作区：消除下半部空白，hover 可见 -->
+          <div class="card-footer">
+            <button class="card-footer__btn" @click.stop="openDialog(a)">
+              <EditOutlined /> 编辑
+            </button>
+            <button class="card-footer__btn" @click.stop="router.push(`/app/agents/${a.id}`)">
+              <SettingOutlined /> 配置
+            </button>
+            <button class="card-footer__btn card-footer__btn--primary" @click.stop="runAgent(a)">
+              <CaretRightOutlined /> 运行
+            </button>
+          </div>
         </EntityCard>
 
         <LbEmptyState
           v-if="list.length === 0 && !loading"
           :icon="RobotOutlined"
-          :title="searchText ? '没有匹配的 Agent' : '还没有 Agent，点击右上角创建一个吧'"
+          :title="searchText ? '没有匹配的 Agent' : '还没有 Agent'"
+          desc="点击右上角「新建 Agent」，或从示例工作流快速开始。"
+        >
+          <template #action>
+            <button class="lb-btn lb-btn--accent lb-btn--accent--agent" @click="openDialog()">
+              <PlusOutlined /> 创建第一个 Agent
+            </button>
+          </template>
+        </LbEmptyState>
+      </div>
+
+      <!-- 列表视图 -->
+      <div v-show="viewMode === 'list'" class="agent-list">
+        <a-table
+          :columns="tableColumns"
+          :data-source="list"
+          :loading="false"
+          :pagination="false"
+          row-key="id"
+          size="middle"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'name'">
+              <div class="list-name" @click="router.push(`/app/agents/${record.id}`)">
+                <span class="list-name__icon" :style="{ background: agentAvatarGradient(record.agentType) }">
+                  {{ (record.name || 'A')[0] }}
+                </span>
+                <div class="list-name__text">
+                  <span class="list-name__title">
+                    {{ record.name }}
+                    <a-tag v-if="record.isDefault" color="gold" class="list-default-tag">默认</a-tag>
+                  </span>
+                  <span class="list-name__desc">{{ record.description || '暂无描述' }}</span>
+                </div>
+              </div>
+            </template>
+            <template v-else-if="column.key === 'type'">
+              <span class="card-type" :class="'card-type--' + (record.agentType?.code || record.agentType || 'chat')">
+                {{ agentTypeLabel(record.agentType) }}
+              </span>
+            </template>
+            <template v-else-if="column.key === 'status'">
+              <span class="card-status" :class="(record.status?.code || record.status || 'draft').toLowerCase()">
+                <span class="card-status__dot" />
+                {{ statusText(record.status?.code || record.status, record.version) }}
+              </span>
+            </template>
+            <template v-else-if="column.key === 'createTime'">
+              <span class="card-time">{{ formatTime(record.createTime) }}</span>
+            </template>
+            <template v-else-if="column.key === 'action'">
+              <div class="list-actions">
+                <a-tooltip title="编辑"><button class="btn-icon" @click="openDialog(record)"><EditOutlined /></button></a-tooltip>
+                <a-tooltip title="配置"><button class="btn-icon" @click="router.push(`/app/agents/${record.id}`)"><SettingOutlined /></button></a-tooltip>
+                <a-tooltip title="运行"><button class="btn-icon" @click="runAgent(record)"><CaretRightOutlined /></button></a-tooltip>
+                <a-dropdown :trigger="['click']">
+                  <button class="btn-icon" @click.stop.prevent><MoreOutlined /></button>
+                  <template #overlay>
+                    <a-menu>
+                      <a-menu-item v-if="!record.isDefault" @click="handleSetDefault(record.id)">
+                        <StarOutlined style="margin-right: 6px" /> 设为默认
+                      </a-menu-item>
+                      <a-menu-item @click="handleClone(record.id)">
+                        <CopyOutlined style="margin-right: 6px" /> 复制
+                      </a-menu-item>
+                      <a-menu-item @click="handleDelete(record.id)" class="menu-danger">
+                        <DeleteOutlined style="margin-right: 6px" /> 删除
+                      </a-menu-item>
+                    </a-menu>
+                  </template>
+                </a-dropdown>
+              </div>
+            </template>
+          </template>
+        </a-table>
+        <LbEmptyState
+          v-if="list.length === 0 && !loading"
+          :icon="RobotOutlined"
+          :title="searchText ? '没有匹配的 Agent' : '还没有 Agent'"
+          desc="点击右上角「新建 Agent」，或从示例工作流快速开始。"
         />
       </div>
     </a-spin>
@@ -183,7 +315,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, reactive, watch, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   PlusOutlined,
@@ -197,6 +329,10 @@ import {
   ExperimentOutlined,
   MoreOutlined,
   LikeOutlined,
+  SettingOutlined,
+  CaretRightOutlined,
+  AppstoreOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
 import {
@@ -216,7 +352,7 @@ import ModelSelect from '../components/ModelSelect.vue'
 import EntityCard from '../components/EntityCard.vue'
 import LbManageHeader from '../components/common/LbManageHeader.vue'
 import LbEmptyState from '../components/common/LbEmptyState.vue'
-import { resolveAgentBindingType } from '../utils/bindingTheme'
+import { resolveAgentBindingType, agentAvatarGradient } from '../utils/bindingTheme'
 
 const router = useRouter()
 const list = ref([])
@@ -233,6 +369,29 @@ const exampleModalVisible = ref(false)
 const workflowExamples = ref([])
 const exampleCreating = ref(null)
 const feedbackOpen = ref(false)
+const viewMode = ref('card') // 'card' | 'list'
+
+// 统计条派生数据
+const totalCount = computed(() => list.value.length)
+const publishedCount = computed(
+  () => list.value.filter((a) => (a.status?.code || a.status || '') === 'published').length,
+)
+const draftCount = computed(
+  () => list.value.filter((a) => (a.status?.code || a.status || 'draft') !== 'published').length,
+)
+
+const tableColumns = [
+  { title: '名称', key: 'name', ellipsis: true },
+  { title: '类型', key: 'type', width: 120 },
+  { title: '状态', key: 'status', width: 140 },
+  { title: '创建时间', key: 'createTime', width: 180 },
+  { title: '操作', key: 'action', width: 160, align: 'right' },
+]
+
+function runAgent(a) {
+  // 运行 = 跳转到该 Agent 的对话/调试界面（沿用既有导航逻辑，不新增接口）
+  router.push(`/app/agents/${a.id}`)
+}
 
 function openDialog(row) {
   createProviderId.value = null
@@ -405,6 +564,79 @@ onMounted(async () => {
   background: var(--color-error-soft) !important;
 }
 
+/* ===== 统计条 ===== */
+.stat-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 18px;
+  padding: 14px 20px;
+  background: rgba(17, 22, 46, 0.66);
+  border: 1px solid var(--card-bd);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+}
+.stat-bar__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 18px;
+}
+.stat-bar__num {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+.stat-bar__num--green {
+  color: #34d399;
+}
+.stat-bar__num--amber {
+  color: #fbbf24;
+}
+.stat-bar__label {
+  font-size: 13px;
+  color: var(--color-mute);
+}
+.stat-bar__divider {
+  width: 1px;
+  height: 28px;
+  background: var(--card-bd);
+}
+
+/* ===== 视图切换 ===== */
+.view-switch {
+  display: inline-flex;
+  border: 1px solid var(--card-bd);
+  border-radius: 9px;
+  overflow: hidden;
+  margin-right: 4px;
+}
+.view-switch__btn {
+  width: 34px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--color-mute);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.view-switch__btn + .view-switch__btn {
+  border-left: 1px solid var(--card-bd);
+}
+.view-switch__btn:hover {
+  color: var(--color-ink);
+  background: rgba(34, 211, 238, 0.08);
+}
+.view-switch__btn.active {
+  color: #051022;
+  background: linear-gradient(135deg, var(--cyan), var(--indigo));
+}
+
+/* ===== 卡片网格 ===== */
 .agent-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -430,18 +662,18 @@ onMounted(async () => {
 }
 .card-type--chat,
 .card-type--assistant {
-  color: #1d4ed8;
-  background: var(--color-info-bg);
+  color: #67e8f9;
+  background: rgba(34, 211, 238, 0.12);
 }
 .card-type--workflow {
-  color: #7c3aed;
-  background: var(--color-purple-bg);
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.14);
 }
 .card-default-tag {
   font-size: 11px;
   padding: 1px 6px;
-  background: var(--color-info-bg);
-  color: #2563eb;
+  background: rgba(34, 211, 238, 0.16);
+  color: #67e8f9;
   border-radius: 100px;
   font-weight: 500;
 }
@@ -455,31 +687,152 @@ onMounted(async () => {
   width: fit-content;
   max-width: 100%;
 }
+/* 状态：彩色圆点标签 */
 .card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
-  padding: 2px 8px;
+  padding: 2px 10px 2px 8px;
   border-radius: 100px;
 }
+.card-status__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
 .card-status.draft {
-  background: var(--color-canvas-soft-2);
-  color: var(--color-mute);
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+}
+.card-status.draft .card-status__dot {
+  background: #fbbf24;
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.7);
 }
 .card-status.published {
-  background: var(--color-success-bg);
-  color: #16a34a;
+  background: rgba(52, 211, 153, 0.12);
+  color: #34d399;
+}
+.card-status.published .card-status__dot {
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.7);
 }
 .card-status.published_editing {
-  background: var(--color-warn-bg-deep);
-  color: #d97706;
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+}
+.card-status.published_editing .card-status__dot {
+  background: #fbbf24;
 }
 .card-status.archived {
-  background: var(--color-warn-bg-deep);
-  color: #d97706;
+  background: rgba(148, 163, 184, 0.14);
+  color: #94a3b8;
+}
+.card-status.archived .card-status__dot {
+  background: #94a3b8;
+}
+/* 卡片底部操作区 */
+.card-footer {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-hairline);
+}
+.card-footer__btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 34px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid var(--card-bd);
+  background: rgba(34, 211, 238, 0.06);
+  color: var(--color-body);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s, transform 0.15s;
+}
+.card-footer__btn:hover {
+  border-color: var(--cyan);
+  background: rgba(34, 211, 238, 0.14);
+  color: #fff;
+}
+.card-footer__btn--primary {
+  border: none;
+  background: linear-gradient(135deg, var(--cyan), var(--indigo));
+  color: #051022;
+  font-weight: 600;
+}
+.card-footer__btn--primary:hover {
+  background: linear-gradient(135deg, #4fe3f7, #7c83f5);
+  color: #051022;
 }
 .card-time {
   font-size: 12px;
   color: var(--color-mute);
 }
+
+/* ===== 列表视图 ===== */
+.agent-list {
+  background: rgba(17, 22, 46, 0.66);
+  border: 1px solid var(--card-bd);
+  border-radius: 14px;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+}
+.list-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+.list-name__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.list-name__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.list-name__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.list-default-tag {
+  transform: scale(0.85);
+  transform-origin: left center;
+}
+.list-name__desc {
+  font-size: 12px;
+  color: var(--color-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list-actions {
+  display: inline-flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+/* 空状态内边距 */
 .empty-state {
   grid-column: 1 / -1;
   text-align: center;
@@ -491,6 +844,8 @@ onMounted(async () => {
   margin-bottom: 16px;
   display: block;
 }
+
+/* 示例弹窗（沿用既有样式，仅微调 hover 色） */
 .example-desc {
   flex-shrink: 0;
   color: var(--color-mute);
@@ -524,7 +879,7 @@ onMounted(async () => {
   transition: border-color 0.2s;
 }
 .example-card:hover {
-  border-color: #1677ff;
+  border-color: var(--cyan);
 }
 .example-card-header {
   display: flex;

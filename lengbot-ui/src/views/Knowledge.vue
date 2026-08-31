@@ -1,88 +1,102 @@
 <template>
-  <div class="page">
-    <LbManageHeader
-      title="知识库"
-      v-model="searchText"
-      search-placeholder="搜索知识库名称..."
-      :refresh-disabled="loading"
-      create-text="新建知识库"
-      @refresh="refresh"
-      @create="openCreateModal"
-    >
-      <template #searchPrefix><SearchOutlined /></template>
-      <template #actions>
-        <button class="lb-btn lb-btn--accent lb-btn--accent--knowledge" @click="router.push('/app/graph')">
-          <ApartmentOutlined />
-          知识图谱
-        </button>
-      </template>
-    </LbManageHeader>
+  <div class="kb-page">
+    <!-- 顶部标题 -->
+    <div class="kb-top">
+      <div>
+        <h1 class="kb-title">知识库</h1>
+        <div class="kb-crumb">工作台 / <b>知识库管理</b></div>
+      </div>
+      <button class="kb-btn-new" @click="openCreateModal">+ 新建知识库</button>
+    </div>
 
+    <!-- 统计条 -->
+    <div class="kb-stats">
+      <div class="kb-stat s1">
+        <div class="ico">📚</div>
+        <div><div class="num">{{ list.length }}</div><div class="lbl">总知识库</div></div>
+      </div>
+      <div class="kb-stat s2">
+        <div class="ico">📄</div>
+        <div><div class="num">{{ totalDocs }}</div><div class="lbl">总文档</div></div>
+      </div>
+      <div class="kb-stat s3">
+        <div class="ico">🧠</div>
+        <div><div class="num">{{ totalChunks }}</div><div class="lbl">总向量</div></div>
+      </div>
+      <div class="kb-stat s4">
+        <div class="ico">⚡</div>
+        <div><div class="num">{{ formatTokenCount(totalTokens) }}</div><div class="lbl">总 Token</div></div>
+      </div>
+    </div>
+
+    <!-- 工具栏 -->
+    <div class="kb-toolbar">
+      <div class="kb-search">
+        <SearchOutlined />
+        <input v-model="searchText" placeholder="搜索知识库..." />
+      </div>
+      <div class="kb-filter" @click="showTypeMenu = !showTypeMenu">
+        全部类型 ▾
+        <div v-if="showTypeMenu" class="kb-filter-menu">
+          <div :class="{ active: filterType === 'all' }" @click.stop="setFilter('all')">全部类型</div>
+          <div :class="{ active: filterType === 'pg' }" @click.stop="setFilter('pg')">PostgreSQL</div>
+          <div :class="{ active: filterType === 'milvus' }" @click.stop="setFilter('milvus')">Milvus</div>
+          <div :class="{ active: filterType === 'dify' }" @click.stop="setFilter('dify')">Dify Dataset</div>
+        </div>
+      </div>
+      <button class="kb-refresh" @click="refresh"><ReloadOutlined /> 刷新</button>
+    </div>
+
+    <!-- 卡片网格 -->
     <a-spin :spinning="loading">
-      <div class="knowledge-grid">
-        <EntityCard
-          v-for="k in list"
+      <div class="kb-cards">
+        <div
+          v-for="k in displayList"
           :key="k.id"
-          type="knowledge"
-          :name="k.name"
+          class="kb-card"
           @click="router.push(`/app/knowledge/${k.id}`)"
         >
-          <template #info>
-            <a-tooltip :title="k.name">
-              <h3 class="card-title">{{ k.name }}</h3>
-            </a-tooltip>
-            <a-tooltip
-              v-if="k.description"
-              :title="k.description"
-              placement="topLeft"
-              :overlay-style="{ maxWidth: '400px' }"
-            >
-              <p class="card-desc">{{ truncateText(k.description, 50) }}</p>
-            </a-tooltip>
-            <p v-else class="card-desc">暂无描述</p>
-          </template>
-          <template #actions>
-            <a-tooltip title="删除知识库">
-              <button class="btn-icon danger" @click="handleDelete(k.id)">
-                <DeleteOutlined />
-              </button>
-            </a-tooltip>
-          </template>
-          <div class="card-stats">
-            <a-tooltip title="文档数">
-              <span class="card-stat-item">
-                <FileTextOutlined class="card-stat-icon" />
-                <span class="card-stat-value">{{ k.documentCount || 0 }}</span>
-              </span>
-            </a-tooltip>
-            <a-tooltip title="分片数">
-              <span class="card-stat-item">
-                <BlockOutlined class="card-stat-icon" />
-                <span class="card-stat-value">{{ k.chunkCount || 0 }}</span>
-              </span>
-            </a-tooltip>
-            <a-tooltip title="Token 数">
-              <span class="card-stat-item">
-                <FontColorsOutlined class="card-stat-icon" />
-                <span class="card-stat-value">{{ formatTokenCount(k.totalTokens) }}</span>
-              </span>
-            </a-tooltip>
-            <span v-if="k.type" class="card-type-icon-wrap">
-              <a-tooltip
-                :title="k.type === 'milvus' ? 'Milvus' : k.type === 'dify' ? 'Dify Dataset（只读）' : 'PostgreSQL'"
-              >
-                <CloudServerOutlined v-if="k.type === 'milvus'" class="card-type-icon milvus" />
-                <ApiOutlined v-else-if="k.type === 'dify'" class="card-type-icon dify" />
-                <DatabaseOutlined v-else class="card-type-icon pg" />
-              </a-tooltip>
-            </span>
+          <div class="c-head">
+            <div class="c-ico" :class="iconClass(k.type)">{{ iconLetter(k) }}</div>
+            <div class="c-tit">
+              <div class="n">{{ k.name }}</div>
+              <div class="row"><span class="c-tag" :class="tagClass(k.type)">{{ typeLabel(k.type) }}</span></div>
+            </div>
           </div>
-        </EntityCard>
+          <div class="c-desc">{{ k.description || '暂无描述' }}</div>
+          <div class="c-metrics">
+            <div class="metric">
+              <div class="m-ico">📄</div>
+              <div class="m-num">{{ k.documentCount || 0 }}</div>
+              <div class="m-lbl">文档</div>
+            </div>
+            <div class="metric">
+              <div class="m-ico">🧠</div>
+              <div class="m-num">{{ k.chunkCount || 0 }}</div>
+              <div class="m-lbl">向量</div>
+            </div>
+            <div class="metric">
+              <div class="m-ico">⚡</div>
+              <div class="m-num">{{ formatTokenCount(k.totalTokens) }}</div>
+              <div class="m-lbl">Token</div>
+            </div>
+          </div>
+          <div class="c-foot">
+            <span class="st"><span class="d"></span>已连接</span>
+            <div class="c-actions">
+              <button class="act" @click.stop="router.push(`/app/knowledge/${k.id}`)">查看详情</button>
+              <button class="act primary" @click.stop="router.push(`/app/knowledge/${k.id}`)">管理</button>
+              <a-tooltip title="删除知识库">
+                <button class="act act-del" @click.stop="handleDelete(k.id)"><DeleteOutlined /></button>
+              </a-tooltip>
+            </div>
+          </div>
+        </div>
 
         <LbEmptyState
-          v-if="list.length === 0 && !loading"
+          v-if="displayList.length === 0 && !loading"
           :icon="DatabaseOutlined"
-          :title="searchText ? '没有匹配的知识库' : '还没有知识库，点击右上角创建一个吧'"
+          :title="searchText || filterType !== 'all' ? '没有匹配的知识库' : '还没有知识库，点击右上角创建一个吧'"
         />
       </div>
     </a-spin>
@@ -165,28 +179,20 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  PlusOutlined,
   DeleteOutlined,
   SearchOutlined,
   ReloadOutlined,
-  ApartmentOutlined,
   DatabaseOutlined,
   CloudServerOutlined,
   ApiOutlined,
-  FileTextOutlined,
-  BlockOutlined,
-  FontColorsOutlined,
 } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
 import { getKnowledgeList, createKnowledge, deleteKnowledge, testDifyDraftConnection } from '../api/knowledge'
 import ModelSelect from '../components/ModelSelect.vue'
-import EntityCard from '../components/EntityCard.vue'
-import LbManageHeader from '../components/common/LbManageHeader.vue'
 import LbEmptyState from '../components/common/LbEmptyState.vue'
-import { truncateText } from '../utils/format'
 
 const router = useRouter()
 const list = ref([])
@@ -195,6 +201,8 @@ const searchText = ref('')
 const showCreate = ref(false)
 const submitting = ref(false)
 const testingDifyConnection = ref(false)
+const filterType = ref('all')
+const showTypeMenu = ref(false)
 const form = reactive({
   name: '',
   description: '',
@@ -203,11 +211,47 @@ const form = reactive({
   difyConfig: { apiUrl: '', datasetId: '', token: '' },
 })
 
+const totalDocs = computed(() => list.value.reduce((s, k) => s + (k.documentCount || 0), 0))
+const totalChunks = computed(() => list.value.reduce((s, k) => s + (k.chunkCount || 0), 0))
+const totalTokens = computed(() => list.value.reduce((s, k) => s + (k.totalTokens || 0), 0))
+const displayList = computed(() =>
+  filterType.value === 'all' ? list.value : list.value.filter((k) => k.type === filterType.value)
+)
+
 function formatTokenCount(count) {
   if (!count || count <= 0) return '0'
   if (count >= 1000000) return (count / 1000000).toFixed(1) + 'M'
   if (count >= 1000) return (count / 1000).toFixed(1) + 'K'
   return String(count)
+}
+
+function typeLabel(type) {
+  if (type === 'milvus') return '向量数据库'
+  if (type === 'dify') return 'Dify Dataset'
+  if (type === 'pg') return 'PostgreSQL 向量'
+  return type || '未知类型'
+}
+function iconClass(type) {
+  if (type === 'milvus') return 'mint'
+  if (type === 'pg') return 'peach'
+  if (type === 'dify') return 'lav'
+  return 'mint'
+}
+function tagClass(type) {
+  if (type === 'milvus') return ''
+  if (type === 'pg') return 'peach'
+  if (type === 'dify') return 'lav'
+  return ''
+}
+function iconLetter(k) {
+  if (k.type === 'milvus') return 'M'
+  if (k.type === 'dify') return 'D'
+  if (k.type === 'pg') return 'P'
+  return (k.name || '?').charAt(0)
+}
+function setFilter(t) {
+  filterType.value = t
+  showTypeMenu.value = false
 }
 
 function openCreateModal() {
@@ -230,9 +274,10 @@ async function loadData() {
   }
 }
 
-// 刷新按钮语义：清空搜索关键词，回到全量列表
+// 刷新按钮语义：清空搜索关键词与类型筛选，回到全量列表
 function refresh() {
   searchText.value = ''
+  filterType.value = 'all'
   loadData()
 }
 
@@ -311,86 +356,349 @@ onMounted(loadData)
 </script>
 
 <style scoped>
-.knowledge-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
+.kb-page {
+  min-height: 100%;
+  padding: 8px 8px 24px;
+  color: #5A534A;
+  font-family: "PingFang SC", "Yuanti SC", "YouYuan", "Microsoft YaHei", sans-serif;
+  background:
+    radial-gradient(420px 320px at 8% 0%, rgba(255, 224, 163, .5), transparent 60%),
+    radial-gradient(420px 320px at 100% 100%, rgba(184, 232, 216, .5), transparent 60%),
+    radial-gradient(360px 300px at 85% 10%, rgba(255, 201, 192, .45), transparent 60%),
+    radial-gradient(300px 260px at 20% 90%, rgba(227, 213, 245, .4), transparent 60%),
+    #FFF9F0;
+  border-radius: 24px;
 }
-.card-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--color-ink);
-  margin-bottom: 14px;
-  width: fit-content;
-  max-width: 100%;
-}
-.card-desc {
-  font-size: 13px;
-  color: var(--color-mute);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-top: 6px;
-  width: fit-content;
-  max-width: 100%;
-}
-.card-stats {
+
+/* ===== 顶部标题 ===== */
+.kb-top {
   display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.kb-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: #A98D5F;
+}
+.kb-crumb {
+  font-size: 12px;
+  color: #9B9284;
+  margin-top: 6px;
+}
+.kb-crumb b {
+  color: #8FBFA9;
+  font-weight: 700;
+}
+.kb-btn-new {
+  height: 40px;
+  padding: 0 22px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  color: #7A5B2E;
+  background: linear-gradient(135deg, #FFE0A3, #FFC9C0);
+  box-shadow: 0 8px 20px rgba(255, 192, 168, .4);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.kb-btn-new:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 26px rgba(255, 192, 168, .5);
+}
+
+/* ===== 统计条 ===== */
+.kb-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin: 18px 0;
+}
+.kb-stat {
+  background: #FFFDF8;
+  border-radius: 20px;
+  padding: 16px 18px;
+  box-shadow: 0 10px 26px rgba(196, 167, 140, .14);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.kb-stat .ico {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+.kb-stat.s1 .ico { background: #FFE0A3; }
+.kb-stat.s2 .ico { background: #B8E8D8; }
+.kb-stat.s3 .ico { background: #FFC9C0; }
+.kb-stat.s4 .ico { background: #E3D5F5; }
+.kb-stat .num {
+  font-size: 25px;
+  font-weight: 800;
+  color: #A98D5F;
+  line-height: 1.1;
+}
+.kb-stat .lbl {
+  font-size: 12px;
+  color: #9B9284;
+  margin-top: 2px;
+}
+
+/* ===== 工具栏 ===== */
+.kb-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
   flex-wrap: wrap;
+}
+.kb-search {
+  flex: 1;
+  max-width: 340px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: #FFFDF8;
+  box-shadow: 0 6px 16px rgba(196, 167, 140, .12);
+  color: #9B9284;
+}
+.kb-search input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #5A534A;
+  font-size: 13.5px;
+  width: 100%;
+}
+.kb-search input::placeholder { color: #C4BBAE; }
+.kb-filter {
+  position: relative;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  color: #9B9284;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #FFFDF8;
+  box-shadow: 0 6px 16px rgba(196, 167, 140, .12);
+  border: none;
+  transition: all .15s ease;
+  user-select: none;
+}
+.kb-filter:hover {
+  color: #5A534A;
+  transform: translateY(-2px);
+}
+.kb-filter-menu {
+  position: absolute;
+  top: 46px;
+  left: 0;
+  min-width: 160px;
+  background: #FFFDF8;
+  border-radius: 16px;
+  box-shadow: 0 14px 34px rgba(196, 167, 140, .24);
+  padding: 6px;
+  z-index: 20;
+}
+.kb-filter-menu div {
+  padding: 9px 14px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  color: #7D6F5E;
+  cursor: pointer;
+  font-weight: 600;
+}
+.kb-filter-menu div:hover { background: rgba(255, 224, 163, .4); }
+.kb-filter-menu div.active {
+  color: #6A8F82;
+  background: #B8E8D8;
+  font-weight: 700;
+}
+.kb-refresh {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  color: #9B9284;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #FFFDF8;
+  box-shadow: 0 6px 16px rgba(196, 167, 140, .12);
+  border: none;
+  transition: all .15s ease;
+}
+.kb-refresh:hover {
+  color: #5A534A;
+  transform: translateY(-2px);
+}
+
+/* ===== 知识库卡片 ===== */
+.kb-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+.kb-card {
+  background: #FFFDF8;
+  border-radius: 24px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 14px 34px rgba(196, 167, 140, .16);
+  transition: all .18s ease;
+  border: 1px solid rgba(255, 255, 255, .9);
+  cursor: pointer;
+}
+.kb-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 22px 46px rgba(196, 167, 140, .24);
+}
+.c-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.c-ico {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 800;
+  color: #7A6A5A;
+  box-shadow: 0 8px 18px rgba(196, 167, 140, .25);
+}
+.c-ico.mint { background: linear-gradient(135deg, #B8E8D8, #EAFBF4); }
+.c-ico.peach { background: linear-gradient(135deg, #FFC9C0, #FFE9E4); }
+.c-ico.lav { background: linear-gradient(135deg, #E3D5F5, #F6EEFD); }
+.c-tit {
+  flex: 1;
+  min-width: 0;
+}
+.c-tit .n {
+  font-size: 18px;
+  font-weight: 800;
+  color: #6A5F50;
+}
+.c-tit .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.c-tag {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #8FBFA9;
+  background: rgba(184, 232, 216, .5);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.c-tag.peach { color: #D98C72; background: rgba(255, 201, 192, .5); }
+.c-tag.lav { color: #9B7FC4; background: rgba(227, 213, 245, .5); }
+.c-desc {
+  font-size: 13px;
+  color: #9B9284;
+  line-height: 1.7;
+}
+.c-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.metric {
+  background: #F7F1E7;
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+.metric .m-ico { font-size: 15px; margin-bottom: 6px; }
+.metric .m-num {
+  font-size: 19px;
+  font-weight: 800;
+  color: #6A5F50;
+}
+.metric .m-lbl {
+  font-size: 11px;
+  color: #9B9284;
+  margin-top: 2px;
+  font-weight: 600;
+}
+.c-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 14px;
+  border-top: 2px dashed #FFE0A3;
+}
+.st {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--color-mute);
-  align-items: center;
+  font-weight: 700;
+  padding: 5px 14px;
+  border-radius: 999px;
+  color: #6A9B82;
+  background: rgba(184, 232, 216, .5);
 }
-.card-stat-item {
+.st .d {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #7FBFA0;
+  box-shadow: 0 0 8px #7FBFA0;
+}
+.c-actions {
+  display: flex;
+  gap: 8px;
+}
+.act {
+  font-size: 12.5px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: #9B9284;
+  background: #F7F1E7;
+  border: none;
+  transition: all .15s ease;
+  font-weight: 700;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
-  background: var(--color-canvas-soft-2);
-  border-radius: 10px;
-  line-height: 1;
 }
-.card-stat-icon {
-  font-size: 11px;
-  color: var(--color-mute);
+.act:hover {
+  color: #fff;
+  background: linear-gradient(135deg, #FFC9C0, #FFE0A3);
+  box-shadow: 0 6px 14px rgba(255, 192, 168, .4);
 }
-.card-stat-value {
-  font-weight: 600;
-  color: var(--color-ink);
-  font-variant-numeric: tabular-nums;
-}
-.card-type-icon-wrap {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-}
-.card-type-icon {
-  font-size: 15px;
-  cursor: help;
-}
-.card-type-icon.pg {
-  color: #3b82f6;
-}
-.card-type-icon.milvus {
-  color: #8b5cf6;
-}
-.card-type-icon.dify {
-  color: #14b8a6;
-}
-.empty-state {
-  grid-column: 1 / -1;
-  text-align: center;
-  padding: 60px 20px;
-  color: var(--color-mute);
-}
-.empty-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
-  display: block;
+.act.primary { color: #D98C72; background: rgba(255, 201, 192, .4); }
+.act-del { padding: 8px 12px; }
+
+@media (max-width: 1200px) {
+  .kb-stats { grid-template-columns: repeat(2, 1fr); }
+  .kb-cards { grid-template-columns: 1fr; }
 }
 
-/* 知识库类型选择卡片 */
+/* ===== 知识库类型选择卡片（创建弹窗） ===== */
 .kb-type-cards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -405,9 +713,7 @@ onMounted(loadData)
   transition: all 0.15s;
   background: var(--color-canvas);
 }
-.kb-type-card:hover {
-  border-color: var(--color-mute);
-}
+.kb-type-card:hover { border-color: var(--color-mute); }
 .kb-type-card.active {
   border-color: var(--color-ink);
   background: var(--color-canvas-soft);
@@ -424,9 +730,7 @@ onMounted(loadData)
   color: var(--color-mute);
   transition: color 0.15s;
 }
-.kb-type-card.active .kb-type-icon {
-  color: var(--color-ink);
-}
+.kb-type-card.active .kb-type-icon { color: var(--color-ink); }
 .kb-type-title {
   font-size: 14px;
   font-weight: 600;
@@ -438,8 +742,6 @@ onMounted(loadData)
   line-height: 1.5;
 }
 @media (max-width: 640px) {
-  .kb-type-cards {
-    grid-template-columns: 1fr;
-  }
+  .kb-type-cards { grid-template-columns: 1fr; }
 }
 </style>

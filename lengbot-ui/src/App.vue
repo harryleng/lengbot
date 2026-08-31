@@ -153,12 +153,12 @@ body {
 [data-theme='dark'] .ant-btn-default:not(.ant-btn-disabled):not(:disabled):focus {
   background: rgba(255, 255, 255, 0.06) !important;
   border-color: #52525b !important;
-  color: #e4e4e7 !important;
+  color: var(--color-ink) !important;
 }
 [data-theme='dark'] .ant-btn-default:not(.ant-btn-disabled):not(:disabled):active {
   background: rgba(255, 255, 255, 0.1) !important;
   border-color: #71717a !important;
-  color: #fafafa !important;
+  color: var(--color-ink) !important;
 }
 
 .ant-input,
@@ -270,14 +270,14 @@ textarea.ant-input:focus,
 }
 .ant-message .ant-message-info .anticon,
 .ant-message .ant-message-loading .anticon {
-  color: #3b82f6 !important;
+  color: #C98A5E !important;
 }
 
 [data-theme='dark'] .ant-message .ant-message-notice-content {
-  background: #18181b !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  color: #fafafa !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6) !important;
+  background: var(--color-bg-elevated) !important;
+  border-color: var(--card-bd) !important;
+  color: var(--color-ink) !important;
+  box-shadow: var(--shadow-3);
 }
 
 /* Notification 全局定制：项目级通知统一圆角与阴影（token Notification.borderRadiusLG 兜底） */
@@ -346,10 +346,10 @@ textarea.ant-input:focus,
 
 /* Tabs 选中态文字、hover 态、下划线：深色模式下用浅色保证可见 */
 [data-theme='dark'] .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
-  color: #e4e4e7 !important;
+  color: var(--color-ink) !important;
 }
 [data-theme='dark'] .ant-tabs-tab:hover .ant-tabs-tab-btn {
-  color: #d4d4d8 !important;
+  color: var(--color-body) !important;
 }
 [data-theme='dark'] .ant-tabs-ink-bar {
   background: #e4e4e7 !important;
@@ -360,24 +360,24 @@ textarea.ant-input:focus,
 
 /* Pagination 激活态：深色模式下用中灰底 + 浅色文字 */
 [data-theme='dark'] .ant-pagination-item-active {
-  background: #3f3f46 !important;
-  border-color: #3f3f46 !important;
+  background: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
 }
 [data-theme='dark'] .ant-pagination-item-active a {
-  color: #e4e4e7 !important;
+  color: var(--color-ink) !important;
 }
 
 /* Table hover 行：darkAlgorithm 派生的 hover 色常偏暗，强制轻量高亮 */
 [data-theme='dark'] .ant-table-tbody > tr.ant-table-row:hover > td {
-  background: rgba(255, 255, 255, 0.04) !important;
+  background: var(--color-link-bg-soft) !important;
 }
 
 /* Menu 选中态：darkAlgorithm 派生色与背景对比度不足 */
 [data-theme='dark'] .ant-menu-item-selected {
-  color: #e4e4e7 !important;
+  color: var(--color-ink) !important;
 }
 [data-theme='dark'] .ant-menu-item-active {
-  background-color: rgba(255, 255, 255, 0.06) !important;
+  background-color: var(--color-link-bg-soft) !important;
 }
 
 /* Radio/Checkbox hover 兜底：antd 把 hover 文字/边框色派生自 colorPrimary（#171717），
@@ -386,15 +386,15 @@ textarea.ant-input:focus,
   .ant-radio-button-wrapper:not(.ant-radio-button-wrapper-checked):not(.ant-radio-button-wrapper-disabled):hover,
 [data-theme='dark'] .ant-radio-wrapper:not(.ant-radio-wrapper-checked):not(.ant-radio-wrapper-disabled):hover,
 [data-theme='dark'] .ant-checkbox-wrapper:not(.ant-checkbox-wrapper-checked):not(.ant-checkbox-wrapper-disabled):hover {
-  color: #d4d4d8 !important;
+  color: var(--color-body) !important;
 }
 [data-theme='dark']
   .ant-radio-button-wrapper:not(.ant-radio-button-wrapper-checked):not(.ant-radio-button-wrapper-disabled):hover {
-  background-color: rgba(255, 255, 255, 0.06) !important;
+  background-color: var(--color-link-bg-soft) !important;
 }
 [data-theme='dark'] .ant-radio-wrapper:not(.ant-radio-wrapper-checked):hover .ant-radio-inner,
 [data-theme='dark'] .ant-checkbox-wrapper:not(.ant-checkbox-wrapper-checked):hover .ant-checkbox-inner {
-  border-color: #d4d4d8 !important;
+  border-color: var(--color-body) !important;
 }
 
 /* ===== colorPrimary 派生的"选中/激活"态全局兜底 =====
@@ -499,9 +499,9 @@ textarea.ant-input:focus,
 
 /* Tag 默认色：深色模式下 default tag 文字对比度不足 */
 [data-theme='dark'] .ant-tag {
-  color: #d4d4d8 !important;
+  color: var(--color-body) !important;
   border-color: var(--color-hairline) !important;
-  background: rgba(255, 255, 255, 0.04) !important;
+  background: var(--color-link-bg-soft) !important;
 }
 
 /* 浮动下拉层：浅/深色统一补边框 + 阴影
@@ -529,7 +529,7 @@ textarea.ant-input:focus,
 [data-theme='dark'] .ant-dropdown-menu,
 [data-theme='dark'] .ant-dropdown-menu-root,
 [data-theme='dark'] .ant-autocomplete-dropdown {
-  background: #1f1f1f !important;
+  background: var(--color-bg-elevated) !important;
   border-color: var(--color-hairline-strong) !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
 }
