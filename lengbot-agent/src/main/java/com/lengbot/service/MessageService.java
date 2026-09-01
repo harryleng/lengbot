@@ -122,11 +122,12 @@ public interface MessageService extends IService<Message> {
     void toggleStar(Long messageId);
 
     /**
-     * 获取所有收藏消息（跨会话）
+     * 获取当前用户的收藏消息（跨会话，按归属隔离）
      *
+     * @param userId   当前登录用户 ID（用于归属过滤，避免泄露其他用户收藏）
      * @param pageNum  页码
      * @param pageSize 每页数量
      * @return 收藏消息分页列表
      */
-    Page<Message> listStarred(int pageNum, int pageSize);
+    Page<Message> listStarred(Long userId, int pageNum, int pageSize);
 }

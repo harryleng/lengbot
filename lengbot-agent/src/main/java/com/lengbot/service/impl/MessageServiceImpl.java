@@ -311,9 +311,12 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
     }
 
     @Override
-    public Page<Message> listStarred(int pageNum, int pageSize) {
+    public Page<Message> listStarred(Long userId, int pageNum, int pageSize) {
+        // 归属隔离：仅返回当前用户所属会话下的收藏消息，避免跨用户泄露
         return page(new Page<>(pageNum, pageSize),
                 new LambdaQueryWrapper<Message>()
+                        .inSql(Message::getSessionId,
+                                "SELECT id FROM chat_session WHERE user_id = " + userId)
                         .eq(Message::getStarred, true)
                         .orderByDesc(Message::getCreateTime));
     }

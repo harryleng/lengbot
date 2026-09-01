@@ -1688,7 +1688,7 @@ public class ChatServiceImpl implements ChatService {
                 ctx.appendTraceCompleteReply(text);
             }
             // 解析 inline thinking 标签（Ollama deepseek-r1 等）
-            if (ctx.getReasoningContent().length() == 0 && !text.isEmpty()) {
+            if (ctx.getReasoningContent().isEmpty() && !text.isEmpty()) {
                 InlineThinkingStreamParser.ParseResult parsed = InlineThinkingStreamParser.parseComplete(text);
                 if (!parsed.reasoningDelta().isEmpty()) {
                     ctx.appendReasoningContent(parsed.reasoningDelta());
@@ -1697,7 +1697,7 @@ public class ChatServiceImpl implements ChatService {
             } else if (InlineThinkingStreamParser.containsThinkingTags(text)) {
                 text = InlineThinkingStreamParser.stripTags(text);
             }
-            if (text.isEmpty() && ctx.getReasoningContent().length() == 0) {
+            if (text.isEmpty() && ctx.getReasoningContent().isEmpty()) {
                 return Flux.empty();
             }
             SensitiveWordFilter.FilterResult filtered = SensitiveWordFilter.filterAiOutput(

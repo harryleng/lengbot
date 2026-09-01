@@ -57,6 +57,9 @@ public class ChatSessionController {
     @Operation(summary = "获取会话详情")
     @GetMapping("/{id}")
     public Result<ChatSession> getById(@PathVariable Long id) {
+        long userId = StpUtil.getLoginIdAsLong();
+        // 归属校验：仅会话所有者可读，防 IDOR 越权读取他人会话
+        chatSessionService.ensureOwnedByUser(id, userId);
         return Result.ok(chatSessionService.getById(id));
     }
 
@@ -66,6 +69,9 @@ public class ChatSessionController {
             @PathVariable Long id,
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize) {
+        long userId = StpUtil.getLoginIdAsLong();
+        // 归属校验：仅会话所有者可读，防 IDOR 越权读取他人聊天记录
+        chatSessionService.ensureOwnedByUser(id, userId);
         return Result.ok(messageService.listBySessionIdPage(id, pageNum, pageSize));
     }
 
@@ -125,6 +131,9 @@ public class ChatSessionController {
             @RequestParam String keyword,
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "20") int pageSize) {
+        long userId = StpUtil.getLoginIdAsLong();
+        // 归属校验：仅会话所有者可搜索，防 IDOR 越权读取他人会话内容
+        chatSessionService.ensureOwnedByUser(id, userId);
         return Result.ok(messageService.searchBySessionId(id, keyword, pageNum, pageSize));
     }
 
@@ -155,7 +164,9 @@ public class ChatSessionController {
     public Result<Page<Message>> listStarred(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "20") int pageSize) {
-        return Result.ok(messageService.listStarred(pageNum, pageSize));
+        long userId = StpUtil.getLoginIdAsLong();
+        // 归属隔离：仅返回当前用户的收藏消息，避免跨用户泄露
+        return Result.ok(messageService.listStarred(userId, pageNum, pageSize));
     }
 
     @Operation(summary = "获取会话附件列表")
