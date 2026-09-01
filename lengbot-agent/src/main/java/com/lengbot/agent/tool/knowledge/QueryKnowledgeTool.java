@@ -13,6 +13,7 @@ import com.lengbot.util.RagParamResolver;
 import com.lengbot.util.TextNormalizeUtil;
 import com.lengbot.util.ModelCalls;
 import com.lengbot.tool.ToolEventEmitter;
+import reactor.core.publisher.Sinks;
 import com.lengbot.tool.annotation.SystemTool;
 import com.lengbot.tool.annotation.ToolParamMeta;
 import lombok.RequiredArgsConstructor;
@@ -80,6 +81,9 @@ public class QueryKnowledgeTool {
             ToolCallParam context) {
         String requestId = (String) context.getRuntimeContext().get("requestId");
         Long finalAgentId = resolveAgentId(context);
+        // 捕获当前线程的实时 Sink：下方检索在 lengBotExecutor 子线程执行，须透传进去，
+        // 否则 emit 落到 EVENTS ThreadLocal 既无法实时推送又会泄漏。
+        Sinks.Many<String> statusSink = ToolEventEmitter.currentSink();
         log.info("[Tool:query_knowledge] 开始检索: agentId={}, question={}", finalAgentId, question);
 
         if (finalAgentId == null) {
@@ -113,6 +117,10 @@ public class QueryKnowledgeTool {
             // 3. 并行检索多个知识库（由统一入口路由本地向量库或 Dify Dataset）。
             List<CompletableFuture<List<Map<String, Object>>>> futures = knowledgeIds.stream()
                     .map(knowledgeId -> CompletableFuture.supplyAsync(() -> {
+                        // 透传实时 Sink 到子线程：使下方 emit 能实时推给前端，并在 finally 清理避免 EVENTS 泄漏。
+                        if (statusSink != null) {
+                            ToolEventEmitter.setupSink(statusSink);
+                        }
                         try {
                             Knowledge knowledge = knowledgeService.getById(knowledgeId);
                             if (knowledge == null) {
@@ -198,6 +206,9 @@ public class QueryKnowledgeTool {
                         } catch (Exception e) {
                             log.warn("[Tool:query_knowledge] 知识库检索失败: knowledgeId={}, error={}", knowledgeId, e.getMessage(), e);
                             return List.<Map<String, Object>>of();
+                        } finally {
+                            ToolEventEmitter.teardownSink();
+                            ToolEventEmitter.clear();
                         }
                     }, lengBotExecutor))
                     .toList();

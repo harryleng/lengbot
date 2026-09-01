@@ -182,6 +182,72 @@ html[data-theme='dark'] body::after {
   opacity: 0.85;
 }
 
+
+
+/* ==========================================================================
+ * 首页 · 深色模式兜底
+ * --------------------------------------------------------------------------
+ * Landing.vue 的 scoped 暗色规则在某些浏览器/缓存下可能未生效，导致暗色模
+ * 式下背景仍是浅色、文字已是浅色，出现白底白字。这里在全局主题文件里再做
+ * 一次兜底，使用 !important 确保覆盖。
+ * ========================================================================== */
+html[data-theme='dark'] .landing-container {
+  background: linear-gradient(180deg, #0a1628 0%, var(--color-canvas) 40%, #0d1117 100%) !important;
+}
+html[data-theme='dark'] .landing-container .title {
+  background: linear-gradient(135deg, #e4e4e7 10%, #60a5fa 55%, #3b82f6) !important;
+  -webkit-background-clip: text !important;
+          background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+html[data-theme='dark'] .landing-container .subtitle,
+html[data-theme='dark'] .landing-container .hero-desc,
+html[data-theme='dark'] .landing-container .feature-title,
+html[data-theme='dark'] .landing-container .feature-desc {
+  color: var(--color-body) !important;
+}
+html[data-theme='dark'] .landing-container .glass-header {
+  background: rgba(8, 8, 10, 0.88) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+}
+html[data-theme='dark'] .landing-container .visual-card {
+  background: linear-gradient(165deg, #1a1a2e, #16213e) !important;
+  border-color: var(--color-hairline) !important;
+  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.3), var(--shadow-4) !important;
+}
+html[data-theme='dark'] .landing-container .visual-glow {
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.08), transparent 80%) !important;
+}
+html[data-theme='dark'] .landing-container .feature-desc-area {
+  background: linear-gradient(135deg, #1a1a2e, #16213e) !important;
+  border-color: rgba(99, 102, 241, 0.12) !important;
+}
+html[data-theme='dark'] .landing-container .orb {
+  opacity: 0.15 !important;
+}
+html[data-theme='dark'] .landing-container .grid-mesh {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px) !important;
+}
+html[data-theme='dark'] .landing-container .footer {
+  border-top-color: rgba(255, 255, 255, 0.06) !important;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.1)) !important;
+}
+html[data-theme='dark'] .landing-container .button-base.primary {
+  background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+  box-shadow: 0 8px 24px -4px rgba(59, 130, 246, 0.4) !important;
+}
+html[data-theme='dark'] .landing-container .button-base.primary:hover {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+}
+html[data-theme='dark'] .landing-container .github-link {
+  color: var(--color-mute) !important;
+}
+html[data-theme='dark'] .landing-container .github-link:hover {
+  color: var(--color-link) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+}
 html, body, #app { background: transparent !important; }
 
 [data-theme] .main-content {

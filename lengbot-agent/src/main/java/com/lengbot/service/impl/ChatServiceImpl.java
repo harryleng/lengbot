@@ -1209,6 +1209,7 @@ public class ChatServiceImpl implements ChatService {
                             return toolResultToText(block);
                         } finally {
                             ToolEventEmitter.teardownSink();
+                            ToolEventEmitter.clear();
                         }
                     }, lengBotExecutor).orTimeout(timeoutSeconds, TimeUnit.SECONDS)
             ).map(result -> {
@@ -1922,6 +1923,8 @@ public class ChatServiceImpl implements ChatService {
                         if (eventSink != null) {
                             ToolEventEmitter.teardownSink();
                         }
+                        // 兜底清理当前（线程池）线程的 EVENTS，防止非流式/嵌套线程 emit 造成 ThreadLocal 泄漏
+                        ToolEventEmitter.clear();
                     }
                 }, lengBotExecutor).get(timeoutSeconds, TimeUnit.SECONDS);
                 if (chatContext != null && chatContext.isAborted()) {
@@ -1948,10 +1951,15 @@ public class ChatServiceImpl implements ChatService {
                             String retryArgs = stripInternalRepairFlags(repaired);
                             log.warn("[Chat] 工具参数解析失败后二次修复重试: name={}", toolName);
                             // 避免递归死循环：直接再调一次 callback（同步），同样注入 RuntimeContext
-                            ToolResultBlock retryBlock = callback.callAsync(ToolCallParam.builder()
-                                    .input(parseToolArgsToMap(retryArgs))
-                                    .runtimeContext(buildToolRuntimeContext(agentId, chatContext, sessionId, requestId, retryArgs)).build()).block();
-                            String retryResult = toolResultToText(retryBlock);
+                            String retryResult;
+                            try {
+                                ToolResultBlock retryBlock = callback.callAsync(ToolCallParam.builder()
+                                        .input(parseToolArgsToMap(retryArgs))
+                                        .runtimeContext(buildToolRuntimeContext(agentId, chatContext, sessionId, requestId, retryArgs)).build()).block();
+                                retryResult = toolResultToText(retryBlock);
+                            } finally {
+                                ToolEventEmitter.clear();
+                            }
                             if (!ToolResultPrefixes.isError(retryResult)) {
                                 sessionAttachmentRegistrar.registerFromToolResult(sessionId, toolName, retryResult);
                             }

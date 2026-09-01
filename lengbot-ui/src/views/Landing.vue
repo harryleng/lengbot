@@ -995,60 +995,57 @@ onUnmounted(() => {
   }
 }
 
-/* 深色模式适配 */
-:global([data-theme='dark']) {
-  .landing-container {
-    background: linear-gradient(180deg, #0a1628 0%, var(--color-canvas) 40%, #0d1117 100%);
-  }
-  .title {
-    background: linear-gradient(135deg, #e4e4e7 10%, #60a5fa 55%, #3b82f6);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
-  .glass-header {
-    background: rgba(8, 8, 10, 0.88);
-    border-bottom-color: rgba(255, 255, 255, 0.06);
-  }
-  .visual-card {
-    background: linear-gradient(165deg, #1a1a2e, #16213e);
-    border-color: var(--color-hairline);
-    box-shadow:
-      0 24px 48px -20px rgba(0, 0, 0, 0.3),
-      var(--shadow-4);
-  }
-  .visual-glow {
-    background: radial-gradient(circle, rgba(59, 130, 246, 0.08), transparent 80%);
-  }
-  .feature-desc-area {
-    background: linear-gradient(135deg, #1a1a2e, #16213e);
-    border-color: rgba(99, 102, 241, 0.12);
-  }
-  .orb {
-    opacity: 0.15;
-  }
-  .grid-mesh {
-    background-image:
-      linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  }
-  .footer {
-    border-top-color: rgba(255, 255, 255, 0.06);
-    background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.1));
-  }
-  .button-base.primary {
-    background: linear-gradient(135deg, #3b82f6, #2563eb);
-    box-shadow: 0 8px 24px -4px rgba(59, 130, 246, 0.4);
-  }
-  .button-base.primary:hover {
-    background: linear-gradient(135deg, #2563eb, #1d4ed8);
-  }
-  .github-link {
-    color: var(--color-mute);
-  }
-  .github-link:hover {
-    color: var(--color-link);
-    background: rgba(255, 255, 255, 0.06);
-  }
+/* 深色模式适配（直接写 [data-theme='dark'] 作用域选择器，Vue 自动加 scoped 属性；
+   不使用 :global() 包裹，避免 Vue 把规则编译成原生 CSS 嵌套在部分浏览器被整体丢弃，导致白底白字） */
+[data-theme='dark'] .landing-container {
+  background: linear-gradient(180deg, #0a1628 0%, var(--color-canvas) 40%, #0d1117 100%);
+}
+[data-theme='dark'] .title {
+  background: linear-gradient(135deg, #e4e4e7 10%, #60a5fa 55%, #3b82f6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+[data-theme='dark'] .glass-header {
+  background: rgba(8, 8, 10, 0.88);
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+[data-theme='dark'] .visual-card {
+  background: linear-gradient(165deg, #1a1a2e, #16213e);
+  border-color: var(--color-hairline);
+  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.3), var(--shadow-4);
+}
+[data-theme='dark'] .visual-glow {
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.08), transparent 80%);
+}
+[data-theme='dark'] .feature-desc-area {
+  background: linear-gradient(135deg, #1a1a2e, #16213e);
+  border-color: rgba(99, 102, 241, 0.12);
+}
+[data-theme='dark'] .orb {
+  opacity: 0.15;
+}
+[data-theme='dark'] .grid-mesh {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+[data-theme='dark'] .footer {
+  border-top-color: rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.1));
+}
+[data-theme='dark'] .button-base.primary {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  box-shadow: 0 8px 24px -4px rgba(59, 130, 246, 0.4);
+}
+[data-theme='dark'] .button-base.primary:hover {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+[data-theme='dark'] .github-link {
+  color: var(--color-mute);
+}
+[data-theme='dark'] .github-link:hover {
+  color: var(--color-link);
+  background: rgba(255, 255, 255, 0.06);
 }
 </style>

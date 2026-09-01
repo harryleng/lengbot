@@ -35,6 +35,15 @@ public final class ToolEventEmitter {
     }
 
     /**
+     * 读取当前线程绑定的实时推送 Sink（无则为 null）。
+     * <p>供工具在内部另起线程池执行时，把 Sink 透传进子线程（{@code setupSink} 后再 {@code teardownSink}），
+     * 避免 {@link #emit} 因跨线程导致事件落到 {@code EVENTS} 而丢失实时进度并泄漏 ThreadLocal。</p>
+     */
+    public static Sinks.Many<String> currentSink() {
+        return SINK.get();
+    }
+
+    /**
      * 解绑实时推送 Sink
      */
     public static void teardownSink() {
