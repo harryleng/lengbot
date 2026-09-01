@@ -871,7 +871,15 @@ public class MessageMiddleware implements ChatMiddleware {
             return history;
         }
 
-        long totalChars = history.stream().mapToLong(m -> m.getContent() != null ? m.getContent().length() : 0).sum();
+        // 体积统计须覆盖 content + metadata + tool_events 三个落库字段，否则大工具结果（open_kb_document 等）
+        // 或大型 tool_events JSON 会被漏算，导致真实上下文体积远超阈值却未触发摘要压缩。
+        long totalChars = history.stream().mapToLong(m -> {
+            long len = 0;
+            if (m.getContent() != null) len += m.getContent().length();
+            if (m.getMetadata() != null) len += m.getMetadata().length();
+            if (m.getToolEvents() != null) len += m.getToolEvents().length();
+            return len;
+        }).sum();
         double totalKb = totalChars / 1024.0;
 
         double thresholdKb = 100.0;

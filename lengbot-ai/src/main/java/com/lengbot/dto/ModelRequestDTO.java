@@ -21,7 +21,7 @@ public class ModelRequestDTO {
     private Long providerId;
 
     @NotBlank(message = "模型标识不能为空")
-    @Pattern(regexp = "^[\\w.:-]+$", message = "模型标识只能包含字母、数字、下划线、点、冒号和连字符，不能包含竖线等特殊符号")
+    @Pattern(regexp = "^[\\w./:-]+$", message = "模型标识只能包含字母、数字、下划线、点、斜杠、冒号和连字符")
     private String modelId;
 
     @NotBlank(message = "模型名称不能为空")
