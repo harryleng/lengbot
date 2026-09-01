@@ -164,7 +164,7 @@ public class TaskQueueServiceImpl implements TaskQueueService {
 
     @Override
     public void ack(String streamId) {
-        // 两个组各自独立 Stream：对 default/heavy 两个 stream 都尝试 ACK
+        // 三组各自独立 Stream：对 default/heavy/cpu 三个 stream 都尝试 ACK
         // （XACK 对未消费的 stream 返回 0，无副作用），无需感知消息归属组
         RecordId recordId = RecordId.of(streamId);
         redis.opsForStream().acknowledge(KEY_STREAM_DEFAULT, GROUP_DEFAULT, recordId);
@@ -330,18 +330,20 @@ public class TaskQueueServiceImpl implements TaskQueueService {
 
     @Override
     public QueueMetrics snapshotMetrics() {
-        // 采集队列关键计数，单次接口调用对 Redis 压力可控（5 个 O(1)/O(logN) 命令）
+        // 采集队列关键计数，单次接口调用对 Redis 压力可控（6 个 O(1)/O(logN) 命令）
         Long defaultLen = redis.opsForStream().size(KEY_STREAM_DEFAULT);
         Long heavyLen = redis.opsForStream().size(KEY_STREAM_HEAVY);
-        long mainLen = (defaultLen == null ? 0 : defaultLen) + (heavyLen == null ? 0 : heavyLen);
+        long mainLen = (defaultLen == null ? 0 : defaultLen)
+                + (heavyLen == null ? 0 : heavyLen);
         Long deadLetterLen = redis.opsForStream().size(KEY_DEAD_LETTER_STREAM);
         Long defaultPending = pendingCount(KEY_STREAM_DEFAULT, GROUP_DEFAULT);
         Long heavyPending = pendingCount(KEY_STREAM_HEAVY, GROUP_HEAVY);
+        long defaultPendingTotal = (defaultPending == null ? 0 : defaultPending);
         Long delaySize = redis.opsForZSet().zCard(KEY_DELAY_ZSET);
         return new QueueMetrics(
                 mainLen,
                 deadLetterLen == null ? 0 : deadLetterLen,
-                defaultPending == null ? 0 : defaultPending,
+                defaultPendingTotal,
                 heavyPending == null ? 0 : heavyPending,
                 delaySize == null ? 0 : delaySize);
     }
@@ -382,8 +384,10 @@ public class TaskQueueServiceImpl implements TaskQueueService {
     /** 任务 → Stream key：按任务类型分组路由；type 缺失时按默认组处理 */
     private String streamKeyFor(Task task) {
         TaskType type = task.getType();
-        if (type != null && type.getGroup() == TaskType.Group.HEAVY) {
-            return KEY_STREAM_HEAVY;
+        if (type != null) {
+            if (type.getGroup() == TaskType.Group.HEAVY) {
+                return KEY_STREAM_HEAVY;
+            }
         }
         return KEY_STREAM_DEFAULT;
     }

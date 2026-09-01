@@ -11,6 +11,7 @@ import com.lengbot.workflow.NodeResilienceMessageFormatter;
 import com.lengbot.workflow.WorkflowTraceRecorder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
@@ -39,6 +40,7 @@ public class WorkflowMiddleware implements ChatMiddleware {
     private final MessageMiddleware messageMiddleware;
     private final TraceMiddleware traceMiddleware;
     private final WorkflowTraceRecorder workflowTraceRecorder;
+    @Qualifier("lengBotExecutor")
     private final ThreadPoolTaskExecutor taskExecutor;
     private final ObjectMapper objectMapper;
 

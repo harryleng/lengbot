@@ -62,7 +62,7 @@ public class TaskConsumerConfig implements TaskInterruptPort {
     private int defaultPoolSize;
 
     /** 重型组（长任务：图谱抽取、问答对生成）线程池大小 */
-    @Value("${lengbot.task.consumer.heavy-pool-size:1}")
+    @Value("${lengbot.task.consumer.heavy-pool-size:3}")
     private int heavyPoolSize;
 
     /** 阻塞拉取时长（秒），无消息时 BLOCK 时长 */
@@ -83,7 +83,6 @@ public class TaskConsumerConfig implements TaskInterruptPort {
 
         defaultPool = Executors.newFixedThreadPool(defaultPoolSize);
         heavyPool = Executors.newFixedThreadPool(heavyPoolSize);
-
         for (int i = 0; i < defaultPoolSize; i++) {
             final int workerIndex = i;
             defaultPool.submit(() -> consumeLoop(TaskType.Group.DEFAULT, workerIndex));
@@ -92,7 +91,8 @@ public class TaskConsumerConfig implements TaskInterruptPort {
             final int workerIndex = i;
             heavyPool.submit(() -> consumeLoop(TaskType.Group.HEAVY, workerIndex));
         }
-        log.info("[任务消费者] 启动, defaultPoolSize={}, heavyPoolSize={}", defaultPoolSize, heavyPoolSize);
+        log.info("[任务消费者] 启动, defaultPoolSize={}, heavyPoolSize={}",
+                defaultPoolSize, heavyPoolSize);
     }
 
     @PreDestroy

@@ -140,6 +140,7 @@ public class ChatServiceImpl implements ChatService {
     /** 文本向量生成服务（AgentScope 引擎） */
     private final TextEmbeddingService textEmbeddingService;
     private final KnowledgeService knowledgeService;
+    @Qualifier("lengBotExecutor")
     private final ThreadPoolTaskExecutor taskExecutor;
     private final ToolCallService toolCallService;
 
