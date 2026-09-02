@@ -33,9 +33,9 @@ spring:
   # 需要安装 pgvector 扩展用于向量存储
   # ========================================
   datasource:
-    url: jdbc:postgresql://lizhongcun.com:5432/${LENGBOT_DB_NAME:lengbot}
+    url: jdbc:postgresql://localhost:5432/${LENGBOT_DB_NAME:lengbot}
     username: 'postgres'
-    password: 'difyai123456'
+    password: '123456'
     driver-class-name: org.postgresql.Driver
 
   # ========================================
@@ -43,7 +43,7 @@ spring:
   # 限定权限：仅 SELECT，无 DML/DDL
   # ========================================
   datasource-readonly:
-    url: jdbc:postgresql://lizhongcun.com:5432/${LENGBOT_DB_NAME:lengbot}
+    url: jdbc:postgresql://localhost:5432/${LENGBOT_DB_NAME:lengbot}
     username: 'postgres'
     password: 'difyai123456'
     driver-class-name: org.postgresql.Driver
@@ -55,9 +55,9 @@ spring:
     redis:
       # 复用现有 redis 容器（redis:latest，Redis 7.4）：容器内部端口 6379 映射到宿主机 9736
       # 密码为容器 redis.conf 中的 requirepass，与默认的 123456 不同
-      host: 'lizhongcun.com'
+      host: 'localhost'
       port: '9736'
-      password: 'wc@961029'
+      password: '123456'
       database: '9'
 
 
@@ -234,7 +234,7 @@ lengbot:
   # 局域网 IP 访问 dev server（如 http://10.10.13.163:5174）时也需加进白名单，
   # 否则 CorsFilter 返回 403 "Invalid CORS request"，前端登录提示"无权访问"。
   cors:
-    allowed-origins: http://localhost:5173,http://localhost:5174,http://localhost:3000,http://10.10.13.163:5173,http://10.10.13.163:5174,http://localhost:5174,http://lizhongcun.com
+    allowed-origins: http://localhost:5173,http://localhost:5174,http://localhost:3000,http://10.10.13.163:5173,http://10.10.13.163:5174,http://localhost:5174,http://localhost.com
     allowed-methods: GET,POST,PUT,DELETE,OPTIONS
     allow-credentials: true
     max-age: 3600

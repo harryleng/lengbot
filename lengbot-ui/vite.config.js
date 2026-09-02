@@ -46,8 +46,6 @@ export default defineConfig({
     // 防点击劫持（X-Frame-Options）、MIME 嗅探（X-Content-Type-Options）、
     // Referer 泄漏（Referrer-Policy）、禁用麦克风/相机/定位（Permissions-Policy）
     allowedHosts: [
-        'lizhongcun.com',
-        '.lizhongcun.com',  // 允许所有子域名
         'localhost',
         '127.0.0.1',
         // 如果你有其他访问域名或 IP，也加进来
