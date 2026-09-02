@@ -94,7 +94,7 @@ sa-token:
 # ========================================
 minio:
   # 容器 lengbot-minio：API 端口 9100（宿主机 9000 被 portainer 占用），控制台 9101
-  endpoint: 'http://lizhongcun.com:9100'
+  endpoint: 'http://localhost:9100'
   access-key: 'minioadmin'
   secret-key: 'minioadmin'
   bucket: 'lengbot'
@@ -211,7 +211,7 @@ lengbot:
   # Milvus 向量数据库配置
   milvus:
     enabled: 'true'
-    uri: 'http://lizhongcun.com:19530'
+    uri: 'http://localhost:19530'
     token: ''
     connect-timeout-ms: 10000
     wait-timeout-ms: 30000
@@ -234,7 +234,7 @@ lengbot:
   # 局域网 IP 访问 dev server（如 http://10.10.13.163:5174）时也需加进白名单，
   # 否则 CorsFilter 返回 403 "Invalid CORS request"，前端登录提示"无权访问"。
   cors:
-    allowed-origins: http://localhost:5173,http://localhost:5174,http://localhost:3000,http://10.10.13.163:5173,http://10.10.13.163:5174,http://lizhongcun.com:5174,http://lizhongcun.com
+    allowed-origins: http://localhost:5173,http://localhost:5174,http://localhost:3000,http://10.10.13.163:5173,http://10.10.13.163:5174,http://localhost:5174,http://lizhongcun.com
     allowed-methods: GET,POST,PUT,DELETE,OPTIONS
     allow-credentials: true
     max-age: 3600
@@ -245,7 +245,7 @@ lengbot:
 
   # Tavily 联网搜索 API Key
   tavily:
-    api-key: ${TAVILY_API_KEY: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}
+    api-key: ${TAVILY_API_KEY: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*******}
 
   # SiliconFlow AI 生图 API Key
   siliconflow:
