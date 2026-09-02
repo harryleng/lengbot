@@ -20,6 +20,7 @@ import java.util.Map;
  *     zombie:
  *       interval-seconds: 60
  *       default-timeout-minutes: 10
+ *       pending-timeout-minutes: 5
  *       batch-size: 100
  *       overrides:
  *         GRAPH_EXTRACTION: 60
@@ -40,6 +41,9 @@ public class TaskZombieProperties {
 
     /** 默认超时阈值（分钟）：RUNNING 任务 update_time 超过此值视为疑似僵尸 */
     private long defaultTimeoutMinutes = 10L;
+
+    /** PENDING 僵尸超时阈值（分钟）：任务创建后始终未被消费（消息丢失/消费组故障）超过此值则重投 */
+    private long pendingTimeoutMinutes = 5L;
 
     /** 单次扫描上限，避免一次性处理过多任务造成 DB 压力 */
     private int batchSize = 100;

@@ -77,8 +77,9 @@ public class TaskZombieScheduler {
                 zombieProperties.getIntervalSeconds(),
                 zombieProperties.getIntervalSeconds(),
                 TimeUnit.SECONDS);
-        log.info("[TaskZombie] 启动, interval={}s, defaultTimeout={}min",
-                zombieProperties.getIntervalSeconds(), zombieProperties.getDefaultTimeoutMinutes());
+        log.info("[TaskZombie] 启动, interval={}s, defaultTimeout={}min, pendingTimeout={}min",
+                zombieProperties.getIntervalSeconds(), zombieProperties.getDefaultTimeoutMinutes(),
+                zombieProperties.getPendingTimeoutMinutes());
     }
 
     @PreDestroy
@@ -165,8 +166,77 @@ public class TaskZombieScheduler {
                 log.info("[TaskZombie] 扫描完成, candidates={}, failed={}, skippedInPel={}, skippedNotDue={}",
                         candidates.size(), failedCount, skippedInPel, skippedNotDue);
             }
+
+            // 3. 兜底扫描 PENDING 僵尸：创建后始终未被消费（消息丢失/消费组故障）
+            scanPendingZombies();
         } catch (Exception e) {
             log.warn("[TaskZombie] 周期任务异常: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 兜底扫描 PENDING 僵尸任务：status=PENDING 且 update_time 已超 pendingTimeout 的任务。
+     *
+     * <p>PENDING 表示任务已 XADD 但从未被消费（消息丢失、消费组未就绪、消息被异常 ACK），
+     * 此时任务既不在 PEL（Zombie 扫不到）、也没有 nextRetryAt（Delay 扫不到），
+     * 若不兜底会永久卡在 PENDING。正确动作是<b>重新投递</b>而非直接判失败。
+     *
+     * <p>防无限循环：重投前 attempts+1，超过 maxAttempts 则转失败（与重试策略语义对齐）。
+     */
+    private void scanPendingZombies() {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime threshold = now.minusMinutes(zombieProperties.getPendingTimeoutMinutes());
+        List<Task> pending = taskService.list(new LambdaQueryWrapper<Task>()
+                .eq(Task::getStatus, TaskStatus.PENDING)
+                .lt(Task::getUpdateTime, threshold)
+                .orderByAsc(Task::getUpdateTime)
+                .last("LIMIT " + zombieProperties.getBatchSize()));
+
+        if (pending.isEmpty()) {
+            return;
+        }
+
+        int reEnqueued = 0;
+        int failed = 0;
+        for (Task task : pending) {
+            int newAttempts = (task.getAttempts() == null ? 0 : task.getAttempts()) + 1;
+            int maxAttempts = task.getMaxAttempts() == null ? 1 : task.getMaxAttempts();
+
+            // 超过最大尝试次数 → 判失败，避免无限重投
+            if (newAttempts > maxAttempts) {
+                casMarkFailed(task.getId(), String.format(
+                        "任务创建后长时间未被消费（PENDING 超时 %d 分钟），且已达最大尝试次数 %d",
+                        zombieProperties.getPendingTimeoutMinutes(), maxAttempts));
+                failed++;
+                continue;
+            }
+
+            try {
+                // CAS：仅当仍为 PENDING 才重投（防与 worker 的 markStart 并发冲突）
+                String streamId = taskQueueService.enqueue(task);
+                boolean updated = taskService.lambdaUpdate()
+                        .eq(Task::getId, task.getId())
+                        .eq(Task::getStatus, TaskStatus.PENDING)
+                        .set(Task::getAttempts, newAttempts)
+                        .set(Task::getStreamId, streamId)
+                        .set(Task::getUpdateTime, LocalDateTime.now())
+                        .update();
+                if (!updated) {
+                    // 状态已被推进（worker 恰好消费了），放弃本次重投
+                    log.info("[TaskZombie] PENDING 任务已被消费，放弃重投, taskId={}", task.getId());
+                    continue;
+                }
+                reEnqueued++;
+                log.warn("[TaskZombie] PENDING 僵尸重投, taskId={}, attempts={}, streamId={}",
+                        task.getId(), newAttempts, streamId);
+            } catch (Exception e) {
+                log.error("[TaskZombie] PENDING 任务重投失败, taskId={}, error={}", task.getId(), e.getMessage());
+            }
+        }
+
+        if (reEnqueued > 0 || failed > 0) {
+            log.info("[TaskZombie] PENDING 扫描完成, candidates={}, reEnqueued={}, failed={}",
+                    pending.size(), reEnqueued, failed);
         }
     }
 

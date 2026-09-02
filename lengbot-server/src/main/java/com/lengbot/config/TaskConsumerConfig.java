@@ -282,8 +282,13 @@ public class TaskConsumerConfig implements TaskInterruptPort {
         // 4. 记录执行线程，便于取消时 interrupt
         runningTasks.put(taskId, Thread.currentThread());
         try {
-            // 5. 状态置 RUNNING + 写入 attempts/streamId
-            taskService.markStart(taskId, newAttempts, streamId);
+            // 5. 状态置 RUNNING + 写入 attempts/streamId（CAS 抢占执行权）
+            // 未抢到说明同一任务已被其他消费者领走（Stream 至少一次投递），直接 ACK 跳过，避免重复执行
+            if (!taskService.markStart(taskId, newAttempts, streamId)) {
+                runningTasks.remove(taskId);
+                safeAck(streamId);
+                return;
+            }
             log.info("[任务消费者] 开始执行, taskId={}, type={}, attempts={}/{}",
                     taskId, task.getType(), newAttempts,
                     task.getMaxAttempts() == null ? retryPolicyProperties.resolve(task.getType()).getMaxAttempts() : task.getMaxAttempts());

@@ -103,16 +103,25 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task>
     }
 
     @Override
-    public void markStart(Long taskId, int attempts, String streamId) {
-        lambdaUpdate()
+    public boolean markStart(Long taskId, int attempts, String streamId) {
+        // CAS：只有 PENDING / PENDING_RETRY 才能推进为 RUNNING。
+        // Stream 至少一次投递下，未抢到的消费者直接返回 false 由调用方 ACK，避免并行重复执行。
+        boolean claimed = lambdaUpdate()
                 .eq(Task::getId, taskId)
+                .in(Task::getStatus, TaskStatus.PENDING, TaskStatus.PENDING_RETRY)
                 .set(Task::getStatus, TaskStatus.RUNNING)
                 .set(Task::getAttempts, attempts)
                 .set(Task::getStreamId, streamId)
                 .set(Task::getStartedAt, LocalDateTime.now())
                 .set(Task::getUpdateTime, LocalDateTime.now())
                 .update();
+        if (!claimed) {
+            log.warn("[任务] markStart CAS 未抢到执行权，任务已被其他消费者领走, taskId={}, streamId={}",
+                    taskId, streamId);
+            return false;
+        }
         broadcastTaskCountByTaskId(taskId);
+        return true;
     }
 
     @Override

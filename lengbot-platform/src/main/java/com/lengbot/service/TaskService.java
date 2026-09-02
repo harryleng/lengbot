@@ -40,12 +40,16 @@ public interface TaskService extends IService<Task> {
 
     /**
      * 标记任务开始执行（Stream 模式）：status=RUNNING + 记录 attempts/streamId
+     * <p>带 CAS 语义：仅当任务当前处于 PENDING / PENDING_RETRY 时才推进为 RUNNING。
+     * Redis Stream 消费者组是<b>至少一次投递</b>，同一任务可能被多个消费者同时领取，
+     * 靠此 CAS 抢占执行权，避免重复执行（重复烧 token / 重复副作用）。</p>
      *
      * @param taskId   任务ID
      * @param attempts 本次执行的累计尝试次数（含本次）
      * @param streamId 主 Stream 消息 ID
+     * @return 抢占成功返回 true；false 表示已被其他消费者领走（调用方应直接 ACK 跳过）
      */
-    void markStart(Long taskId, int attempts, String streamId);
+    boolean markStart(Long taskId, int attempts, String streamId);
 
     /**
      * 标记任务为等待重试：status=PENDING_RETRY + 记录 attempts/nextRetryAt + 拼接错误信息

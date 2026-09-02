@@ -1836,3 +1836,42 @@ CREATE INDEX idx_project_memory_vector_hnsw ON project_memory USING hnsw (embedd
 
 -- 5. 兜底：embedding 模型记录未配置维度时，按 1024 维写入（与向量列一致）
 UPDATE model SET dimension = 1024 WHERE type = 'embedding' AND dimension IS NULL;
+
+-- ============================================================================
+-- Source: 2026-09-01-001.sql
+-- 任务表（task）索引优化：消除列表查询与僵尸任务扫描的 filesort
+-- 存量环境请单独执行 sql/2026-09-01-001.sql（内容与本块一致，幂等可重复执行）
+-- ============================================================================
+
+-- 背景：TaskServiceImpl.listByUserId 的实际查询为
+--   WHERE user_id = ? [AND status = ?] [AND type = ?] ORDER BY create_time DESC LIMIT ?
+-- 原索引仅单列 idx_task_user_id，只能过滤不能排序，ORDER BY 必然 filesort，
+-- 且深分页需先扫完该用户全部匹配行再排序。把排序列并入索引后，叶子层本身按
+-- (前缀, create_time DESC) 有序，排序被消除且读满 LIMIT 即可提前终止。
+
+-- 1. 核心：用户维度等值过滤 + 时间倒序（最左前缀：等值列在前，排序列在后）
+CREATE INDEX IF NOT EXISTS idx_task_user_create_time
+    ON task (user_id, create_time DESC);
+
+-- 2. 列表页带状态筛选（status 为单值等值有效；IN 多值仍会走 Sort 节点）
+CREATE INDEX IF NOT EXISTS idx_task_user_status_time
+    ON task (user_id, status, create_time DESC);
+
+-- 3. 僵尸任务扫描（TaskZombieScheduler）：不带 user_id，按 status 过滤后
+--    按 update_time 升序取最老一批，故将原单列索引升级为复合索引而非删除
+CREATE INDEX IF NOT EXISTS idx_task_status_update_time
+    ON task (status, update_time);
+
+-- 4. 清理冗余索引
+DROP INDEX IF EXISTS idx_task_status;   -- 已被 idx_task_status_update_time 前缀覆盖
+DROP INDEX IF EXISTS idx_task_type;     -- type 过滤均带 user_id，无独立查询，仅拖慢写入
+
+COMMENT ON INDEX idx_task_user_create_time IS '用户任务列表：user_id 过滤 + create_time 倒序，消除 filesort';
+COMMENT ON INDEX idx_task_user_status_time IS '用户任务列表带状态筛选：user_id + status 过滤 + create_time 倒序';
+COMMENT ON INDEX idx_task_status_update_time IS '僵尸任务调度：status 过滤 + update_time 升序（不带 user_id）';
+
+-- 可选（默认不启用）：listByUserId 中 name LIKE '%关键词%' 带前置通配符，
+-- B+ 树最左前缀失效，需 pg_trgm + GIN；但 task 写入频繁、GIN 维护成本高，
+-- 且任务名搜索非高频路径，故默认不建。成为瓶颈时再执行：
+--   CREATE EXTENSION IF NOT EXISTS pg_trgm;
+--   CREATE INDEX idx_task_name_trgm ON task USING GIN (name gin_trgm_ops);
