@@ -48,7 +48,7 @@ public class QaPairVectorizeUtil extends ServiceImpl<QaPairMapper, QaPair> {
 
         // 3. 存储向量
         long id = IdWorker.getId();
-        embeddingMapper.insertQaPairVector(id, qaPairId, "default", vector.length, toVectorString(vector));
+        embeddingMapper.insertQaPairVector(id, qaPairId, qaPair.getKnowledgeId(), "default", vector.length, toVectorString(vector));
 
         // 4. 更新状态为生效
         qaPair.setStatus(QaPairStatus.ACTIVE);

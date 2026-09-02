@@ -87,7 +87,10 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
     public void saveVector(Long chunkId, String modelName, float[] vector) {
         long id = IdWorker.getId();
         String vectorStr = toVectorString(vector);
-        embeddingMapper.insertVector(id, chunkId, modelName, vector.length, vectorStr);
+        // 反查 chunk 获取 knowledge_id（冗余列，供 HNSW pre-filter）
+        Chunk chunk = chunkService.getById(chunkId);
+        Long knowledgeId = chunk != null ? chunk.getKnowledgeId() : null;
+        embeddingMapper.insertVector(id, chunkId, knowledgeId, modelName, vector.length, vectorStr);
     }
 
     /**
@@ -134,11 +137,18 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
 
         // pgvector（原有逻辑）
         List<Map<String, Object>> batch = new ArrayList<>(chunkIds.size());
+        // 批量写入时已知 knowledgeId（调用方传入）；为 null 时反查 chunk 补齐
+        Long resolvedKnowledgeId = knowledgeId;
+        if (resolvedKnowledgeId == null && !chunkIds.isEmpty()) {
+            Chunk first = chunkService.getById(chunkIds.get(0));
+            resolvedKnowledgeId = first != null ? first.getKnowledgeId() : null;
+        }
         for (int i = 0; i < chunkIds.size(); i++) {
             float[] vector = vectors.get(i);
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", IdWorker.getId());
             row.put("chunkId", chunkIds.get(i));
+            row.put("knowledgeId", resolvedKnowledgeId);
             row.put("modelName", modelName);
             row.put("dimension", vector.length);
             row.put("vector", toVectorString(vector));
@@ -208,7 +218,7 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
         int hnswEf = getIntParam(queryParams, "hnsw_ef_search", DEFAULT_HNSW_EF_SEARCH);
         embeddingMapper.setHnswEfSearch(Math.max(hnswEf, topK));
         String searchMode = queryParams != null && queryParams.get("search_mode") instanceof String s
-                ? s : SEARCH_MODE_VECTOR;
+                ? s : SEARCH_MODE_HYBRID;
 
         return switch (searchMode) {
             case SEARCH_MODE_KEYWORD -> {
@@ -407,7 +417,7 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
             return List.of();
         }
 
-        String searchMode = SEARCH_MODE_VECTOR;
+        String searchMode = SEARCH_MODE_HYBRID;
         if (queryParams != null && queryParams.get("search_mode") instanceof String s) {
             searchMode = s;
         }

@@ -50,7 +50,7 @@ public class KnowledgeRetrievalServiceImpl implements KnowledgeRetrievalService 
         String apiUrl = stringValue(config.get("apiUrl"));
         String datasetId = stringValue(config.get("datasetId"));
         String token = difySecretCipher.decrypt(stringValue(config.get("tokenCiphertext")));
-        String searchMode = queryParams != null ? stringValue(queryParams.get("search_mode")) : "vector";
+        String searchMode = queryParams != null ? stringValue(queryParams.get("search_mode")) : "hybrid";
         List<Map<String, Object>> records = difyDatasetClient.retrieve(apiUrl, datasetId, token, query,
                 Math.min(Math.max(topK, 1), 20), threshold, searchMode);
         List<Map<String, Object>> results = new ArrayList<>(records.size());

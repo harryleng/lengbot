@@ -793,7 +793,7 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeMapper, Knowledge
                 return mode;
             }
         }
-        return "vector";
+        return "hybrid";
     }
 
     private String stringParam(Map<String, Object> source, String key, String defaultValue) {

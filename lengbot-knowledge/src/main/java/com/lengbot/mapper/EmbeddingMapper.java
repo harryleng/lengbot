@@ -34,15 +34,17 @@ public interface EmbeddingMapper extends BaseMapper<Embedding> {
     /**
      * 存储向量（pgvector ::vector 类型转换需原生SQL）
      *
-     * @param id        主键ID
-     * @param chunkId   分块ID
-     * @param modelName 模型名称
-     * @param dimension 向量维度
-     * @param vector    向量字符串 "[0.1,0.2,...]"
+     * @param id          主键ID
+     * @param chunkId     分块ID
+     * @param knowledgeId 知识库ID（冗余，供 HNSW pre-filter）
+     * @param modelName   模型名称
+     * @param dimension   向量维度
+     * @param vector      向量字符串 "[0.1,0.2,...]"
      */
-    @Insert("INSERT INTO embedding (id, chunk_id, model_name, dimension, vector, create_time) " +
-            "VALUES (#{id}, #{chunkId}, #{modelName}, #{dimension}, #{vector}::vector, NOW())")
+    @Insert("INSERT INTO embedding (id, chunk_id, knowledge_id, model_name, dimension, vector, create_time) " +
+            "VALUES (#{id}, #{chunkId}, #{knowledgeId}, #{modelName}, #{dimension}, #{vector}::vector, NOW())")
     void insertVector(@Param("id") Long id, @Param("chunkId") Long chunkId,
+                      @Param("knowledgeId") Long knowledgeId,
                       @Param("modelName") String modelName, @Param("dimension") int dimension,
                       @Param("vector") String vector);
 
@@ -61,7 +63,7 @@ public interface EmbeddingMapper extends BaseMapper<Embedding> {
             "FROM embedding e " +
             "JOIN chunk c ON e.chunk_id = c.id " +
             "JOIN document d ON c.document_id = d.id " +
-            "WHERE c.knowledge_id = #{knowledgeId} AND d.deleted = 0 AND c.status = 'vectorized' " +
+            "WHERE e.knowledge_id = #{knowledgeId} AND d.deleted = 0 AND c.status = 'vectorized' " +
             "ORDER BY e.vector <=> #{vector}::vector LIMIT #{topK}")
     List<Map<String, Object>> searchSimilar(@Param("vector") String vector,
                                              @Param("knowledgeId") Long knowledgeId,
@@ -84,7 +86,7 @@ public interface EmbeddingMapper extends BaseMapper<Embedding> {
             "FROM embedding e " +
             "JOIN chunk c ON e.chunk_id = c.id " +
             "JOIN document d ON c.document_id = d.id " +
-            "WHERE c.knowledge_id = #{knowledgeId} AND d.deleted = 0 AND c.status = 'vectorized' " +
+            "WHERE e.knowledge_id = #{knowledgeId} AND d.deleted = 0 AND c.status = 'vectorized' " +
             "AND (1 - (e.vector <=> #{vector}::vector)) >= #{threshold} " +
             "ORDER BY e.vector <=> #{vector}::vector LIMIT #{topK}")
     List<Map<String, Object>> searchSimilarWithThreshold(@Param("vector") String vector,
@@ -100,12 +102,12 @@ public interface EmbeddingMapper extends BaseMapper<Embedding> {
      * PostgreSQL 的 ON CONFLICT 不支持用列名匹配部分索引，故用不带目标的
      * ON CONFLICT DO NOTHING 匹配任意唯一约束冲突。</p>
      *
-     * @param vectors 向量数据列表，每项包含 [id, chunkId, modelName, dimension, vectorStr]
+     * @param vectors 向量数据列表，每项包含 [id, chunkId, knowledgeId, modelName, dimension, vectorStr]
      */
     @Insert("<script>" +
-            "INSERT INTO embedding (id, chunk_id, model_name, dimension, vector, create_time) VALUES " +
+            "INSERT INTO embedding (id, chunk_id, knowledge_id, model_name, dimension, vector, create_time) VALUES " +
             "<foreach collection='vectors' item='v' separator=','>" +
-            "(#{v.id}, #{v.chunkId}, #{v.modelName}, #{v.dimension}, #{v.vector}::vector, NOW())" +
+            "(#{v.id}, #{v.chunkId}, #{v.knowledgeId}, #{v.modelName}, #{v.dimension}, #{v.vector}::vector, NOW())" +
             "</foreach>" +
             " ON CONFLICT DO NOTHING" +
             "</script>")
@@ -154,15 +156,17 @@ public interface EmbeddingMapper extends BaseMapper<Embedding> {
     /**
      * 存储 QA Pair 向量
      *
-     * @param id        主键ID
-     * @param qaPairId  问答对ID
-     * @param modelName 模型名称
-     * @param dimension 向量维度
-     * @param vector    向量字符串 "[0.1,0.2,...]"
+     * @param id          主键ID
+     * @param qaPairId    问答对ID
+     * @param knowledgeId 知识库ID（冗余，供 HNSW pre-filter）
+     * @param modelName   模型名称
+     * @param dimension   向量维度
+     * @param vector      向量字符串 "[0.1,0.2,...]"
      */
-    @Insert("INSERT INTO embedding (id, qa_pair_id, model_name, dimension, vector, create_time) " +
-            "VALUES (#{id}, #{qaPairId}, #{modelName}, #{dimension}, #{vector}::vector, NOW())")
+    @Insert("INSERT INTO embedding (id, qa_pair_id, knowledge_id, model_name, dimension, vector, create_time) " +
+            "VALUES (#{id}, #{qaPairId}, #{knowledgeId}, #{modelName}, #{dimension}, #{vector}::vector, NOW())")
     void insertQaPairVector(@Param("id") Long id, @Param("qaPairId") Long qaPairId,
+                            @Param("knowledgeId") Long knowledgeId,
                             @Param("modelName") String modelName, @Param("dimension") int dimension,
                             @Param("vector") String vector);
 
@@ -179,7 +183,7 @@ public interface EmbeddingMapper extends BaseMapper<Embedding> {
             "1 - (e.vector <=> #{vector}::vector) AS score " +
             "FROM embedding e " +
             "JOIN qa_pair qp ON e.qa_pair_id = qp.id " +
-            "WHERE qp.knowledge_id = #{knowledgeId} AND qp.deleted = 0 AND qp.status = 'active' " +
+            "WHERE e.knowledge_id = #{knowledgeId} AND qp.deleted = 0 AND qp.status = 'active' " +
             "AND (1 - (e.vector <=> #{vector}::vector)) >= #{threshold} " +
             "ORDER BY e.vector <=> #{vector}::vector LIMIT #{topK}")
     List<Map<String, Object>> searchSimilarQaPairs(@Param("vector") String vector,

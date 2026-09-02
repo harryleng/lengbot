@@ -34,6 +34,11 @@ public class Embedding {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long qaPairId;
 
+    @TableField("knowledge_id")
+    @Schema(description = "知识库ID（冗余，供 HNSW pre-filter 使用）")
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long knowledgeId;
+
     @TableField("model_name")
     @Schema(description = "模型名称")
     private String modelName;
