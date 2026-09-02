@@ -37,6 +37,21 @@ public final class ConfigKeys {
         public static final String SUMMARY_TOOL_RESULT_TOKEN_LIMIT = "summaryToolResultTokenLimit";
         /** 最大执行步数（工具调用递归深度上限） */
         public static final String MAX_EXECUTION_STEPS = "maxExecutionSteps";
+        /**
+         * 单轮对话总执行时间预算（毫秒），覆盖全部 LLM 调用与工具执行
+         * <p>与 maxExecutionSteps 并列，谁先触发听谁的——步数上限管不住"每步都很慢"的场景</p>
+         */
+        public static final String MAX_EXECUTION_TIME_MS = "maxExecutionTimeMs";
+        /**
+         * 完全相同参数（工具名 + 入参）连续调用达到该次数即判定死循环，拦截本次执行
+         */
+        public static final String TOOL_LOOP_REPEAT_THRESHOLD = "toolLoopRepeatThreshold";
+        /**
+         * 滑动窗口内同一工具出现次数达到该阈值即给出软告警（覆盖 A→B→C→A→B→C 型周期循环）
+         */
+        public static final String TOOL_LOOP_WINDOW_THRESHOLD = "toolLoopWindowThreshold";
+        /** 同一工具连续失败达到该次数即熔断告警 */
+        public static final String TOOL_FAILURE_THRESHOLD = "toolFailureThreshold";
         /** 模型调用失败重试次数 */
         public static final String MODEL_RETRY_TIMES = "modelRetryTimes";
         /** 提示词自定义变量列表 [{key,label,defaultValue,description}] */
@@ -78,6 +93,17 @@ public final class ConfigKeys {
         public static final String MAX_CONTEXT_MESSAGES = "maxContextMessages";
         /** 最大上下文消息条数默认值 */
         public static final int DEFAULT_MAX_CONTEXT_MESSAGES = 20;
+
+        /** 总执行时间预算默认值：5 分钟 */
+        public static final int DEFAULT_MAX_EXECUTION_TIME_MS = 5 * 60 * 1000;
+        /** 总执行时间预算硬上限：30 分钟（防止配置误填导致单请求长期占用） */
+        public static final int HARD_MAX_EXECUTION_TIME_MS = 30 * 60 * 1000;
+        /** 完全相同参数连续调用判定阈值默认值 */
+        public static final int DEFAULT_TOOL_LOOP_REPEAT_THRESHOLD = 3;
+        /** 滑动窗口内同一工具软告警阈值默认值（窗口大小见 ChatContext.TOOL_WINDOW_SIZE） */
+        public static final int DEFAULT_TOOL_LOOP_WINDOW_THRESHOLD = 5;
+        /** 同一工具连续失败熔断阈值默认值 */
+        public static final int DEFAULT_TOOL_FAILURE_THRESHOLD = 4;
     }
 
     /**

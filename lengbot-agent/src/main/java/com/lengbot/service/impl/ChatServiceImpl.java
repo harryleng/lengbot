@@ -279,7 +279,23 @@ public class ChatServiceImpl implements ChatService {
         Map<String, ToolBase> toolCallbackMap = ctx.getToolCallbackMap();
         Agent agent = ctx.getAgent();
 
+        long budgetMs = resolveTotalExecutionBudgetMs(ctx.getConfigMap());
+        // 走完整轮 for 才算"步数用尽"；ask_user 中断与预算耗尽属正常收尾，不追加提示
+        boolean stepLimitReached = true;
+
         for (int depth = 0; depth < maxSteps; depth++) {
+            // 总执行时间预算：与步数上限并列，谁先到听谁的
+            // （步数上限管"转多少圈"，管不住"每圈都很慢"，故需预算兜底）
+            ctx.ensureExecutionDeadline(budgetMs);
+            if (ctx.isExecutionBudgetExhausted()) {
+                log.warn("[Chat][Trace] 执行时间已达预算上限({}ms)，非流式路径停止工具循环", budgetMs);
+                if (ctx.markExecutionBudgetNotified()) {
+                    fullReply.append("\n[执行时间已达上限，已返回当前进展]");
+                }
+                stepLimitReached = false;
+                break;
+            }
+
             ChatResponse response = callModelWithRetry(ctx, retryTimes);
             if (response == null) {
                 return fullReply.toString();
@@ -296,7 +312,7 @@ public class ChatServiceImpl implements ChatService {
                     ctx.appendTraceCompleteReply(text);
                 }
                 // 如果 metadata 没有 reasoningContent，尝试解析 inline thinking 标签
-                if (ctx.getReasoningContent().length() == 0 && text != null && !text.isEmpty()) {
+                if (ctx.getReasoningContent().isEmpty() && text != null && !text.isEmpty()) {
                     InlineThinkingStreamParser.ParseResult parsed = InlineThinkingStreamParser.parseComplete(text);
                     if (!parsed.reasoningDelta().isEmpty()) {
                         ctx.appendReasoningContent(parsed.reasoningDelta());
@@ -318,24 +334,19 @@ public class ChatServiceImpl implements ChatService {
             int toolContentOffset = resolveToolBlockOffset(ctx);
 
             // 目前非流式只处理第一个工具调用（简化处理）
-            ToolUseBlock firstTool = toolCalls.get(0);
+            ToolUseBlock firstTool = toolCalls.getFirst();
             String toolName = firstTool.getName();
             String toolArgs = toolInputToString(firstTool.getInput());
             ctx.getToolCallCountHolder()[0]++;
-
-            String safeArgs = toolArgs;
-
             // 记录工具调用开始（SubAgent 委派走专用 subagent_call 事件）
-            long toolCallId = appendToolCallStart(ctx, toolEventsList, null, toolName, safeArgs, toolContentOffset);
-
+            long toolCallId = appendToolCallStart(ctx, toolEventsList, null, toolName, toolArgs, toolContentOffset);
             // 执行工具
-            String toolResult = executeToolCallback(toolCallbackMap, toolName, safeArgs, agent.getId(), ctx.getSessionId(), requestId, null, ctx);
-
+            String toolResult = executeToolCallback(toolCallbackMap, toolName, toolArgs, agent.getId(), ctx.getSessionId(), requestId, null, ctx);
             // 暂存工具调用记录（复用 toolCallId 作为主键，前端按 id 拉取完整结果）
             ToolCall toolCallLog = new ToolCall();
             toolCallLog.setId(toolCallId);
             toolCallLog.setToolName(toolName);
-            toolCallLog.setToolInput(safeArgs);
+            toolCallLog.setToolInput(toolArgs);
             toolCallLog.setToolOutput(toolResult);
             toolCallLog.setStatus(ToolResultPrefixes.isError(toolResult) ? "error" : "success");
             toolCallLog.setErrorMessage(ToolResultPrefixes.isError(toolResult) ? toolResult : null);
@@ -350,7 +361,7 @@ public class ChatServiceImpl implements ChatService {
             }
 
             // 记录工具结果（SubAgent 委派走 subagent_result）
-            appendToolCallResult(ctx, toolEventsList, null, toolName, safeArgs, toolResult, toolContentOffset, toolCallId);
+            appendToolCallResult(ctx, toolEventsList, null, toolName, toolArgs, toolResult, toolContentOffset, toolCallId);
 
             toolResponses.add(ToolResultBlock.builder()
                     .id(firstTool.getId())
@@ -367,8 +378,15 @@ public class ChatServiceImpl implements ChatService {
                     .anyMatch(r -> AskUserTool.TOOL_NAME.equals(r.getName()));
             if (hasAskUser) {
                 log.info("[Chat][Trace] ask_user 工具调用，中断工具循环，等待用户回复");
+                stepLimitReached = false;
                 break;
             }
+        }
+
+        // 对齐流式路径：步数耗尽时给出明确提示，避免用户收到空回复却不知道发生了什么
+        if (stepLimitReached) {
+            log.warn("[Chat][Trace] 工具调用轮次达上限({})，非流式路径", maxSteps);
+            fullReply.append("\n[工具调用轮次已达上限，请简化问题后重试]");
         }
 
         return fullReply.toString();
@@ -1199,6 +1217,26 @@ public class ChatServiceImpl implements ChatService {
             final ToolCallParam effectiveParam = ToolCallParam.builder(param)
                     .input(parseToolArgsToMap(argsForCall)).build();
 
+            // 死循环防护（与 legacy executeToolCallback 对齐）：
+            // ① 完全相同参数连续调用达阈值 → 直接拦截，跳过真实执行
+            String loopBlocked = guardToolLoopBeforeExecute(ctx, toolName, effectiveArgs);
+            if (loopBlocked != null) {
+                emitToolResultHarness(ctx, toolEventsList, eventSink, toolName, argsForCall,
+                        loopBlocked, contentOffset, toolCallId);
+                return Mono.just(textToolResultBlock(loopBlocked, ToolResultState.ERROR));
+            }
+            // ② 总执行时间预算耗尽 → 标记中断，后续工具调用一律短路，促使 HarnessAgent 尽快收尾
+            ctx.ensureExecutionDeadline(resolveTotalExecutionBudgetMs(ctx.getConfigMap()));
+            if (ctx.isExecutionBudgetExhausted()) {
+                log.warn("[Chat][Harness][Tool] 执行时间已达预算上限，中断工具执行: name={}", toolName);
+                ctx.requestAbort("执行时间已达上限");
+                String budgetExceeded = ToolResultPrefixes.failureJson(
+                        "执行时间已达上限，后续工具调用已被中断。请立即基于已有信息直接回答用户。");
+                emitToolResultHarness(ctx, toolEventsList, eventSink, toolName, argsForCall,
+                        budgetExceeded, contentOffset, toolCallId);
+                return Mono.just(textToolResultBlock(budgetExceeded, ToolResultState.ERROR));
+            }
+
             return Mono.fromFuture(
                     CompletableFuture.supplyAsync(() -> {
                         if (ctx.isAborted()) {
@@ -1215,6 +1253,9 @@ public class ChatServiceImpl implements ChatService {
                     }, lengBotExecutor).orTimeout(timeoutSeconds, TimeUnit.SECONDS)
             ).map(result -> {
                 boolean isError = ToolResultPrefixes.isError(result);
+                // 死循环防护：连续失败统计 + 软告警。
+                // 只作用于回灌模型的结果，落库与前端事件仍用原始 result（告警是提示，不是工具真实输出）
+                String resultForModel = guardToolLoopAfterExecute(ctx, toolName, result);
                 // ToolCall 记录（供 buildDoneEvent 批量落库）。toolCallId=0 为委派类工具（delegate_to_subagent），
                 // appendToolCallStart 对委派返回 0 表示不入 tool_calls 表；若建 id=0 记录，多次委派会重复键。
                 if (toolCallId > 0) {
@@ -1235,17 +1276,19 @@ public class ChatServiceImpl implements ChatService {
                 }
                 // 工具结果：emit tool_result（对齐 appendToolCallResult，含 todos_updated/subagent 路由）
                 emitToolResultHarness(ctx, toolEventsList, eventSink, toolName, argsForCall, result, contentOffset, toolCallId);
-                return textToolResultBlock(result, isError ? ToolResultState.ERROR : ToolResultState.SUCCESS);
+                return textToolResultBlock(resultForModel, isError ? ToolResultState.ERROR : ToolResultState.SUCCESS);
             }).onErrorResume(TimeoutException.class, e -> {
                 log.error("[Chat][Harness][Tool] 执行超时: name={}, timeout={}s", toolName, timeoutSeconds);
                 String fail = ToolResultPrefixes.failureJson("工具执行超时（" + timeoutSeconds + "秒），请稍后重试");
                 emitToolResultHarness(ctx, toolEventsList, eventSink, toolName, argsForCall, fail, contentOffset, toolCallId);
-                return Mono.just(textToolResultBlock(fail, ToolResultState.ERROR));
+                return Mono.just(textToolResultBlock(
+                        guardToolLoopAfterExecute(ctx, toolName, fail), ToolResultState.ERROR));
             }).onErrorResume(e -> {
                 log.error("[Chat][Harness][Tool] 执行异常: name={}", toolName, e);
                 String fail = ToolResultPrefixes.failureJson(ToolResultPrefixes.FAILURE + ": " + e.getMessage());
                 emitToolResultHarness(ctx, toolEventsList, eventSink, toolName, argsForCall, fail, contentOffset, toolCallId);
-                return Mono.just(textToolResultBlock(fail, ToolResultState.ERROR));
+                return Mono.just(textToolResultBlock(
+                        guardToolLoopAfterExecute(ctx, toolName, fail), ToolResultState.ERROR));
             });
         }
     }
@@ -1278,6 +1321,14 @@ public class ChatServiceImpl implements ChatService {
         if (depth >= maxSteps) {
             log.warn("[Chat][Trace] 工具调用递归深度达到上限({})，停止循环", depth);
             return Flux.just("\n[工具调用轮次已达上限，请简化问题后重试]");
+        }
+        // 总执行时间预算：与步数上限并列，谁先到听谁的
+        // （步数上限管"转多少圈"，管不住"每圈都很慢"，故需预算兜底）
+        long totalBudgetMs = resolveTotalExecutionBudgetMs(ctx.getConfigMap());
+        ctx.ensureExecutionDeadline(totalBudgetMs);
+        if (ctx.isExecutionBudgetExhausted()) {
+            log.warn("[Chat][Trace] 执行时间已达预算上限({}ms)，停止工具循环: depth={}", totalBudgetMs, depth);
+            return Flux.just("\n[执行时间已达上限，已返回当前进展]");
         }
 
         Model chatModel = ctx.getChatModel();
@@ -1460,9 +1511,8 @@ public class ChatServiceImpl implements ChatService {
                         String toolArgs = toolInputToString(firstTool.getInput());
                         toolCallCountHolder[0]++;
 
-                        String safeArgs = toolArgs;
-                        String callArgs = toolArgsSanitizer.forChatCall(safeArgs);
-                        long toolCallId = appendToolCallStart(ctx, toolEventsList, statusFluxes, toolName, safeArgs, toolContentOffset);
+                        String callArgs = toolArgsSanitizer.forChatCall(toolArgs);
+                        long toolCallId = appendToolCallStart(ctx, toolEventsList, statusFluxes, toolName, toolArgs, toolContentOffset);
 
                         long tToolStart = System.currentTimeMillis();
                         // 流式模式：绑定 Sink 使工具内部 emit() 实时推送给前端
@@ -1479,7 +1529,7 @@ public class ChatServiceImpl implements ChatService {
 
                         spans.add(LlmTraceSpanDTO.of("tool_" + toolCallCountHolder[0], llmSpanId, "tool_execute",
                                 tToolStart, tToolEnd - tToolStart, "OK",
-                                buildToolTraceAttributes(toolName, safeArgs, toolResult)));
+                                buildToolTraceAttributes(toolName, toolArgs, toolResult)));
                         appendSubAgentTraceSpans(spans, "tool_" + toolCallCountHolder[0], toolName, toolResult, tToolStart);
 
                         if ("query_knowledge".equals(toolName)) {
@@ -1491,13 +1541,13 @@ public class ChatServiceImpl implements ChatService {
                         ToolCall toolCallLog = new ToolCall();
                         toolCallLog.setId(toolCallId);
                         toolCallLog.setToolName(toolName);
-                        toolCallLog.setToolInput(safeArgs);
+                        toolCallLog.setToolInput(toolArgs);
                         toolCallLog.setToolOutput(toolResult);
                         toolCallLog.setStatus(ToolResultPrefixes.isError(toolResult) ? "error" : "success");
                         toolCallLog.setErrorMessage(ToolResultPrefixes.isError(toolResult) ? toolResult : null);
                         ctx.getPendingToolCalls().add(toolCallLog);
 
-                        appendToolCallResult(ctx, toolEventsList, statusFluxes, toolName, safeArgs, toolResult, toolContentOffset, toolCallId);
+                        appendToolCallResult(ctx, toolEventsList, statusFluxes, toolName, toolArgs, toolResult, toolContentOffset, toolCallId);
                         toolResponses.add(ToolResultBlock.builder()
                                 .id(firstTool.getId())
                                 .name(toolName)
@@ -1561,7 +1611,6 @@ public class ChatServiceImpl implements ChatService {
      *
      * @param ctx       对话上下文
      * @param chatModel 模型实例
-     * @param prompt    模型输入
      * @param depth     工具调用轮次
      * @param eventSink SSE 事件通道
      * @return 模型流式响应
@@ -1631,6 +1680,14 @@ public class ChatServiceImpl implements ChatService {
         if (depth >= maxSteps) {
             log.warn("[Chat][Trace] 工具调用递归深度达到上限({})，停止循环", depth);
             return Flux.just("\n[工具调用轮次已达上限，请简化问题后重试]");
+        }
+        // 总执行时间预算：与步数上限并列，谁先到听谁的
+        // （步数上限管"转多少圈"，管不住"每圈都很慢"，故需预算兜底）
+        long totalBudgetMs = resolveTotalExecutionBudgetMs(ctx.getConfigMap());
+        ctx.ensureExecutionDeadline(totalBudgetMs);
+        if (ctx.isExecutionBudgetExhausted()) {
+            log.warn("[Chat][Trace] 执行时间已达预算上限({}ms)，停止工具循环: depth={}", totalBudgetMs, depth);
+            return Flux.just("\n[执行时间已达上限，已返回当前进展]");
         }
 
         Model chatModel = ctx.getChatModel();
@@ -1883,7 +1940,116 @@ public class ChatServiceImpl implements ChatService {
         ChatMessageContextUtil.trimToolCallContext(messages, MAX_TOOL_CONTEXT_CHARS, TOOL_ROUNDS_TO_KEEP);
     }
 
+    /**
+     * 工具执行入口（带死循环防护）
+     * <p>在原执行逻辑外包一层：执行前做循环检测（命中则直接拦截，跳过真实执行），
+     * 执行后统一拼接软告警（周期循环提示 / 连续失败熔断提示），
+     * 这样超时、异常、工具不存在等所有返回路径都能带上告警，不会漏</p>
+     */
     private String executeToolCallback(Map<String, ToolBase> toolCallbackMap, String toolName,
+                                       String callArgs, Long agentId, Long sessionId, String requestId,
+                                       Sinks.Many<String> eventSink, ChatContext chatContext) {
+        // ① 执行前：死循环检测（命中直接返回，不再浪费一次工具调用与 token）
+        if (chatContext != null) {
+            String blockedResult = guardToolLoopBeforeExecute(chatContext, toolName, callArgs);
+            if (blockedResult != null) {
+                return blockedResult;
+            }
+        }
+        String result = doExecuteToolCallback(toolCallbackMap, toolName, callArgs, agentId,
+                sessionId, requestId, eventSink, chatContext);
+        // ② 执行后：连续失败统计 + 软告警前置
+        if (chatContext != null && result != null) {
+            result = guardToolLoopAfterExecute(chatContext, toolName, result);
+        }
+        return result;
+    }
+
+    /**
+     * 工具执行前的死循环检测
+     *
+     * @return 非 null 表示判定为死循环，该返回值直接作为工具结果回灌模型（跳过执行）
+     */
+    // synchronized：HarnessAgent 可能并行调用多个工具，多个 callAsync 会并发读写
+    // ctx 上的指纹/窗口/失败计数（ArrayDeque 非线程安全）。方法体极短且锁内不执行工具，开销可忽略。
+    private synchronized String guardToolLoopBeforeExecute(ChatContext ctx, String toolName, String callArgs) {
+        Map<String, Object> configMap = ctx.getConfigMap();
+        int repeatThreshold = resolveToolLoopRepeatThreshold(configMap);
+        int windowThreshold = resolveToolLoopWindowThreshold(configMap);
+
+        // 1) 完全相同参数连续重复：确定性最强，直接拦截
+        String fingerprint = toolName + "|" + (callArgs == null ? "" : callArgs);
+        if (fingerprint.equals(ctx.getLastToolFingerprint())) {
+            ctx.setToolRepeatCount(ctx.getToolRepeatCount() + 1);
+        } else {
+            ctx.setLastToolFingerprint(fingerprint);
+            ctx.setToolRepeatCount(1);
+        }
+        ctx.recordToolWindow(toolName);
+
+        if (ctx.getToolRepeatCount() >= repeatThreshold) {
+            log.warn("[Chat] 检测到工具死循环（完全相同参数连续调用）: name={}, count={}, argsLen={}",
+                    toolName, ctx.getToolRepeatCount(), callArgs != null ? callArgs.length() : 0);
+            // 重置计数：给模型一次"改过自新"的机会，而不是直接掐死整轮对话
+            ctx.setToolRepeatCount(0);
+            return ToolResultPrefixes.failureJson(
+                    "你对 " + toolName + " 用完全相同的参数连续调用了 " + repeatThreshold + " 次，"
+                            + "本次调用已被系统拦截（再执行结果也不会有任何变化）。"
+                            + "请立即停止重试：换一个工具、调整参数，或改用完全不同的思路。"
+                            + "若已有信息足够，请直接基于现有内容回答用户，并说明你做了什么、卡在哪里。");
+        }
+
+        // 2) 滑动窗口内同一工具高频出现：覆盖 A→B→C→A→B→C 型周期循环，仅软告警不拦截
+        int inWindow = ctx.countInToolWindow(toolName);
+        if (inWindow >= windowThreshold) {
+            log.warn("[Chat] 检测到工具周期循环: name={}, 最近{}次调用中出现{}次",
+                    toolName, ChatContext.TOOL_WINDOW_SIZE, inWindow);
+            ctx.setPendingSoftLoopWarning(
+                    "[系统提示] 最近几次调用中 " + toolName + " 已被调用 " + inWindow + " 次，你可能正在循环重试。"
+                            + "请改用其他工具或调整策略；若已有信息足够，请直接基于现有内容回答用户。");
+        }
+        return null;
+    }
+
+    /**
+     * 工具执行后的连续失败统计与软告警拼接
+     *
+     * @return 已拼接告警的工具结果（无告警则原样返回）
+     */
+    private synchronized String guardToolLoopAfterExecute(ChatContext ctx, String toolName, String result) {
+        int failureThreshold = resolveToolFailureThreshold(ctx.getConfigMap());
+        if (ToolResultPrefixes.isError(result)) {
+            if (toolName.equals(ctx.getLastFailedToolName())) {
+                ctx.setConsecutiveToolFailures(ctx.getConsecutiveToolFailures() + 1);
+            } else {
+                ctx.setLastFailedToolName(toolName);
+                ctx.setConsecutiveToolFailures(1);
+            }
+        } else {
+            ctx.setConsecutiveToolFailures(0);
+            ctx.setLastFailedToolName(null);
+        }
+
+        List<String> warnings = new ArrayList<>(2);
+        String softLoopWarning = ctx.consumePendingSoftLoopWarning();
+        if (softLoopWarning != null) {
+            warnings.add(softLoopWarning);
+        }
+        if (ctx.getConsecutiveToolFailures() >= failureThreshold) {
+            log.warn("[Chat] 工具连续失败达熔断阈值: name={}, count={}", toolName, ctx.getConsecutiveToolFailures());
+            // 重置：熔断是"提醒"而非"终止"，避免后续每步都重复告警
+            ctx.setConsecutiveToolFailures(0);
+            warnings.add("[系统提示] 工具 " + toolName + " 已连续失败 " + failureThreshold + " 次。"
+                    + "请不要再用相同方式重试，改用其他工具或换个思路；"
+                    + "若已有信息足够，请直接基于现有内容回答用户并说明卡点。");
+        }
+        if (warnings.isEmpty()) {
+            return result;
+        }
+        return String.join("\n\n", warnings) + "\n\n" + result;
+    }
+
+    private String doExecuteToolCallback(Map<String, ToolBase> toolCallbackMap, String toolName,
                                        String callArgs, Long agentId, Long sessionId, String requestId,
                                        Sinks.Many<String> eventSink, ChatContext chatContext) {
         ToolBase callback = toolCallbackMap.get(toolName);
@@ -2156,6 +2322,79 @@ public class ChatServiceImpl implements ChatService {
             try { return Math.max(1, Math.min(200, Integer.parseInt(val.toString()))); } catch (Exception ignored) {}
         }
         return 20;
+    }
+
+    /**
+     * 解析单轮对话总执行时间预算（毫秒）。
+     * <p>与 maxExecutionSteps 互补：步数上限管的是"转多少圈"，预算管的是"转多久"。</p>
+     */
+    private long resolveTotalExecutionBudgetMs(Map<String, Object> configMap) {
+        long val = -1;
+        if (configMap != null) {
+            Object raw = configMap.get(ConfigKeys.Agent.MAX_EXECUTION_TIME_MS);
+            if (raw instanceof Number n) {
+                val = n.longValue();
+            } else if (raw != null) {
+                try {
+                    val = Long.parseLong(raw.toString());
+                } catch (Exception ignored) {
+                    // 配置值非法时回退默认值
+                }
+            }
+        }
+        if (val <= 0) {
+            return ConfigKeys.Agent.DEFAULT_MAX_EXECUTION_TIME_MS;
+        }
+        // 硬上限兜底：防止配置误填（如把秒当毫秒、或填了超大值）导致单请求长期占用
+        return Math.min(val, ConfigKeys.Agent.HARD_MAX_EXECUTION_TIME_MS);
+    }
+
+    /** 完全相同参数连续调用判定阈值 */
+    private int resolveToolLoopRepeatThreshold(Map<String, Object> configMap) {
+        int def = ConfigKeys.Agent.DEFAULT_TOOL_LOOP_REPEAT_THRESHOLD;
+        if (configMap == null) return def;
+        Object raw = configMap.get(ConfigKeys.Agent.TOOL_LOOP_REPEAT_THRESHOLD);
+        if (raw instanceof Number n) return Math.max(2, Math.min(10, n.intValue()));
+        if (raw != null) {
+            try {
+                return Math.max(2, Math.min(10, Integer.parseInt(raw.toString())));
+            } catch (Exception ignored) {
+                // 配置值非法时回退默认值
+            }
+        }
+        return def;
+    }
+
+    /** 滑动窗口内同一工具软告警阈值 */
+    private int resolveToolLoopWindowThreshold(Map<String, Object> configMap) {
+        int def = ConfigKeys.Agent.DEFAULT_TOOL_LOOP_WINDOW_THRESHOLD;
+        if (configMap == null) return def;
+        Object raw = configMap.get(ConfigKeys.Agent.TOOL_LOOP_WINDOW_THRESHOLD);
+        if (raw instanceof Number n) return Math.max(2, Math.min(ChatContext.TOOL_WINDOW_SIZE, n.intValue()));
+        if (raw != null) {
+            try {
+                return Math.max(2, Math.min(ChatContext.TOOL_WINDOW_SIZE, Integer.parseInt(raw.toString())));
+            } catch (Exception ignored) {
+                // 配置值非法时回退默认值
+            }
+        }
+        return def;
+    }
+
+    /** 同一工具连续失败熔断阈值 */
+    private int resolveToolFailureThreshold(Map<String, Object> configMap) {
+        int def = ConfigKeys.Agent.DEFAULT_TOOL_FAILURE_THRESHOLD;
+        if (configMap == null) return def;
+        Object raw = configMap.get(ConfigKeys.Agent.TOOL_FAILURE_THRESHOLD);
+        if (raw instanceof Number n) return Math.max(2, Math.min(10, n.intValue()));
+        if (raw != null) {
+            try {
+                return Math.max(2, Math.min(10, Integer.parseInt(raw.toString())));
+            } catch (Exception ignored) {
+                // 配置值非法时回退默认值
+            }
+        }
+        return def;
     }
 
     private int resolveModelRetryTimes(Map<String, Object> configMap) {

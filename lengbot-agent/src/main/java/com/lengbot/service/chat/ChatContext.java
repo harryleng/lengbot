@@ -10,7 +10,9 @@ import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.ToolBase;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -176,6 +178,106 @@ public class ChatContext {
 
     /** 待持久化的工具调用记录（assistant 消息保存后批量写入，关联 messageId） */
     private List<ToolCall> pendingToolCalls;
+
+    // ===== 工具死循环防护 =====
+    /** 滑动窗口大小：统计最近多少次工具调用中的同名工具频次 */
+    public static final int TOOL_WINDOW_SIZE = 8;
+
+    /** 上一次工具调用指纹（toolName|args），用于识别"完全相同参数连续重试" */
+    private String lastToolFingerprint;
+    /** 相同指纹连续出现次数 */
+    private int toolRepeatCount;
+    /** 最近 {@link #TOOL_WINDOW_SIZE} 次工具调用的名称（识别 A→B→C→A→B→C 型周期循环） */
+    private final Deque<String> recentToolNames = new ArrayDeque<>();
+    /** 待回灌的软告警（周期循环提示，由工具结果前置拼接到模型） */
+    private String pendingSoftLoopWarning;
+    /** 同一工具连续失败次数（工具名切换即重置） */
+    private int consecutiveToolFailures;
+    /** 上一次失败的工具名 */
+    private String lastFailedToolName;
+    /** 总执行时间预算截止时间戳（毫秒），惰性初始化 */
+    private long executionDeadlineMillis;
+    /** 预算耗尽提示是否已追加（避免每步重复追加同一句） */
+    private boolean executionBudgetNotified;
+
+    /**
+     * 记录一次工具调用到滑动窗口
+     *
+     * @param toolName 工具名
+     */
+    public void recordToolWindow(String toolName) {
+        if (toolName == null) {
+            return;
+        }
+        recentToolNames.addLast(toolName);
+        while (recentToolNames.size() > TOOL_WINDOW_SIZE) {
+            recentToolNames.pollFirst();
+        }
+    }
+
+    /**
+     * 统计滑动窗口内某工具出现的次数
+     *
+     * @param toolName 工具名
+     * @return 窗口内出现次数
+     */
+    public int countInToolWindow(String toolName) {
+        if (toolName == null) {
+            return 0;
+        }
+        int count = 0;
+        for (String name : recentToolNames) {
+            if (toolName.equals(name)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 初始化总执行时间预算（仅首次生效）
+     *
+     * @param budgetMs 预算毫秒数
+     */
+    public void ensureExecutionDeadline(long budgetMs) {
+        if (executionDeadlineMillis <= 0) {
+            long base = startTime > 0 ? startTime : System.currentTimeMillis();
+            executionDeadlineMillis = base + Math.max(1, budgetMs);
+        }
+    }
+
+    /**
+     * 判断总执行时间预算是否已耗尽
+     *
+     * @return 已耗尽返回 true
+     */
+    public boolean isExecutionBudgetExhausted() {
+        return executionDeadlineMillis > 0 && System.currentTimeMillis() > executionDeadlineMillis;
+    }
+
+    /**
+     * 抢占"预算耗尽"提示的追加权，保证整轮只追加一次
+     *
+     * @return 抢到返回 true（调用方应追加提示），已追加过返回 false
+     */
+    public boolean markExecutionBudgetNotified() {
+        if (executionBudgetNotified) {
+            return false;
+        }
+        executionBudgetNotified = true;
+        return true;
+    }
+
+    /**
+     * 取出并清空待回灌的软告警
+     *
+     * @return 软告警文本，无则返回 null
+     */
+    public String consumePendingSoftLoopWarning() {
+        String warning = pendingSoftLoopWarning;
+        pendingSoftLoopWarning = null;
+        return warning;
+    }
 
     // ===== 子代理流式事件队列 =====
     private Queue<SubAgentEvent> subAgentEventQueue;
