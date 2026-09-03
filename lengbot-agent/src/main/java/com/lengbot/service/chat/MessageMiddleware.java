@@ -3,55 +3,37 @@ package com.lengbot.service.chat;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lengbot.common.BizException;
 import com.lengbot.constant.ChatAttachmentConstants;
 import com.lengbot.constant.ConfigKeys;
-import com.lengbot.common.BizException;
+import com.lengbot.dto.AgentChatCapabilitiesDTO;
 import com.lengbot.dto.ChatAttachmentDTO;
 import com.lengbot.dto.ChatMentionDTO;
-import com.lengbot.dto.ChatMentionDTO;
 import com.lengbot.dto.ChatRequestDTO;
-import com.lengbot.vo.UserPreferenceVO;
-import com.lengbot.enums.ErrorCode;
-import com.lengbot.dto.AgentChatCapabilitiesDTO;
-import com.lengbot.util.AgentChatCapabilitiesUtil;
-import com.lengbot.util.ChatDocumentMessageUtil;
-import com.lengbot.util.ChatMessageMediaUtil;
-import com.lengbot.util.LlmTraceContext;
-import com.lengbot.util.MinioUtil;
-import com.lengbot.util.PromptTemplateUtil;
 import com.lengbot.entity.Agent;
 import com.lengbot.entity.Message;
 import com.lengbot.enums.ContentType;
+import com.lengbot.enums.ErrorCode;
 import com.lengbot.enums.MessageRole;
 import com.lengbot.enums.MessageType;
 import com.lengbot.mapper.MessageMapper;
 import com.lengbot.model.ModelFactory;
 import com.lengbot.model.ProviderResolver;
-import com.lengbot.service.ChatAttachmentParsedService;
-import com.lengbot.service.AgentService;
-import com.lengbot.service.ChatSessionService;
-import com.lengbot.service.SessionTodoService;
-import com.lengbot.service.UserMemoryService;
-import com.lengbot.service.WorkspaceMemoryService;
-import com.lengbot.service.UserPreferenceService;
+import com.lengbot.service.*;
+import com.lengbot.util.*;
 import com.lengbot.vo.TodoItemVO;
+import com.lengbot.vo.UserPreferenceVO;
+import io.agentscope.core.message.Msg;
+import io.agentscope.core.model.ChatResponse;
+import io.agentscope.core.model.Model;
+import io.agentscope.core.tool.ToolBase;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import io.agentscope.core.model.Model;
-import io.agentscope.core.model.ChatResponse;
-import io.agentscope.core.message.Msg;
-import io.agentscope.core.tool.ToolBase;
-import com.lengbot.util.Msgs;
-import com.lengbot.util.ModelCalls;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * 消息构建中间件：保存用户消息、构建消息列表（含系统提示词+工具引导+历史+摘要）
@@ -896,7 +878,7 @@ public class MessageMiddleware implements ChatMiddleware {
         int keepRecent = 6;
         Object keepVal = configMap.get(ConfigKeys.Agent.SUMMARY_KEEP_MESSAGES);
         if (keepVal instanceof Number kn) {
-            keepRecent = Math.max(1, Math.min(kn.intValue(), 50));
+            keepRecent = Math.clamp(kn.intValue(), 1, 50);
         }
 
         if (history.size() <= keepRecent + 2) {
@@ -918,7 +900,7 @@ public class MessageMiddleware implements ChatMiddleware {
             int toolResultTokenLimit = 500;
             Object tokenLimitVal = configMap.get(ConfigKeys.Agent.SUMMARY_TOOL_RESULT_TOKEN_LIMIT);
             if (tokenLimitVal instanceof Number tln) {
-                toolResultTokenLimit = Math.max(50, Math.min(tln.intValue(), 5000));
+                toolResultTokenLimit = Math.clamp(tln.intValue(), 50, 5000);
             }
             int toolResultCharLimit = toolResultTokenLimit * 4;
 

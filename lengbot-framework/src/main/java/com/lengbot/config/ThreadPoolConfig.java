@@ -25,9 +25,9 @@ public class ThreadPoolConfig {
     @Bean(name = "lengBotExecutor", destroyMethod = "shutdown")
     public ThreadPoolTaskExecutor lengBotExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(8);
-        executor.setMaxPoolSize(32);
-        executor.setQueueCapacity(256);
+        executor.setCorePoolSize(16);
+        executor.setMaxPoolSize(64);
+        executor.setQueueCapacity(512);
         executor.setThreadNamePrefix("lengbot-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         executor.setWaitForTasksToCompleteOnShutdown(true);
@@ -43,9 +43,9 @@ public class ThreadPoolConfig {
     @Bean(name = "subAgentExecutor", destroyMethod = "shutdown")
     public ThreadPoolTaskExecutor subAgentExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(5);
-        executor.setMaxPoolSize(10);
-        executor.setQueueCapacity(100);
+        executor.setCorePoolSize(8);
+        executor.setMaxPoolSize(20);
+        executor.setQueueCapacity(200);
         executor.setThreadNamePrefix("lengbot-subagent-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         executor.setWaitForTasksToCompleteOnShutdown(true);
