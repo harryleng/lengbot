@@ -615,7 +615,9 @@ public class SubAgentTaskServiceImpl implements SubAgentTaskService {
 
     private String validate(DelegationInput input, Map<String, SubAgentDefinition> definitions) {
         if (!List.of("sync", "parallel").contains(input.mode())) return "mode 仅支持 sync、parallel；子智能体必须等待任务完成后返回结果";
-        if (!List.of("return_all", "summarize").contains(input.aggregation())) return "aggregation 仅支持 return_all、summarize";
+        // 仅支持 return_all：框架不做自动汇总，各任务 reply 原样返回，由主 Agent 自行阅读综合。
+        if (!"return_all".equals(input.aggregation()))
+            return "aggregation 仅支持 return_all：子任务结果原样返回，合并与总结请由主 Agent 自行完成";
         for (DelegatedTask task : input.tasks()) {
             if (task.subagentName() == null || task.subagentName().isBlank()) return "缺少 subagent_name 参数";
             if (task.task() == null || task.task().isBlank()) return "缺少 task 参数";
