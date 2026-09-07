@@ -26,8 +26,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
@@ -438,6 +440,71 @@ public class SubAgentTaskServiceImpl implements SubAgentTaskService {
                 : completed + failed + cancelled >= tasks.size() && !tasks.isEmpty() ? (failed > 0 ? "failed" : "completed")
                 : running > 0 ? "running" : "pending");
         repository.saveBatch(batch);
+    }
+
+    /**
+     * 回收孤儿任务：把超时未终结的 run 判为崩溃残留并置为 failed，再对受影响批次全量重算。
+     *
+     * <p>刻意<b>不做自动重试</b>：子 Agent 可能已经产生副作用（工具已执行、token 已计费），
+     * 而父对话上下文随进程一起丢失，重试出来的结果没有任何接收方，只会重复扣费。
+     * 这里的目标是把状态机推到终态，让批次计数收敛、前端协作面板不再转圈。</p>
+     */
+    @Override
+    public int reapOrphanRuns(int timeoutMinutes, int batchSize) {
+        if (timeoutMinutes <= 0 || batchSize <= 0) {
+            return 0;
+        }
+        List<SubAgentRun> orphans;
+        try {
+            orphans = repository.findOrphanRuns(LocalDateTime.now().minusMinutes(timeoutMinutes), batchSize);
+        } catch (Exception e) {
+            log.warn("[SubAgentReap] 查询孤儿任务失败，本轮跳过: {}", e.getMessage());
+            return 0;
+        }
+        if (orphans == null || orphans.isEmpty()) {
+            return 0;
+        }
+
+        Set<String> touchedBatches = new LinkedHashSet<>();
+        int reaped = 0;
+        for (SubAgentRun run : orphans) {
+            String reason = String.format(
+                    "任务超过 %d 分钟未推进（update_time=%s），判定为进程崩溃残留，已自动置为失败",
+                    timeoutMinutes, run.getUpdateTime());
+            boolean updated;
+            try {
+                // CAS：仅当仍处未终结态才推进，避免覆盖 worker 最后一刻写入的终态
+                updated = repository.casUpdateStatus(run.getId(), List.of("pending", "running"),
+                        "failed", reason, LocalDateTime.now());
+            } catch (Exception e) {
+                log.warn("[SubAgentReap] 推进状态失败, runId={}, err={}", run.getId(), e.getMessage());
+                continue;
+            }
+            if (!updated) {
+                continue;
+            }
+            reaped++;
+            if (run.getBatchId() != null && !run.getBatchId().isBlank()) {
+                touchedBatches.add(run.getBatchId());
+            }
+            log.warn("[SubAgentReap] 回收孤儿, runId={}, batchId={}, subagent={}, updateTime={}",
+                    run.getId(), run.getBatchId(), run.getSubagentName(), run.getUpdateTime());
+        }
+
+        // refreshBatch 是按当前全部任务重新计数（幂等），顺带修正并发下的计数漂移
+        for (String batchId : touchedBatches) {
+            try {
+                refreshBatch(batchId);
+            } catch (Exception e) {
+                log.warn("[SubAgentReap] 批次重算失败, batchId={}, err={}", batchId, e.getMessage());
+            }
+        }
+
+        if (reaped > 0) {
+            log.info("[SubAgentReap] 本轮完成, candidates={}, reaped={}, batches={}",
+                    orphans.size(), reaped, touchedBatches.size());
+        }
+        return reaped;
     }
 
     private void publishBatchStart(RuntimeContext context, String batchId, DelegationInput input,
