@@ -1,12 +1,15 @@
 package com.lengbot.service.sandbox;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lengbot.dto.CodeExecResultDTO;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.*;
 import java.util.regex.Pattern;
@@ -52,6 +55,15 @@ public class PythonEngine implements CodeEngine {
 
     /** Python 3 解释器候选路径 */
     private static final String[] PYTHON_CANDIDATES = {"python3", "python"};
+
+    /** 容器中无 ObjectMapper Bean 时的兜底实例（仅用于序列化 params） */
+    private static final ObjectMapper FALLBACK_MAPPER = new ObjectMapper();
+
+    private final ObjectMapper objectMapper;
+
+    public PythonEngine(@Autowired(required = false) ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper != null ? objectMapper : FALLBACK_MAPPER;
+    }
 
     @Override
     public String language() {
@@ -218,21 +230,18 @@ public class PythonEngine implements CodeEngine {
     /**
      * 将用户代码包装为可执行的 Python 脚本
      * <p>注入 params 变量，捕获 main() 返回值，通过标记输出。</p>
+     * <p><b>params 注入方式</b>：经 {@link #encodeParamsLiteral(Map)} 编码为 Base64 字面量，
+     * 而非拼接原始 JSON 字符串——详见该方法的安全说明。</p>
      */
     private String wrapCode(String code, Map<String, Object> params) {
         StringBuilder sb = new StringBuilder();
-        sb.append("import json, sys\n");
+        sb.append("import json, sys, base64\n");
         sb.append("if hasattr(sys.stdout, 'reconfigure'):\n");
         sb.append("    sys.stdout.reconfigure(encoding='utf-8')\n");
         sb.append("    sys.stderr.reconfigure(encoding='utf-8')\n");
 
-        // 注入 params
-        sb.append("params = ");
-        if (params != null && !params.isEmpty()) {
-            sb.append("json.loads('").append(escapeJson(params)).append("')\n");
-        } else {
-            sb.append("{}\n");
-        }
+        // 注入 params（Base64 字面量，不可闭合、不可注入）
+        sb.append("params = ").append(encodeParamsLiteral(params)).append("\n");
 
         sb.append("\n");
         sb.append(code.strip());
@@ -321,38 +330,38 @@ public class PythonEngine implements CodeEngine {
         }
     }
 
-    private String escapeJson(Map<String, Object> params) {
-        try {
-            // 简单 JSON 序列化，避免引入 ObjectMapper 依赖
-            StringBuilder json = new StringBuilder("{");
-            boolean first = true;
-            for (Map.Entry<String, Object> entry : params.entrySet()) {
-                if (!first) json.append(",");
-                first = false;
-                json.append("\"").append(escapeStr(entry.getKey())).append("\":");
-                Object val = entry.getValue();
-                if (val == null) {
-                    json.append("null");
-                } else if (val instanceof Number || val instanceof Boolean) {
-                    json.append(val);
-                } else {
-                    json.append("\"").append(escapeStr(String.valueOf(val))).append("\"");
-                }
-            }
-            json.append("}");
-            return json.toString();
-        } catch (Exception e) {
+    /**
+     * 把 params 变成一段「不可能被注入」的 Python 表达式。
+     *
+     * <p>做法：{@code params → JSON 字符串 → Base64 → json.loads(base64.b64decode("..."))}。</p>
+     *
+     * <p><b>为什么必须这样</b>：历史实现是 {@code json.loads('...')} 直接拼接，由转义函数负责挡住
+     * 参数值里的引号。而转义函数只处理了 {@code \ " \n \r \t}，<b>漏掉了单引号</b>，
+     * 偏偏外层用的就是单引号——于是参数值里一个 {@code '} 就能闭合字符串字面量，
+     * 后面接任意 Python 表达式。params 来自 LLM 生成的工具参数（不可信输入），
+     * 这构成了一条 prompt injection → 子进程 RCE 的完整链路。</p>
+     *
+     * <p><b>为什么 Base64 是根治</b>：Base64 字符集只有 {@code [A-Za-z0-9+/=]}，
+     * 不含引号、反斜杠、换行、分号——无论参数值里塞什么字符，都只会被编码成字母数字，
+     * 在语法上永远无法跳出双引号。安全性由字符集保证，而不依赖转义逻辑的正确性。
+     * （转义是「黑名单思维」，漏一个字符就破防；编码是「白名单思维」，字符集天然闭合。）</p>
+     *
+     * <p>序列化用 Jackson 而非手写拼接：手写版对嵌套 Map/List 会退化成 {@code String.valueOf}
+     * 的 {@code {a=1}} 形式，那不是合法 JSON，Base64 之后照样解析失败。</p>
+     */
+    private String encodeParamsLiteral(Map<String, Object> params) {
+        if (params == null || params.isEmpty()) {
             return "{}";
         }
-    }
-
-    private String escapeStr(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+        try {
+            String json = objectMapper.writeValueAsString(params);
+            String b64 = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+            return "json.loads(base64.b64decode(\"" + b64 + "\").decode('utf-8'))";
+        } catch (Exception e) {
+            // 序列化失败不该让执行继续带着畸形参数跑，退化为无参数并留下告警
+            log.warn("[PythonEngine] params 序列化失败，本次以空参数执行", e);
+            return "{}";
+        }
     }
 
     private String truncateOutput(String text) {
