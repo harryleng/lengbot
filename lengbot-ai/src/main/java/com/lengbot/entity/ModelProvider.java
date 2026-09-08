@@ -37,7 +37,8 @@ public class ModelProvider {
     private ModelProviderType type;
 
     @TableField("api_key")
-    @Schema(description = "API密钥")
+    @Schema(description = "API密钥", accessMode = Schema.AccessMode.WRITE_ONLY)
+    @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.WRITE_ONLY)
     private String apiKey;
 
     @TableField("base_url")

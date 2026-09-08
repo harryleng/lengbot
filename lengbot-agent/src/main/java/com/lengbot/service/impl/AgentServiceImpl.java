@@ -466,6 +466,10 @@ public class AgentServiceImpl extends ServiceImpl<AgentMapper, Agent>
                     }
                 }
             }
+            // 归属校验：防止通过已绑定的他人 knowledgeId 越权读取（IDOR 兜底）
+            for (Long knowledgeId : ids) {
+                knowledgeService.checkMember(knowledgeId);
+            }
             return ids;
         } catch (Exception e) {
             log.warn("[Agent] 解析config.knowledges失败: agentId={}, error={}", agentId, e.getMessage());
@@ -481,6 +485,12 @@ public class AgentServiceImpl extends ServiceImpl<AgentMapper, Agent>
             throw new BizException(ErrorCode.AGENT_KNOWLEDGE_LIMIT);
         }
         Agent agent = checkOwnership(agentId);
+        // 1. 归属校验：禁止把非本人/非共享成员的知识库绑定到 Agent（IDOR 修复点）
+        if (knowledgeIds != null) {
+            for (Long knowledgeId : knowledgeIds) {
+                knowledgeService.checkMember(knowledgeId);
+            }
+        }
         try {
             // 1. 解析现有config
             var configNode = objectMapper.readTree(

@@ -180,4 +180,14 @@ public interface KnowledgeService extends IService<Knowledge> {
      * @return 是否可用
      */
     boolean isMilvusAvailable();
+
+    /**
+     * 校验当前登录用户是否为指定知识库的成员（owner 或共享成员）。
+     * <p>用于跨模块（如 agent 绑定知识库）的归属校验，避免 IDOR 越权。</p>
+     *
+     * @param knowledgeId 知识库 ID
+     * @throws BizException {@link com.lengbot.enums.ErrorCode#KNOWLEDGE_NO_PERMISSION}
+     *                       当用户非该知识库成员时
+     */
+    void checkMember(Long knowledgeId);
 }

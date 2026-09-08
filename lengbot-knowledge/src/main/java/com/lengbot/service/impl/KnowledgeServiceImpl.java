@@ -606,7 +606,8 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeMapper, Knowledge
     /**
      * 校验当前用户是否为知识库成员
      */
-    private void checkMember(Long knowledgeId) {
+    @Override
+    public void checkMember(Long knowledgeId) {
         long userId = StpUtil.getLoginIdAsLong();
         KnowledgeRole role = knowledgeMemberService.getMemberRole(knowledgeId, userId);
         if (role == null) {
