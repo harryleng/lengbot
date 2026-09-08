@@ -18,6 +18,9 @@ import com.lengbot.mapper.ModelProviderMapper;
 import com.lengbot.service.ModelProviderService;
 import com.lengbot.service.ModelService;
 import com.lengbot.util.ModelProviderCacheUtil;
+import com.lengbot.util.SecretCipher;
+import org.springframework.util.StringUtils;
+import java.io.Serializable;
 import lombok.RequiredArgsConstructor;
 
 import java.util.HashMap;
@@ -60,6 +63,21 @@ public class ModelProviderServiceImpl extends ServiceImpl<ModelProviderMapper, M
 
     private final ModelProviderCacheUtil cacheUtil;
     private final ObjectMapper objectMapper;
+    /** 凭证加解密（明文落库前加密、出库时解密；缓存与内存中保持明文） */
+    private final SecretCipher secretCipher;
+
+    /**
+     * 覆写 IService.getById：出库时解密 api_key，避免运行时（ModelFactory）与接口拿到库内密文。
+     * Controller 的 /{id} 出口依赖实体 WRITE_ONLY 注解不向外序列化该字段，此处解密不影响响应。
+     */
+    @Override
+    public ModelProvider getById(Serializable id) {
+        ModelProvider provider = super.getById(id);
+        if (provider != null) {
+            provider.setApiKey(decryptApiKey(provider.getApiKey()));
+        }
+        return provider;
+    }
     /** 延迟解析：ModelProviderServiceImpl 不直接依赖 ModelFactory（避免循环依赖），ObjectProvider 在首次调用时取 bean */
     private final org.springframework.beans.factory.ObjectProvider<com.lengbot.model.ModelFactory> modelFactoryProvider;
 
@@ -69,7 +87,7 @@ public class ModelProviderServiceImpl extends ServiceImpl<ModelProviderMapper, M
         ModelProvider provider = new ModelProvider();
         provider.setName(request.getName());
         provider.setType(request.getType());
-        provider.setApiKey(request.getApiKey());
+        provider.setApiKey(encryptApiKey(request.getApiKey()));
         provider.setBaseUrl(request.getBaseUrl());
         provider.setModelsEndpoint(request.getModelsEndpoint());
         provider.setHeadersJson(request.getHeadersJson());
@@ -78,7 +96,8 @@ public class ModelProviderServiceImpl extends ServiceImpl<ModelProviderMapper, M
         provider.setStatus(CommonStatus.ACTIVE);
         save(provider);
 
-        // 2. 同步缓存
+        // 2. 同步缓存（缓存/内存中保持明文，便于运行时直接使用）
+        provider.setApiKey(decryptApiKey(provider.getApiKey()));
         cacheUtil.cacheProvider(provider);
         syncAllProvidersCache();
         return provider;
@@ -94,7 +113,10 @@ public class ModelProviderServiceImpl extends ServiceImpl<ModelProviderMapper, M
         // 2. 更新字段
         provider.setName(request.getName());
         provider.setType(request.getType());
-        provider.setApiKey(request.getApiKey());
+        // 仅当用户传入新的明文 key 时才重新加密；空串视为不修改（保留库中已有密文）
+        if (request.getApiKey() != null && !request.getApiKey().isBlank()) {
+            provider.setApiKey(encryptApiKey(request.getApiKey()));
+        }
         provider.setBaseUrl(request.getBaseUrl());
         provider.setModelsEndpoint(request.getModelsEndpoint());
         provider.setHeadersJson(request.getHeadersJson());
@@ -102,7 +124,8 @@ public class ModelProviderServiceImpl extends ServiceImpl<ModelProviderMapper, M
         provider.setConfig(buildProviderConfig(request));
         updateById(provider);
 
-        // 3. 同步缓存
+        // 3. 同步缓存（内存/缓存中保持明文）
+        provider.setApiKey(decryptApiKey(provider.getApiKey()));
         cacheUtil.cacheProvider(provider);
         syncAllProvidersCache();
         // 4. 失效该 provider 的联网模型列表缓存（baseUrl/凭证变更后旧列表不再适用）
@@ -112,8 +135,12 @@ public class ModelProviderServiceImpl extends ServiceImpl<ModelProviderMapper, M
 
     @Override
     public Page<ModelProvider> listPage(int pageNum, int pageSize) {
-        return baseMapper.selectPage(new Page<>(pageNum, pageSize),
+        Page<ModelProvider> page = baseMapper.selectPage(new Page<>(pageNum, pageSize),
                 new LambdaQueryWrapper<ModelProvider>().orderByDesc(ModelProvider::getCreateTime));
+        if (page.getRecords() != null) {
+            page.getRecords().forEach(p -> p.setApiKey(decryptApiKey(p.getApiKey())));
+        }
+        return page;
     }
 
     @Override
@@ -150,9 +177,11 @@ public class ModelProviderServiceImpl extends ServiceImpl<ModelProviderMapper, M
 
     @Override
     public List<ModelProvider> listAllActive() {
-        return list(new LambdaQueryWrapper<ModelProvider>()
+        List<ModelProvider> providers = list(new LambdaQueryWrapper<ModelProvider>()
                 .eq(ModelProvider::getStatus, CommonStatus.ACTIVE)
                 .orderByDesc(ModelProvider::getCreateTime));
+        providers.forEach(p -> p.setApiKey(decryptApiKey(p.getApiKey())));
+        return providers;
     }
 
     @Override
@@ -295,5 +324,18 @@ public class ModelProviderServiceImpl extends ServiceImpl<ModelProviderMapper, M
         List<ModelProvider> all = list(new LambdaQueryWrapper<ModelProvider>()
                 .orderByDesc(ModelProvider::getCreateTime));
         cacheUtil.cacheAllProviders(all);
+    }
+
+    /** 落库前加密 api_key（空值透传，已是密文则跳过，避免重复加密）。 */
+    private String encryptApiKey(String apiKey) {
+        if (!StringUtils.hasText(apiKey) || secretCipher.isCiphertext(apiKey)) {
+            return apiKey;
+        }
+        return secretCipher.encrypt(apiKey);
+    }
+
+    /** 出库时解密 api_key（兼容 legacy 明文）。 */
+    private String decryptApiKey(String apiKey) {
+        return secretCipher.decrypt(apiKey);
     }
 }
