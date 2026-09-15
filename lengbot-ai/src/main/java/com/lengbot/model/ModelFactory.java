@@ -96,8 +96,14 @@ public class ModelFactory {
             ModelProvider provider = resolveProvider(actualId);
             ModelProviderHandler handler = getHandler(provider.getType());
             String defaultModelId = resolveModelId(provider, handler);
-            log.info("[ModelFactory] 创建 AgentScope Model: providerId={}, type={}, defaultModel={}",
-                    id, provider.getType(), defaultModelId);
+            String keyFp = maskKey(provider.getApiKey());
+            if (provider.getApiKey() == null || provider.getApiKey().isBlank()) {
+                log.warn("[ModelFactory] 创建 AgentScope Model 但凭证为空，调用必然 401: providerId={}, type={}, baseUrl={}",
+                        id, provider.getType(), provider.getBaseUrl());
+            } else {
+                log.info("[ModelFactory] 创建 AgentScope Model: providerId={}, type={}, defaultModel={}, keyFp={}, baseUrl={}",
+                        id, provider.getType(), defaultModelId, keyFp, provider.getBaseUrl());
+            }
             return handler.createModel(provider, defaultModelId);
         });
     }
@@ -269,6 +275,19 @@ public class ModelFactory {
     }
 
     /**
+     * API Key 脱敏：仅保留前后缀与长度，便于日志定位问题而不泄露凭证。
+     */
+    private String maskKey(String key) {
+        if (key == null) {
+            return "NULL";
+        }
+        if (key.length() <= 10) {
+            return "****(len=" + key.length() + ")";
+        }
+        return key.substring(0, 6) + "..." + key.substring(key.length() - 4) + "(len=" + key.length() + ")";
+    }
+
+    /**
      * 清除指定提供商的 Model 缓存（凭证变更时调用）。
      */
     public void invalidateCache(Long providerId) {
@@ -295,8 +314,11 @@ public class ModelFactory {
      * @return 检查结果消息
      */
     public String checkConnectivity(Long providerId) {
-        ModelProvider provider = resolveProvider(providerId);
+        // FIX: 原实现"先读 provider 再清缓存"，导致沿用的仍是旧凭证（首次检查永远失败、掩盖真实状态）。
+        // 改为先失效本地 modelCache + Redis + 多实例广播，再回源读最新凭证。
         invalidateCache(providerId);
+        ModelProvider provider = resolveProvider(providerId);
+        log.info("[ModelFactory] 连通性检查: providerId={}, keyFp={}", providerId, maskKey(provider.getApiKey()));
         return doCheckConnectivity(provider, null);
     }
 
@@ -339,7 +361,11 @@ public class ModelFactory {
      */
     @CacheEvict(value = "providerModels", key = "#providerId")
     public void invalidateProviderModelsCache(Long providerId) {
-        log.info("[ModelFactory] 失效模型列表缓存: providerId={}", providerId);
+        log.info("[ModelFactory] 失效模型缓存: providerId={}", providerId);
+        // FIX: 此前该方法仅记录日志，未真正清理本地 Model 实例缓存（其中绑定了 API Key）。
+        // 导致 Provider 更新/删除后，getModel() 仍从 modelCache 命中旧实例、沿用旧凭证，对外表现为持续 401（Authentication Fails）。
+        // 缓存 key 即 providerId（见 getModel 中 computeIfAbsent(actualId)），因此复用 invalidateCache 即可准确清除。
+        invalidateCache(providerId);
     }
 
     /**
@@ -562,6 +588,16 @@ public class ModelFactory {
             }
             cacheUtil.cacheProvider(provider);
             log.debug("[ModelFactory] 缓存未命中，从数据库加载提供商: id={}", providerId);
+        } else if (provider.getApiKey() == null || provider.getApiKey().isBlank()) {
+            // ModelProvider.apiKey 标注了 @JsonProperty(access = WRITE_ONLY)：序列化时被丢弃，
+            // 因此 Redis 快照中永远不含凭证。过去直接拿这个快照去建 Model，等于用空凭证调用供应商，
+            // 表现为改库/重启都无法消除的持续 401（DeepSeek: Authentication Fails）。
+            // 这里命中缓存时回源补齐凭证；凭证本身不写入 Redis，避免密钥落盘到缓存中间件。
+            ModelProvider dbProvider = modelProviderService.getById(providerId);
+            if (dbProvider == null) {
+                throw new BizException(ErrorCode.MODEL_PROVIDER_NOT_FOUND);
+            }
+            provider.setApiKey(dbProvider.getApiKey());
         }
         return provider;
     }
