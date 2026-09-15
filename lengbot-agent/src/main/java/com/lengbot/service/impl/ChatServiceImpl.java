@@ -366,7 +366,7 @@ public class ChatServiceImpl implements ChatService {
             toolResponses.add(ToolResultBlock.builder()
                     .id(firstTool.getId())
                     .name(toolName)
-                    .output(TextBlock.builder().text(toolResult).build())
+                    .output(TextBlock.builder().text(truncateToolResultForModel(toolResult)).build())
                     .build());
 
             ctx.getMessages().add(ToolResultMessage.builder()
@@ -1284,7 +1284,7 @@ public class ChatServiceImpl implements ChatService {
                 }
                 // 工具结果：emit tool_result（对齐 appendToolCallResult，含 todos_updated/subagent 路由）
                 emitToolResultHarness(ctx, toolEventsList, eventSink, toolName, argsForCall, result, contentOffset, toolCallId);
-                return textToolResultBlock(resultForModel, isError ? ToolResultState.ERROR : ToolResultState.SUCCESS);
+                return textToolResultBlock(truncateToolResultForModel(resultForModel), isError ? ToolResultState.ERROR : ToolResultState.SUCCESS);
             }).onErrorResume(TimeoutException.class, e -> {
                 log.error("[Chat][Harness][Tool] 执行超时: name={}, timeout={}s", toolName, timeoutSeconds);
                 String fail = ToolResultPrefixes.failureJson("工具执行超时（" + timeoutSeconds + "秒），请稍后重试");
@@ -1507,7 +1507,7 @@ public class ChatServiceImpl implements ChatService {
                             toolResponses.add(ToolResultBlock.builder()
                                     .id(tc.getId())
                                     .name(tc.getName())
-                                    .output(TextBlock.builder().text(result).build())
+                                    .output(TextBlock.builder().text(truncateToolResultForModel(result)).build())
                                     .build());
                         }
                     } else {
@@ -1559,7 +1559,7 @@ public class ChatServiceImpl implements ChatService {
                         toolResponses.add(ToolResultBlock.builder()
                                 .id(firstTool.getId())
                                 .name(toolName)
-                                .output(TextBlock.builder().text(toolResult).build())
+                                .output(TextBlock.builder().text(truncateToolResultForModel(toolResult)).build())
                                 .build());
                     }
 
@@ -1864,7 +1864,7 @@ public class ChatServiceImpl implements ChatService {
                 toolResponses.add(ToolResultBlock.builder()
                         .id(tc.getId())
                         .name(tc.getName())
-                        .output(TextBlock.builder().text(result).build())
+                        .output(TextBlock.builder().text(truncateToolResultForModel(result)).build())
                         .build());
             }
         } else {
@@ -1915,7 +1915,7 @@ public class ChatServiceImpl implements ChatService {
             toolResponses.add(ToolResultBlock.builder()
                     .id(firstTool.getId())
                     .name(toolName)
-                    .output(TextBlock.builder().text(toolResult).build())
+                    .output(TextBlock.builder().text(truncateToolResultForModel(toolResult)).build())
                     .build());
         }
 
@@ -3211,6 +3211,22 @@ public class ChatServiceImpl implements ChatService {
         return com.lengbot.util.ModelErrorClassifier.classifyCode(e);
     }
 
+
+    /**
+     * 工具结果回灌模型前的截断：超长工具输出会持续膨胀上下文、推高 input token。
+     * 截断到 TOOL_RESULT_MAX_CHARS 字符（约 500 token），模型仍能基于摘要继续推理。
+     * 仅影响回灌模型的文本，落库/前端展示仍用完整结果（见 appendToolCallResult）。
+     */
+    private static final int TOOL_RESULT_MAX_CHARS = 2000;
+
+    private String truncateToolResultForModel(String result) {
+        if (result == null || result.length() <= TOOL_RESULT_MAX_CHARS) {
+            return result;
+        }
+        return result.substring(0, TOOL_RESULT_MAX_CHARS)
+                + "\n[工具结果已截断，原文共 " + result.length() + " 字符]";
+    }
+
     private void accumulateStreamUsage(ChatResponse response, int[] inputTokenHolder, int[] outputTokenHolder, int[] cachedTokenHolder) {
         if (response == null) {
             return;
@@ -3224,7 +3240,6 @@ public class ChatServiceImpl implements ChatService {
         if (cachedTokenHolder != null) {
             cachedTokenHolder[0] += usage.getCachedTokens();
         }
-        outputTokenHolder[0] += usage.getOutputTokens();
     }
 
     /** 安全地将 Object 转为 Long（兼容 Number 和 String 类型） */
