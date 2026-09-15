@@ -77,6 +77,10 @@ public class LlmTrace {
     @Schema(description = "工具调用次数")
     private Integer toolCallCount;
 
+    @TableField("prompt_cache_hit_tokens")
+    @Schema(description = "DeepSeek 上下文缓存命中 Token 数（来自 ChatUsage.cachedTokens，可省约 10 倍 input 单价）")
+    private Integer promptCacheHitTokens;
+
     @TableField("total_duration_ms")
     @Schema(description = "总耗时（毫秒）")
     private Long totalDurationMs;

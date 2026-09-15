@@ -513,6 +513,11 @@ public class MessageMiddleware implements ChatMiddleware {
         systemPrompt = appendCurrentTodosPrompt(systemPrompt, ctx);
         systemPrompt = systemPrompt + PLATFORM_REPLY_CONSTRAINTS;
 
+        // [TokenProbe] 静态上下文构成探针：sysPrompt 长度决定每次请求的 input token 入场费，
+        // 工具数反映 ToolBase schema 注入量；重启后可据此判断上下文缓存前缀是否稳定。
+        int toolCount = (ctx != null && ctx.getToolCallbackMap() != null) ? ctx.getToolCallbackMap().size() : 0;
+        log.info("[TokenProbe] agentId={}, sysPromptChars={}, approxTokens={}, toolCount={}, maxContext={}",
+                agent != null ? agent.getId() : null, systemPrompt.length(), systemPrompt.length() / 3, toolCount, maxContextMessages);
         messages.add(Msgs.system(systemPrompt));
 
         // 4. 加载历史消息：必须按「最近 N 条」取，再按时间正序交给模型（原先 ASC LIMIT 会取最旧 N 条，长会话会丢当前上下文、模型易被旧问题带偏）

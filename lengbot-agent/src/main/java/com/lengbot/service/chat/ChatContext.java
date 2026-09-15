@@ -105,6 +105,9 @@ public class ChatContext {
     private int[] toolCallCountHolder;
     private int[] inputTokenHolder;
     private int[] outputTokenHolder;
+
+    /** DeepSeek 上下文缓存命中 Token 数累加器（来自 AgentScope ChatUsage.getCachedTokens()） */
+    private int[] cachedTokenHolder;
     private List<Map<String, Object>> toolEventsList;
     /** 工作流节点执行事件（WORKFLOW 类型 Agent） */
     private List<Map<String, Object>> workflowEventsList;
@@ -501,6 +504,7 @@ public class ChatContext {
         ctx.toolCallCountHolder = new int[]{0};
         ctx.inputTokenHolder = new int[]{0};
         ctx.outputTokenHolder = new int[]{0};
+        ctx.cachedTokenHolder = new int[]{0};
         ctx.toolEventsList = new ArrayList<>();
         ctx.workflowEventsList = new ArrayList<>();
         ctx.spans = new ArrayList<>();

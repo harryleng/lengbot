@@ -301,7 +301,7 @@ public class ChatServiceImpl implements ChatService {
                 return fullReply.toString();
             }
 
-            accumulateStreamUsage(response, ctx.getInputTokenHolder(), ctx.getOutputTokenHolder());
+            accumulateStreamUsage(response, ctx.getInputTokenHolder(), ctx.getOutputTokenHolder(), ctx.getCachedTokenHolder());
             Msg assistantMsg = Msg.builderForRole(MsgRole.ASSISTANT).content(response.getContent()).build();
 
             // 检查reasoningContent（AgentScope 下从 response metadata 提取，若不可用则依赖 inline thinking 解析）
@@ -991,6 +991,10 @@ public class ChatServiceImpl implements ChatService {
                         if (msg != null && msg.getUsage() != null) {
                             inputTokenHolder[0] += msg.getUsage().getInputTokens();
                             outputTokenHolder[0] += msg.getUsage().getOutputTokens();
+                                if (msg.getUsage().getCachedTokens() > 0) {
+                                    ctx.getCachedTokenHolder()[0] += msg.getUsage().getCachedTokens();
+                                }
+                            outputTokenHolder[0] += msg.getUsage().getOutputTokens();
                         }
                         String text = msg != null ? msg.getTextContent() : "";
                         if (text == null) {
@@ -1016,6 +1020,10 @@ public class ChatServiceImpl implements ChatService {
                             Msg m = r.getResult();
                             if (m != null && m.getUsage() != null) {
                                 inputTokenHolder[0] += m.getUsage().getInputTokens();
+                                outputTokenHolder[0] += m.getUsage().getOutputTokens();
+                                if (m.getUsage().getCachedTokens() > 0) {
+                                    ctx.getCachedTokenHolder()[0] += m.getUsage().getCachedTokens();
+                                }
                                 outputTokenHolder[0] += m.getUsage().getOutputTokens();
                             }
                         }
@@ -1376,7 +1384,7 @@ public class ChatServiceImpl implements ChatService {
                     // 2. 无工具调用 → 直接输出文本（结束递归）
                     if (assistantMsg == null || !Msgs.hasToolCalls(response)) {
                         // 先累加 Token（usage 常在最后一个空文本 chunk，不能因 stripped 为空而跳过）
-                        accumulateStreamUsage(response, inputTokenHolder, outputTokenHolder);
+                accumulateStreamUsage(response, inputTokenHolder, outputTokenHolder, ctx.getCachedTokenHolder());
 
                         String text = Msgs.extractText(response);
                         if (text == null) text = "";
@@ -1406,7 +1414,7 @@ public class ChatServiceImpl implements ChatService {
                     // 3. 有工具调用 → 执行工具
                     messages.add(assistantMsg);
 
-                    accumulateStreamUsage(response, inputTokenHolder, outputTokenHolder);
+                accumulateStreamUsage(response, inputTokenHolder, outputTokenHolder, ctx.getCachedTokenHolder());
 
                     // 3.0 先消费本 chunk 携带的正文（部分模型将正文与工具调用放在同一 chunk）。
                     //     必须在计算 toolContentOffset 之前完成，使 offset 精确反映"组件前已产出的正文长度"，
@@ -1732,7 +1740,7 @@ public class ChatServiceImpl implements ChatService {
             return Flux.just(STATUS_PREFIX + toolEventGenerator.errorEvent(
                     ctx.getStreamErrorMessage(), ctx.getStreamErrorCode()));
         }
-        accumulateStreamUsage(response, inputTokenHolder, outputTokenHolder);
+                accumulateStreamUsage(response, inputTokenHolder, outputTokenHolder, ctx.getCachedTokenHolder());
 
         Msg assistantMsg = Msg.builderForRole(MsgRole.ASSISTANT).content(response.getContent()).build();
 
@@ -3203,7 +3211,7 @@ public class ChatServiceImpl implements ChatService {
         return com.lengbot.util.ModelErrorClassifier.classifyCode(e);
     }
 
-    private void accumulateStreamUsage(ChatResponse response, int[] inputTokenHolder, int[] outputTokenHolder) {
+    private void accumulateStreamUsage(ChatResponse response, int[] inputTokenHolder, int[] outputTokenHolder, int[] cachedTokenHolder) {
         if (response == null) {
             return;
         }
@@ -3212,6 +3220,10 @@ public class ChatServiceImpl implements ChatService {
             return;
         }
         inputTokenHolder[0] += usage.getInputTokens();
+        outputTokenHolder[0] += usage.getOutputTokens();
+        if (cachedTokenHolder != null) {
+            cachedTokenHolder[0] += usage.getCachedTokens();
+        }
         outputTokenHolder[0] += usage.getOutputTokens();
     }
 
