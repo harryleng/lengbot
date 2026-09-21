@@ -194,6 +194,24 @@ public class TaskQueueServiceImpl implements TaskQueueService {
     @Override
     public List<TaskMessage> readMessages(TaskType.Group group, String consumerName, int count, Duration block) {
         // XREADGROUP GROUP <group> <consumer> COUNT n BLOCK ms STREAMS main >
+        return readInternal(group, consumerName, count, block, ReadOffset.lastConsumed());
+    }
+
+    @Override
+    public List<TaskMessage> readPending(TaskType.Group group, String consumerName, int count) {
+        // XREADGROUP GROUP <group> <consumer> COUNT n STREAMS main 0
+        return readInternal(group, consumerName, count, null, ReadOffset.from("0"));
+    }
+
+    /**
+     * 统一读取入口：readMessages / readPending 仅偏移量语义不同，其余逻辑完全一致。
+     * <ul>
+     *   <li>offset = lastConsumed()（即 ">"）: 只拉从未投递给任何消费者的新消息</li>
+     *   <li>offset = from("0")          : 只拉本消费者 PEL 中未 ACK 的积压消息（崩溃兜底）</li>
+     * </ul>
+     */
+    private List<TaskMessage> readInternal(TaskType.Group group, String consumerName, int count,
+                                           Duration block, ReadOffset offset) {
         Consumer consumer = Consumer.from(groupName(group), consumerName);
         StreamReadOptions options = StreamReadOptions.empty().count(count);
         if (block != null && !block.isZero() && !block.isNegative()) {
@@ -202,21 +220,7 @@ public class TaskQueueServiceImpl implements TaskQueueService {
         List<MapRecord<String, Object, Object>> records = redis.opsForStream().read(
                 consumer,
                 options,
-                StreamOffset.create(streamKey(group), ReadOffset.lastConsumed()));
-
-        return toMessages(records);
-    }
-
-    @Override
-    public List<TaskMessage> readPending(TaskType.Group group, String consumerName, int count) {
-        // XREADGROUP GROUP <group> <consumer> COUNT n STREAMS main 0
-        Consumer consumer = Consumer.from(groupName(group), consumerName);
-        StreamReadOptions options = StreamReadOptions.empty().count(count);
-        List<MapRecord<String, Object, Object>> records = redis.opsForStream().read(
-                consumer,
-                options,
-                StreamOffset.create(streamKey(group), ReadOffset.from("0")));
-
+                StreamOffset.create(streamKey(group), offset));
         return toMessages(records);
     }
 
