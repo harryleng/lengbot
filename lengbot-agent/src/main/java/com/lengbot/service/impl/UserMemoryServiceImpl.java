@@ -15,11 +15,17 @@ import com.lengbot.enums.ErrorCode;
 import com.lengbot.enums.UserMemoryStatus;
 import com.lengbot.enums.UserMemoryType;
 import com.lengbot.mapper.UserMemoryMapper;
+import com.lengbot.model.ModelFactory;
+import com.lengbot.model.ProviderResolver;
 import com.lengbot.service.UserMemoryService;
 import com.lengbot.service.UserPreferenceService;
 import com.lengbot.service.TextEmbeddingService;
+import com.lengbot.util.Msgs;
 import com.lengbot.util.TextNormalizeUtil;
 import com.lengbot.util.VectorUtil;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import io.agentscope.core.message.Msg;
+import io.agentscope.core.model.Model;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,11 +59,32 @@ public class UserMemoryServiceImpl extends ServiceImpl<UserMemoryMapper, UserMem
     private static final int MAX_PROMPT_MEMORY_CHARS = 1500;
     private static final int MAX_USER_MEMORY_COUNT = 15;
 
+    /** 单轮 LLM 抽取最多写入的记忆条数 */
+    private static final int MAX_EXTRACT_PER_TURN = 3;
+    /** 单条记忆内容最大长度（与提示词约束对齐，避免灌爆记忆库） */
+    private static final int MAX_EXTRACT_CONTENT_LEN = 300;
+
+    /** 长期记忆 LLM 语义抽取提示词（强约束 JSON 输出） */
+    private static final String EXTRACT_SYSTEM_PROMPT = """
+            你是长期记忆抽取器。阅读「用户本轮消息」与「助手本轮回复」，判断其中有哪些值得跨会话长期记住的用户事实/偏好/背景/经验。
+            只抽取明确、稳定、可复用的事实；不要抽取一次性指令、临时数据、或本就可从对话上下文还原的内容。
+            严禁抽取：密码、密钥、Token、API Key、手机号等敏感信息。
+            每条记忆用一句话概括（≤%d 字）。类型从以下枚举选一：
+            PREFERENCE=用户偏好；PROFILE=用户画像；PROJECT_FACT=项目事实；INSTRUCTION=长期指令；LESSON=踩坑经验；CASE=成功案例。
+            最多输出 %d 条。若没有值得记的，返回空数组。
+            仅输出如下 JSON，不要任何其他文字、不要 Markdown 围栏：
+            {"memories":[{"type":"枚举","content":"一句话记忆","keywords":["关键词1","关键词2"],"confidence":0.0~1.0}]}
+            """.formatted(MAX_EXTRACT_CONTENT_LEN, MAX_EXTRACT_PER_TURN);
+
     private final UserMemoryMapper userMemoryMapper;
     private final UserPreferenceService userPreferenceService;
     private final ObjectMapper objectMapper;
     /** 文本向量生成服务（AgentScope 引擎） */
     private final TextEmbeddingService textEmbeddingService;
+    /** LLM 语义抽取用：取对话模型实例 */
+    private final ModelFactory modelFactory;
+    /** providerId 解析（空=系统默认/第一个可用） */
+    private final ProviderResolver providerResolver;
 
     @Autowired
     @Qualifier("lengBotExecutor")
@@ -222,16 +249,136 @@ public class UserMemoryServiceImpl extends ServiceImpl<UserMemoryMapper, UserMem
 
     private void autoExtract(MemoryExtractDTO request, Long memoryAgentId, String userMessage, String assistantReply) {
         try {
-            ExtractedMemory extracted = heuristicExtract(userMessage, assistantReply);
+            UserPreferenceVO pref = userPreferenceService.getPreferences(request.getUserId());
+            ExtractedMemory extracted;
+            if (Boolean.FALSE.equals(pref.getLongMemoryLlmExtract())) {
+                // 显式关闭 LLM 抽取 → 回退关键词启发式（行为等同升级前）
+                extracted = heuristicExtract(userMessage, assistantReply);
+            } else {
+                extracted = llmExtract(request.getUserId(), pref.getMemoryExtractProviderId(), userMessage, assistantReply);
+            }
             if (extracted == null || extracted.confidence().compareTo(AUTO_MIN_CONFIDENCE) < 0) {
+                return;
+            }
+            // 落库前再拦一次敏感词（heuristic 已拦，LLM 路径额外兜底）
+            if (containsSensitive(extracted.content())) {
+                log.debug("[UserMemory] 命中敏感词，放弃保存: userId={}", request.getUserId());
                 return;
             }
             saveFromTool(request.getUserId(), memoryAgentId, request.getSessionId(), request.getSourceMessageId(),
                     extracted.memoryType().getCode(), extracted.content(), extracted.keywords(), extracted.confidence());
-            log.info("[UserMemory] 自动记忆已保存: userId={}, type={}", request.getUserId(), extracted.memoryType());
+            log.info("[UserMemory] 自动记忆已保存: userId={}, type={}, via={}",
+                    request.getUserId(), extracted.memoryType(),
+                    Boolean.FALSE.equals(pref.getLongMemoryLlmExtract()) ? "heuristic" : "llm");
         } catch (Exception e) {
             log.warn("[UserMemory] 自动记忆抽取失败: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 模型驱动抽取：把 用户消息 + 助手回复 交给 LLM，判出本轮值得长期记住的事实。
+     * 失败/不可解析时回退关键词启发式，保证「至少还能记」。
+     */
+    private ExtractedMemory llmExtract(Long userId, Long providerId, String userMessage, String assistantReply) {
+        if (userMessage == null || userMessage.isBlank()) {
+            return null;
+        }
+        try {
+            Model model = modelFactory.getModel(providerResolver.resolve(providerId));
+            List<Msg> msgs = List.of(
+                    Msgs.system(EXTRACT_SYSTEM_PROMPT),
+                    Msgs.user(buildExtractUserPrompt(userMessage, assistantReply)));
+            String raw = ModelCalls.callText(model, msgs);
+            ExtractedMemory parsed = parseExtractJson(raw);
+            return parsed != null ? parsed : heuristicExtract(userMessage, assistantReply);
+        } catch (Exception e) {
+            log.warn("[UserMemory] LLM 抽取失败，降级关键词: {}", e.getMessage());
+            return heuristicExtract(userMessage, assistantReply);
+        }
+    }
+
+    private String buildExtractUserPrompt(String userMessage, String assistantReply) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("【用户消息】\n").append(userMessage.trim()).append("\n\n");
+        if (assistantReply != null && !assistantReply.isBlank()) {
+            String reply = assistantReply.length() > 1500 ? assistantReply.substring(0, 1500) + "…" : assistantReply;
+            sb.append("【助手回复】\n").append(reply).append("\n\n");
+        }
+        sb.append("请输出抽取 JSON：");
+        return sb.toString();
+    }
+
+    /**
+     * 解析 LLM 返回的 JSON。容错：去 Markdown 围栏、截取首个 {...}；类型/内容非法或畸形时返回 null（由调用方回退关键词）。
+     */
+    private ExtractedMemory parseExtractJson(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String json = raw.trim().replaceAll("^```[a-zA-Z]*", "").replaceAll("```$", "").trim();
+        int s = json.indexOf('{');
+        int e = json.lastIndexOf('}');
+        if (s < 0 || e < 0 || e <= s) {
+            return null;
+        }
+        json = json.substring(s, e + 1);
+        try {
+            LlmExtractResult result = objectMapper.readValue(json, LlmExtractResult.class);
+            if (result.memories == null || result.memories.isEmpty()) {
+                return null;
+            }
+            // 取第一条（如需多条可展开循环，当前仅落首条以控成本）
+            LlmMemoryItem item = result.memories.get(0);
+            UserMemoryType type = safeType(item.type);
+            String content = normalizeExtractContent(item.content);
+            if (content == null) {
+                return null;
+            }
+            double conf = item.confidence != null ? item.confidence : 0.8;
+            List<String> keywords = (item.keywords != null && !item.keywords.isEmpty())
+                    ? item.keywords : extractKeywords(content);
+            return new ExtractedMemory(type, content, keywords,
+                    BigDecimal.valueOf(Math.min(1.0, Math.max(0.0, conf))));
+        } catch (Exception ex) {
+            log.debug("[UserMemory] 抽取 JSON 解析失败，回退关键词: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    private UserMemoryType safeType(String t) {
+        if (t == null) {
+            return UserMemoryType.PREFERENCE;
+        }
+        try {
+            return UserMemoryType.fromValue(t.toUpperCase(Locale.ROOT));
+        } catch (Exception e) {
+            return UserMemoryType.PREFERENCE;
+        }
+    }
+
+    private String normalizeExtractContent(String c) {
+        if (c == null) {
+            return null;
+        }
+        String s = c.trim();
+        if (s.isBlank() || s.length() > MAX_EXTRACT_CONTENT_LEN) {
+            return null;
+        }
+        return TextNormalizeUtil.sanitizeForDatabase(s);
+    }
+
+    /** LLM 抽取 JSON 载体（忽略未知字段，便于模型自由发挥） */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static class LlmExtractResult {
+        public List<LlmMemoryItem> memories;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static class LlmMemoryItem {
+        public String type;
+        public String content;
+        public List<String> keywords;
+        public Double confidence;
     }
 
     private ExtractedMemory heuristicExtract(String userMessage, String assistantReply) {

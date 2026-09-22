@@ -124,6 +124,10 @@ public final class ConfigKeys {
         public static final String LONG_MEMORY_AUTO_EXTRACT = "longMemoryAutoExtract";
         public static final String LONG_MEMORY_INJECT_LIMIT = "longMemoryInjectLimit";
         public static final String LONG_MEMORY_SCOPE = "longMemoryScope";
+        /** 长期记忆是否启用 LLM 语义抽取（false=回退关键词启发式） */
+        public static final String LONG_MEMORY_LLM_EXTRACT = "longMemoryLlmExtract";
+        /** 记忆抽取专用模型 providerId（空=系统默认） */
+        public static final String MEMORY_EXTRACT_PROVIDER_ID = "memoryExtractProviderId";
     }
 
     /**

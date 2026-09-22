@@ -26,7 +26,7 @@ import java.util.stream.Stream;
 /**
  * 内置工具 — 受控本地文件访问（增删改查）
  * <p>允许 Agent 直接操作本机白名单目录（{@code lengbot.local-file.root}，
- * 默认 {@code D:/lengbot/workspace}）下的文件，用于本地开发调试。
+ * 默认 {@code C:/home/testwork}）下的文件，用于本地开发调试。
  * 提供 列目录 / 读 / 写(覆盖) / 追加 / 删除 能力，全部路径强制限制在白名单根目录内，
  * 禁止 ".." 遍历与绝对路径越界。</p>
  * <p>{@code lengbot.local-file.root} 留空则该工具禁用（调用即返回未配置提示）。</p>
@@ -54,7 +54,7 @@ public class LocalFileTool {
     private static final long MAX_WRITE_BYTES = 10L * 1024 * 1024;
 
     @Tool(name = "local_read_file",
-          description = "读取本机白名单目录（lengbot.local-file.root，默认 D:/lengbot/workspace）下的文本文件。" +
+          description = "读取本机白名单目录（lengbot.local-file.root，默认 C:/home/testwork）下的文本文件。" +
                   "传入相对于该根目录的路径，如 README.md 或 src/main/java/App.java。" +
                   "只能访问白名单内的文件；仅支持 UTF-8 文本，最大 4MB。")
     @SystemTool(displayName = "读取本地文件")
@@ -90,7 +90,7 @@ public class LocalFileTool {
     }
 
     @Tool(name = "local_list_dir",
-          description = "列出本机白名单目录（lengbot.local-file.root，默认 D:/lengbot/workspace）下的文件。" +
+          description = "列出本机白名单目录（lengbot.local-file.root，默认 C:/home/testwork）下的文件。" +
                   "传入相对于根目录的子路径如 data，不传则列出根目录。只能访问白名单内的目录。")
     @SystemTool(displayName = "列出本地目录")
     public String listDir(

@@ -30,6 +30,7 @@ public class UserPreferenceServiceImpl implements UserPreferenceService {
     private static final boolean DEFAULT_LONG_MEMORY_AUTO_EXTRACT = false;
     private static final int DEFAULT_LONG_MEMORY_INJECT_LIMIT = 6;
     private static final String DEFAULT_LONG_MEMORY_SCOPE = "user";
+    private static final boolean DEFAULT_LONG_MEMORY_LLM_EXTRACT = true;
 
     private final UserMapper userMapper;
     private final ObjectMapper objectMapper;
@@ -65,6 +66,12 @@ public class UserPreferenceServiceImpl implements UserPreferenceService {
             String scope = normalizeScope(request.getLongMemoryScope());
             config.put(ConfigKeys.User.LONG_MEMORY_SCOPE, scope);
         }
+        if (request.getLongMemoryLlmExtract() != null) {
+            config.put(ConfigKeys.User.LONG_MEMORY_LLM_EXTRACT, request.getLongMemoryLlmExtract());
+        }
+        if (request.getMemoryExtractProviderId() != null) {
+            config.put(ConfigKeys.User.MEMORY_EXTRACT_PROVIDER_ID, request.getMemoryExtractProviderId());
+        }
 
         try {
             user.setConfig(objectMapper.writeValueAsString(config));
@@ -95,6 +102,8 @@ public class UserPreferenceServiceImpl implements UserPreferenceService {
         vo.setLongMemoryAutoExtract(boolVal(config.get(ConfigKeys.User.LONG_MEMORY_AUTO_EXTRACT), DEFAULT_LONG_MEMORY_AUTO_EXTRACT));
         vo.setLongMemoryInjectLimit(intVal(config.get(ConfigKeys.User.LONG_MEMORY_INJECT_LIMIT), DEFAULT_LONG_MEMORY_INJECT_LIMIT, 1, 15));
         vo.setLongMemoryScope(normalizeScope(String.valueOf(config.getOrDefault(ConfigKeys.User.LONG_MEMORY_SCOPE, DEFAULT_LONG_MEMORY_SCOPE))));
+        vo.setLongMemoryLlmExtract(boolVal(config.get(ConfigKeys.User.LONG_MEMORY_LLM_EXTRACT), DEFAULT_LONG_MEMORY_LLM_EXTRACT));
+        vo.setMemoryExtractProviderId(longVal(config.get(ConfigKeys.User.MEMORY_EXTRACT_PROVIDER_ID), null));
         return vo;
     }
 
@@ -107,6 +116,18 @@ public class UserPreferenceServiceImpl implements UserPreferenceService {
     private int intVal(Object value, int defaultValue, int min, int max) {
         int parsed = value instanceof Number n ? n.intValue() : defaultValue;
         return Math.max(min, Math.min(max, parsed));
+    }
+
+    private Long longVal(Object value, Long defaultValue) {
+        if (value instanceof Number n) return n.longValue();
+        if (value instanceof String s && !s.isBlank()) {
+            try {
+                return Long.parseLong(s.trim());
+            } catch (NumberFormatException ignored) {
+                return defaultValue;
+            }
+        }
+        return defaultValue;
     }
 
     private String normalizeScope(String scope) {
