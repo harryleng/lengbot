@@ -14,6 +14,7 @@ import io.agentscope.core.tool.ToolParam;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -118,6 +119,59 @@ public class SandboxFileTool {
             @ToolParamMeta(example = "\\n\\n## 第二节\\n……") String content,
             ToolCallParam toolContext) {
         return doWrite(path, content, true, toolContext);
+    }
+
+    @Tool(name = "sandbox_write_file_binary",
+          description = "写入（覆盖）二进制文件到当前会话，用于落地 PDF/PPTX/图片/压缩包等无法用纯文本表示的产物。" +
+                  "content 必须是文件的 Base64 编码字符串（不是原始文本，也不是文件路径）。路径规则与 sandbox_write_file 相同：" +
+                  "交付物以 outputs/ 开头（如 outputs/files/report.pptx），可再配合 present_artifacts 交付给用户。" +
+                  "禁止写入 skills/。普通文本文件请仍用 sandbox_write_file。")
+    @SystemTool(displayName = "写入沙盒二进制文件", tags = {"file", "sandbox", "write", "binary"})
+    public String writeFileBinary(
+            @ToolParam(name = "path", description = "相对路径，必须最先传入。交付文件如 outputs/files/report.pptx。不要传 skills/")
+            @ToolParamMeta(example = "outputs/files/report.pptx") String path,
+            @ToolParam(name = "content", description = "文件内容的 Base64 编码字符串（在 path 之后传入），不要传原始二进制或文本")
+            @ToolParamMeta(example = "UEsDBBQAAAAI...") String content,
+            ToolCallParam toolContext) {
+        log.info("[Tool:sandbox_write_file_binary] path={}", path);
+        if (path == null || path.isBlank()) {
+            return errorJson("路径不能为空");
+        }
+        if (content == null || content.isBlank()) {
+            return errorJson("Base64 内容不能为空");
+        }
+        try {
+            byte[] data;
+            try {
+                data = Base64.getDecoder().decode(content.trim());
+            } catch (IllegalArgumentException e) {
+                return errorJson("Base64 解码失败: 内容不是合法的 Base64 字符串");
+            }
+            SandboxPath sandboxPath = resolvePath(path.trim(), toolContext);
+            sandboxFs.writeBytes(sandboxPath, data);
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("path", path.trim());
+            output.put("size", data.length);
+            output.put("success", true);
+            output.put("mode", "overwrite-binary");
+            // outputs/ 路径：交付物，附访问 URL 让前端直接渲染文件卡片（MinIO=预签名，本地=下载接口）
+            String normalized = normalizeLeadingSlash(path.trim());
+            if (normalized.startsWith("outputs/")) {
+                String contentType = inferContentType(normalized);
+                try {
+                    SandboxFileAccess access = sandboxFs.resolveFileAccess(sandboxPath, contentType);
+                    output.put("name", access.name());
+                    output.put("contentType", access.contentType());
+                    output.put("url", access.url());
+                    output.put("downloadUrl", access.downloadUrl());
+                } catch (Exception ex) {
+                    log.warn("[Tool:sandbox_write_file_binary] 生成访问URL失败: path={}, error={}", path, ex.getMessage());
+                }
+            }
+            return toJson(output);
+        } catch (Exception e) {
+            return errorJson("写入二进制文件失败: " + e.getMessage());
+        }
     }
 
     private String doWrite(String path, String content, boolean append, ToolCallParam toolContext) {

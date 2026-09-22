@@ -1,6 +1,7 @@
 package com.lengbot.service.sandbox;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lengbot.dto.CodeArtifactDTO;
 import com.lengbot.dto.CodeExecResultDTO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,7 +10,9 @@ import org.springframework.stereotype.Component;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
 import java.util.regex.Pattern;
@@ -30,6 +33,9 @@ public class PythonEngine implements CodeEngine {
     private static final String RESULT_START_MARKER = "__SANDBOX_RESULT_START__";
     private static final String RESULT_END_MARKER = "__SANDBOX_RESULT_END__";
 
+    /** 单个产物文件大小上限（解码后字节），超过则跳过，避免超大文件撑爆回传 */
+    private static final long MAX_ARTIFACT_BYTES = 10L * 1024 * 1024;
+
     /**
      * 危险 import 黑名单（L1 快速过滤，配合 -E -S 启动参数 + 工作目录隔离形成纵深防御）
      * <p>覆盖已知绕过模式：</p>
@@ -41,9 +47,8 @@ public class PythonEngine implements CodeEngine {
      * </ul>
      */
     private static final Pattern BLOCKED_IMPORTS = Pattern.compile(
-            "\\b(import\\s+(os|subprocess|shutil|socket|http|urllib|ftplib|smtplib|ctypes|sys|signal|multiprocessing|threading|importlib|builtins|marshal|imp|pty|platform|asyncio|telnetlib|paramiko)"
-                    + "|from\\s+(os|subprocess|shutil|socket|http|urllib|ftplib|smtplib|ctypes|sys|signal|multiprocessing|threading|importlib|builtins|marshal|imp|pty|platform|asyncio|telnetlib|paramiko)\\s+import)"
-                    + "|__import__\\s*\\("
+            // —— 动态执行 / 沙箱逃逸：硬性禁止（最高优先级）——
+            "__import__\\s*\\("
                     + "|importlib\\.(import_module|__import__|find_loader|reload)"
                     + "|__builtins__"
                     + "|globals\\(\\)\\s*\\["
@@ -51,7 +56,15 @@ public class PythonEngine implements CodeEngine {
                     + "|exec\\s*\\("
                     + "|eval\\s*\\("
                     + "|compile\\s*\\("
-                    + "|open\\s*\\([^)]*['\"]w", Pattern.CASE_INSENSITIVE);
+                    // —— 网络 / 原生 RCE 模块：整模块禁止（这些模块无良性等价用法）——
+                    + "|\\bimport\\s+(subprocess|ctypes|socket|http|urllib|ftplib|smtplib|telnetlib|paramiko|marshal|imp|pty|builtins|importlib)\\b"
+                    + "|from\\s+(subprocess|ctypes|socket|http|urllib|ftplib|smtplib|telnetlib|paramiko|marshal|imp|pty|builtins|importlib)\\s+import\\b"
+                    // —— 高危系统调用：按“调用”拦截，放行 os.path / os.getcwd / shutil.copy 等良性用法 ——
+                    + "|\\bos\\.(system|popen\\w*|exec\\w*|spawn\\w*|fork|kill|remove|unlink|rmdir|removedirs|rename|chmod|chown|setuid|setgid|access)\\s*\\("
+                    + "|\\bshutil\\.(rmtree|rm|move|copytree)\\s*\\("
+                    // —— 任意文件写：落盘统一走产物回传通道，禁止用户直接 open('w') ——
+                    + "|open\\s*\\([^)]*['\"]w",
+            Pattern.CASE_INSENSITIVE);
 
     /** Python 3 解释器候选路径 */
     private static final String[] PYTHON_CANDIDATES = {"python3", "python"};
@@ -178,10 +191,13 @@ public class PythonEngine implements CodeEngine {
             if (exitCode == 0) {
                 // 解析返回值（最后一行 stdout 为返回值标记）
                 String returnValue = parseReturnValue(stdout);
+                // 收集脚本生成的文件产物（在 finally 清目录之前，字节已读入内存）
+                List<CodeArtifactDTO> artifacts = collectArtifacts(workDir);
                 return CodeExecResultDTO.builder()
                         .success(true)
                         .output(output)
                         .returnValue(returnValue)
+                        .artifacts(artifacts)
                         .elapsedMs(System.currentTimeMillis() - start)
                         .language("python")
                         .build();
@@ -269,6 +285,41 @@ public class PythonEngine implements CodeEngine {
     /**
      * 解析 main() 的返回值（从标记中提取）
      */
+    /**
+     * 收集脚本在临时工作目录生成的文件产物。
+     * <p>在子进程退出、finally 清目录之前调用：扫描 workDir 下除 script.py 外的普通文件，
+     * 读字节 → Base64 → 封装为 {@link CodeArtifactDTO}。脚本可用第三方库（如 python-pptx）
+     * 生成交付物（库内部写文件不触发安全黑名单），产物经此回传后由工具层落盘到会话 outputs/。</p>
+     */
+    private List<CodeArtifactDTO> collectArtifacts(File workDir) {
+        List<CodeArtifactDTO> artifacts = new ArrayList<>();
+        File[] files = workDir.listFiles();
+        if (files == null) {
+            return artifacts;
+        }
+        for (File f : files) {
+            if (!f.isFile() || "script.py".equals(f.getName())) {
+                continue;
+            }
+            try {
+                long size = f.length();
+                if (size > MAX_ARTIFACT_BYTES) {
+                    log.warn("[PythonEngine] 产物超过上限，跳过: {} ({} bytes)", f.getName(), size);
+                    continue;
+                }
+                byte[] bytes = Files.readAllBytes(f.toPath());
+                artifacts.add(CodeArtifactDTO.builder()
+                        .name(f.getName())
+                        .base64(Base64.getEncoder().encodeToString(bytes))
+                        .size(bytes.length)
+                        .build());
+            } catch (IOException e) {
+                log.warn("[PythonEngine] 读取产物失败: {}", f.getName(), e.getMessage());
+            }
+        }
+        return artifacts;
+    }
+
     private String parseReturnValue(String stdout) {
         if (stdout == null) return null;
         int startIdx = stdout.indexOf(RESULT_START_MARKER);
@@ -316,8 +367,17 @@ public class PythonEngine implements CodeEngine {
     }
 
     private String checkSecurity(String code) {
-        if (BLOCKED_IMPORTS.matcher(code).find()) {
-            return "Python 安全校验未通过：包含不允许的模块（禁止 os/subprocess/socket/http/sys 等系统模块）";
+        var m = BLOCKED_IMPORTS.matcher(code);
+        if (m.find()) {
+            String hit = m.group().trim();
+            if (hit.length() > 60) {
+                hit = hit.substring(0, 57) + "...";
+            }
+            return "Python 安全校验未通过：检测到受限的模块或危险调用（命中：" + hit
+                    + "）。禁用项：动态执行(exec/eval/__import__/importlib)、网络与原生RCE模块"
+                    + "(subprocess/ctypes/socket/http/urllib/ftp/smtp/telnet/paramiko 等)、"
+                    + "高危系统调用(os.system/popen/exec、shutil.rmtree 等)、任意文件写(open 'w')。"
+                    + "如需生成文件，请用库内写入(prs.save 等)，产物会自动回传至 outputs/ 工作区。";
         }
         return null;
     }

@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Base64;
 import java.util.stream.Stream;
 
 /**
@@ -242,6 +243,89 @@ public class LocalFileTool {
             return toJson(out);
         } catch (SecurityException | IOException e) {
             return errorJson("删除文件失败: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "local_write_file_binary",
+          description = "写入（覆盖）本机白名单目录下的**二进制**文件，仅用于**用户显式点名的本机文件**。" +
+                  "content 为文件字节的 Base64 编码（可含空白换行，会自动去除）；父目录不存在会自动创建。" +
+                  "用来落地 pptx/xlsx/docx/pdf/图片等二进制产物。只能写白名单内的文件，最大 10MB（解码后字节）。" +
+                  "注意：你自己生成的产物如需出现在用户会话文件树，仍优先用 sandbox_write_file_binary(outputs/...) + present_artifacts。")
+    @SystemTool(displayName = "写入本地二进制文件")
+    public String writeFileBinary(
+            @ToolParam(name = "path", description = "相对于白名单根目录的文件路径，如 output/report.pptx")
+            @ToolParamMeta(example = "output/report.pptx") String path,
+            @ToolParam(name = "content", description = "文件字节的 Base64 编码（不是普通文本）")
+            @ToolParamMeta(example = "UEsDBBQAAAAI...") String content,
+            ToolCallParam toolContext) {
+        if (path == null || path.isBlank()) {
+            return errorJson("路径不能为空");
+        }
+        if (content == null || content.isBlank()) {
+            return errorJson("Base64 内容不能为空");
+        }
+        if (isDisabled()) {
+            return errorJson("本地文件访问未启用（lengbot.local-file.root 未配置）");
+        }
+        try {
+            byte[] data = Base64.getDecoder().decode(content.replaceAll("\\s+", ""));
+            if (data.length > MAX_WRITE_BYTES) {
+                return errorJson("解码后内容超过写入上限(10MB): " + path);
+            }
+            Path root = rootPath();
+            Path target = LocalFilePathValidator.resolve(path.trim(), root);
+            if (Files.isDirectory(target)) {
+                return errorJson("目标是目录，不能写入: " + path);
+            }
+            Files.createDirectories(target.getParent());
+            Files.write(target, data, StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("path", path.trim());
+            out.put("size", data.length);
+            out.put("success", true);
+            out.put("mode", "overwrite-binary");
+            return toJson(out);
+        } catch (IllegalArgumentException e) {
+            return errorJson("Base64 解码失败: " + e.getMessage());
+        } catch (SecurityException | IOException e) {
+            return errorJson("写入文件失败: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "local_read_file_binary",
+          description = "读取本机白名单目录下的**二进制**文件，返回文件字节的 Base64 编码。" +
+                  "用于读取 pptx/xlsx/docx/pdf/图片等二进制文件。只能访问白名单内的文件，最大 4MB。")
+    @SystemTool(displayName = "读取本地二进制文件")
+    public String readFileBinary(
+            @ToolParam(name = "path", description = "相对于白名单根目录的文件路径，如 output/report.pptx")
+            @ToolParamMeta(example = "output/report.pptx") String path,
+            ToolCallParam toolContext) {
+        if (path == null || path.isBlank()) {
+            return errorJson("路径不能为空");
+        }
+        if (isDisabled()) {
+            return errorJson("本地文件访问未启用（lengbot.local-file.root 未配置）");
+        }
+        try {
+            Path root = rootPath();
+            Path target = LocalFilePathValidator.resolve(path.trim(), root);
+            if (!Files.isRegularFile(target)) {
+                return errorJson("文件不存在或非普通文件: " + path);
+            }
+            long size = Files.size(target);
+            if (size > MAX_READ_BYTES) {
+                return errorJson("文件超过读取上限(4MB): " + path + " (" + size + " bytes)");
+            }
+            byte[] bytes = Files.readAllBytes(target);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("path", path.trim());
+            out.put("size", bytes.length);
+            out.put("base64", Base64.getEncoder().encodeToString(bytes));
+            out.put("success", true);
+            return toJson(out);
+        } catch (SecurityException | IOException e) {
+            return errorJson("读取文件失败: " + e.getMessage());
         }
     }
 
