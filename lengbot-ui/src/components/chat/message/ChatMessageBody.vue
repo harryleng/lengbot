@@ -58,7 +58,7 @@
             v-if="segment.block?.kind === 'tools' && getPureToolEvents(segment.block.events).length > 0"
             :tool-events="getPureToolEvents(segment.block.events)"
             :is-done="isToolBlockSegmentDone(msg, segment.block)"
-            :default-expanded="!!msg._streaming"
+            :default-expanded="true"
             :message-index="index"
             :message-id="msg._id"
             @height-change="$emit('height-change', $event)"

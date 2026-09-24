@@ -9,7 +9,6 @@ import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.tool.ToolBase;
 import io.agentscope.core.tool.ToolCallParam;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -60,6 +59,7 @@ public class DelegateSubAgentTool {
         return """
                 将自包含任务委派给一个或多个 SubAgent。mode=sync 按顺序等待；mode=parallel 并行等待。
                 仅支持 sync、parallel；父 Agent 会等待每项任务到达终态，并拿到最终 reply 后继续本轮生成。
+                各任务的 reply 会原样全部返回，框架不做自动汇总；合并与总结由你（主 Agent）在拿到结果后自行阅读完成。
                 可用 SubAgent：
                 """ + catalog;
     }
@@ -73,7 +73,8 @@ public class DelegateSubAgentTool {
                   "subagent_name":{"type":"string","enum":[%s]},"task":{"type":"string"},"thread_id":{"type":"string"},
                   "tasks":{"type":"array","items":{"type":"object","properties":{"subagent_name":{"type":"string","enum":[%s]},"task":{"type":"string"},"thread_id":{"type":"string"}},"required":["subagent_name","task"]}},
                   "max_concurrency":{"type":"integer","minimum":1,"maximum":5},
-                  "aggregation":{"type":"string","enum":["return_all","summarize"]}
+                  "aggregation":{"type":"string","enum":["return_all"],"default":"return_all",
+                    "description":"当前仅支持 return_all：各子任务结果原样返回，由主 Agent 自行阅读并综合"}
                 }}
                 """.formatted(names, names);
     }

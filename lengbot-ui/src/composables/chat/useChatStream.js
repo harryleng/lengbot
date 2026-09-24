@@ -6,7 +6,7 @@ import { createSession, getSessionMessages } from '../../api/chatSession'
 import { validatePendingAttachmentMix } from '../../utils/chatAttachment'
 import { enrichVideoThumbnails } from '../../utils/videoThumbnail'
 import { safeJsonParse } from '../../utils/request'
-import { getToolBlockOffsets, markToolBlockDone } from './useChatEventPartition.js'
+import { getToolBlockOffsets, markToolBlockDone, splitContentByOffsets } from './useChatEventPartition.js'
 import { registerToolBlockOffset } from './useChatCapabilityStream.js'
 import { normalizeAssistantMessageErrors, resolveDeleteAssistantMessageId } from '../../utils/chat/messageErrorState.js'
 
@@ -232,6 +232,11 @@ export function useChatStream(deps) {
     let assistantMsg = null
     let pushed = false
     let pendingRequestId = null
+    // 在途工具计数：tool_call 时 +1，tool_complete 时 -1。用于精准判别 tool_status 是
+    // 「真实工具进度提示」（计数 > 0，工具执行中）还是「被后端误路由的答案正文」
+    // （计数 == 0 且无 onChunk 正文）。注意不能用 _toolExpanded（它在 tool_complete 后仍为真，
+    // 直到 onDone 才复位），否则"调用工具后"的答案会被误判为进度提示而漏进正文。
+    let inFlightToolCalls = 0
     abortController.value = new AbortController()
 
     const attachRequestId = (msg) => {
@@ -376,6 +381,7 @@ export function useChatStream(deps) {
             ensureAssistantMsg(event.type === 'tool_call' || event.type === 'tool_result')
             if (event.type === 'tool_complete') {
               const offset = event.contentOffset ?? assistantMsg._currentToolOffset
+              if (inFlightToolCalls > 0) inFlightToolCalls--
               markToolBlockDone(assistantMsg, offset)
               return
             }
@@ -518,14 +524,32 @@ export function useChatStream(deps) {
             if (event.type === 'tool_call') {
               assistantMsg._toolExpanded = true
               assistantMsg._currentToolOffset = offset
+              inFlightToolCalls++
               registerToolBlockOffset(assistantMsg, offset)
             } else if (assistantMsg._currentToolOffset == null || assistantMsg._currentToolOffset < 0) {
               assistantMsg._currentToolOffset = offset
               registerToolBlockOffset(assistantMsg, offset)
             }
 
-            // tool_status 提示文案：低频，立即生效
+            // tool_status 处理：区分「真实工具进度提示」与「被误路由的正文」。
+            // 根因：后端在某些情况下把模型答案当 tool_status 下发（contentOffset:0、无前置 tool_call，
+            // 见 [DBG onDone] 日志 contentLen:0、toolEventTypes 全为 tool_status），前端原逻辑只把它当
+            // 瞬时状态栏、从不写入 content，导致流式阶段正文空白、刷新（走 DB 回填）才显示。
+            // 判别：① 无活动工具调用（_toolExpanded 为假，即没有真实 tool_call 进行中）；② 正文尚未经
+            // onChunk 到达。两者同时成立时，该 tool_status.message 即为被误发的答案正文 —— 经 streamSmoother
+            // 补进 content（与 onChunk 同机制），并跳过 batchToolEvent 避免工具面板重复展示。
             if (event.type === 'tool_status' && event.message) {
+              const contentViaChunk =
+                !!(assistantMsg.content && assistantMsg.content.length > 0)
+              // 工具执行中（在途计数 > 0）的 tool_status = 真实进度提示；否则（计数归零且正文未到）
+              // = 被后端误路由的答案正文，需补进 content。用 inFlightToolCalls 而非 _toolExpanded，
+              // 以正确覆盖「调用工具后、答案被误发为 tool_status」的场景。
+              const toolExecuting = inFlightToolCalls > 0
+              if (!toolExecuting && !contentViaChunk) {
+                streamSmoother.push(event.message)
+                currentStatus.value = ''
+                return
+              }
               currentStatus.value = event.message
             }
 

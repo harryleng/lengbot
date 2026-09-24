@@ -117,6 +117,7 @@ public enum ErrorCode {
     TOOL_MISSING_PARAM(91005, "缺少必填参数", HttpStatus.BAD_REQUEST),
     TOOL_EXEC_FAILED(91006, "工具执行失败", HttpStatus.INTERNAL_SERVER_ERROR),
     TOOL_SSRF_BLOCKED(91007, "禁止访问内网地址", HttpStatus.BAD_REQUEST),
+    TOOL_NOT_OWNED(91008, "无权绑定该工具：工具非本人所有且非系统共享", HttpStatus.FORBIDDEN),
 
     // ========== SubAgent模块 ==========
     SUBAGENT_NOT_FOUND(91101, "SubAgent不存在", HttpStatus.BAD_REQUEST),

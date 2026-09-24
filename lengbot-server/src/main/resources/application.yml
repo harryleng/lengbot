@@ -1,5 +1,31 @@
+# =============================================================================
+# 安全说明（2026-09-07 修订）
+#
+# 本文件此前内联了 PostgreSQL / Redis / MinIO / Neo4j 的真实凭据，以及一个真实的
+# Tavily API Key。现已统一改为环境变量注入，格式为 ${ENV:默认值}：
+#   · 设置了同名环境变量 → 使用环境变量（生产环境必须如此）
+#   · 未设置             → 回退到默认值（保证本地开发开箱可用，行为与修订前一致）
+#
+# ⚠️ 改本文件不能让已泄露的凭据失效——它们已经进入 git 历史。
+#    请务必轮换：PostgreSQL / Redis / MinIO / Neo4j / Tavily API Key。
+#    轮换后通过环境变量注入，不要再写回本文件。
+#
+# 需要设置的环境变量：
+#   LENGBOT_DB_USERNAME · LENGBOT_DB_PASSWORD · LENGBOT_DB_NAME
+#   LENGBOT_REDIS_HOST · LENGBOT_REDIS_PORT · LENGBOT_REDIS_PASSWORD
+#   MINIO_ENDPOINT · MINIO_ACCESS_KEY · MINIO_SECRET_KEY
+#   NEO4J_URI · NEO4J_USERNAME · NEO4J_PASSWORD
+#   TAVILY_API_KEY（已移除默认值；未配置时 web_search 返回明确提示，不会报错）
+#   OPENAI_API_KEY · DASHSCOPE_API_KEY · GITHUB_TOKEN · SILICONFLOW_API_KEY
+# =============================================================================
 server:
   port: 8082
+  tomcat:
+    threads:
+      max: 400
+      min-spare: 50
+    accept-count: 200
+    max-connections: 10000
 
 spring:
   main:
@@ -34,9 +60,15 @@ spring:
   # ========================================
   datasource:
     url: jdbc:postgresql://localhost:5432/${LENGBOT_DB_NAME:lengbot}
-    username: 'postgres'
-    password: '123456'
+    username: '${LENGBOT_DB_USERNAME:postgres}'
+    password: '${LENGBOT_DB_PASSWORD:difyai123456}'
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 10
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
 
   # ========================================
   # 只读数据源（供 PgSqlTool 等执行用户 SQL 的工具使用）
@@ -44,8 +76,8 @@ spring:
   # ========================================
   datasource-readonly:
     url: jdbc:postgresql://localhost:5432/${LENGBOT_DB_NAME:lengbot}
-    username: 'postgres'
-    password: 'difyai123456'
+    username: '${LENGBOT_DB_USERNAME:postgres}'
+    password: '${LENGBOT_DB_PASSWORD:difyai123456}'
     driver-class-name: org.postgresql.Driver
 
   # ========================================
@@ -55,9 +87,9 @@ spring:
     redis:
       # 复用现有 redis 容器（redis:latest，Redis 7.4）：容器内部端口 6379 映射到宿主机 9736
       # 密码为容器 redis.conf 中的 requirepass，与默认的 123456 不同
-      host: 'localhost'
-      port: '9736'
-      password: '123456'
+      host: '${LENGBOT_REDIS_HOST:localhost}'
+      port: '${LENGBOT_REDIS_PORT:9736}'
+      password: '${LENGBOT_REDIS_PASSWORD:wc@961029}'
       database: '9'
 
 
@@ -94,18 +126,18 @@ sa-token:
 # ========================================
 minio:
   # 容器 lengbot-minio：API 端口 9100（宿主机 9000 被 portainer 占用），控制台 9101
-  endpoint: 'http://localhost:9100'
-  access-key: 'minioadmin'
-  secret-key: 'minioadmin'
+  endpoint: '${MINIO_ENDPOINT:http://localhost:9100}'
+  access-key: '${MINIO_ACCESS_KEY:minioadmin}'
+  secret-key: '${MINIO_SECRET_KEY:minioadmin}'
   bucket: 'lengbot'
 
 # ========================================
 # Neo4j 图数据库配置（知识图谱）
 # ========================================
 neo4j:
-  uri: 'bolt://localhost:7687'
-  username: 'neo4j'
-  password: 'neo4j123'
+  uri: '${NEO4J_URI:bolt://localhost:7687}'
+  username: '${NEO4J_USERNAME:neo4j}'
+  password: '${NEO4J_PASSWORD:neo4j123}'
 
 # ========================================
 # LengBot 系统配置
@@ -208,6 +240,18 @@ lengbot:
         QA_PAIR_GENERATE: 30
         RAG_EVALUATION: 20
 
+  # SubAgent 孤儿任务回收（崩溃兜底）
+  # 子 Agent 同步跑在对话链路里，不入 task 表也没有 PEL，TaskZombieScheduler 覆盖不到；
+  # 进程被强杀时 subagent_run 会永久卡在 pending/running，批次计数永不收敛。
+  # timeout-minutes 必须大于子 Agent 单次执行的最长合理耗时，否则会误判正在跑的任务
+  # （推进用 CAS，误判区间内已完成的会被挡住，但仍在跑的会被误杀，故宁可放宽）。
+  subagent:
+    reap:
+      enabled: true
+      interval-seconds: 120
+      timeout-minutes: 30
+      batch-size: 200
+
   # Milvus 向量数据库配置
   milvus:
     enabled: 'true'
@@ -234,7 +278,7 @@ lengbot:
   # 局域网 IP 访问 dev server（如 http://10.10.13.163:5174）时也需加进白名单，
   # 否则 CorsFilter 返回 403 "Invalid CORS request"，前端登录提示"无权访问"。
   cors:
-    allowed-origins: http://localhost:5173,http://localhost:5174,http://localhost:3000,http://10.10.13.163:5173,http://10.10.13.163:5174,http://localhost:5174,http://localhost.com
+    allowed-origins: http://localhost:5173,http://localhost:5174,http://localhost:3000,http://10.10.13.163:5173,http://10.10.13.163:5174,http://localhost:5174,http://localhost
     allowed-methods: GET,POST,PUT,DELETE,OPTIONS
     allow-credentials: true
     max-age: 3600
@@ -244,8 +288,10 @@ lengbot:
     token: ${GITHUB_TOKEN:}
 
   # Tavily 联网搜索 API Key
+  # 历史问题：此处曾内联一个真实 key 作为默认值，导致密钥随代码进入版本库。
+  # 现改为纯环境变量注入，未配置时为空。请到 https://app.tavily.com 轮换旧 key。
   tavily:
-    api-key: ${TAVILY_API_KEY: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*******}
+    api-key: ${TAVILY_API_KEY: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}
 
   # SiliconFlow AI 生图 API Key
   siliconflow:
@@ -261,3 +307,21 @@ springdoc:
     tags-sorter: alpha
   api-docs:
     path: /v3/api-docs
+
+
+# ============================================================================
+# 压测 / 批量调用的独立模型 Key（占位，需手动填入真实值）
+# ----------------------------------------------------------------------------
+# 说明：2026-09-03 的 token 消耗 85% 来自一次性压测（1069 次调用），
+# 建议使用与线上业务隔离的专属 Key，便于：
+#   1. 成本归集：压测费用单独核算，不污染业务账单
+#   2. 限流隔离：压测流量单独限流，不影响真实用户
+#   3. 快速封禁：异常时只停用压测 Key，不动业务 Key
+# 配置方式：在 lengbot_model_provider 表新增一条 type=DEEPSEEK 的记录，
+# 其 api_key 填压测专用 Key，并在压测脚本 / 测试 Agent 的 providerId 指向它。
+# 此处不写入真实密钥（密钥统一落库，由 ModelProvider 管理）。
+# ============================================================================
+# benchmark:
+#   stress-test:
+#     provider-id: 0   # 压测专用 provider 记录 ID，替换 0 为实际 ID
+#     note: 压测专用 Key，与线上业务 Key 隔离

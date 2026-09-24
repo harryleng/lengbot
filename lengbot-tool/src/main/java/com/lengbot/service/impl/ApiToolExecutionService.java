@@ -150,7 +150,10 @@ public class ApiToolExecutionService {
         } catch (BizException e) {
             throw e;
         } catch (Exception e) {
-            log.warn("[ApiToolExecution] DNS 解析失败: {}", e.getMessage());
+            // DNS 解析失败一律拒绝，而非放行：放行会让 DNS rebinding 绕过
+            // （首次解析公网 IP 通过校验，二次解析到内网 IP 即可访问内网服务）
+            log.warn("[ApiToolExecution] DNS 解析失败，拒绝访问: host={}, error={}", host, e.getMessage());
+            throw new BizException(ErrorCode.TOOL_SSRF_BLOCKED, "域名解析失败，拒绝访问");
         }
     }
 

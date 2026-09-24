@@ -5,6 +5,7 @@ import com.lengbot.entity.SubAgentTaskBatch;
 import com.lengbot.entity.SubAgentTaskEvent;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /** SubAgent 批次和任务持久化 SPI。 */
@@ -43,4 +44,23 @@ public interface SubAgentTaskRepository {
     List<SubAgentTaskEvent> findTaskEvents(String taskId, Long cursor, int limit);
 
     SubAgentTaskEvent findLatestTaskEvent(String taskId);
+
+    /**
+     * 查询疑似孤儿的未终结任务：状态仍为 pending/running 且 update_time 早于阈值。
+     * <p>用途：进程被强杀时代码没有机会推进状态，这些记录会永久卡在未终结态，
+     * 导致批次计数永不收敛、前端协作面板一直转圈。孤儿回收器据此做兜底。</p>
+     *
+     * @param updateTimeBefore update_time 早于该时间点才算候选（按 update_time 升序，先处理最老的）
+     * @param limit            单轮最大扫描条数
+     */
+    List<SubAgentRun> findOrphanRuns(LocalDateTime updateTimeBefore, int limit);
+
+    /**
+     * CAS 推进任务状态：仅当当前状态属于 {@code expectedStatuses} 时才更新为终态。
+     * <p>用于避免回收器覆盖 worker 恰好在同一时刻写入的终态（状态已推进则更新 0 行）。</p>
+     *
+     * @return 是否实际更新（false 表示状态已被别处推进，调用方应跳过）
+     */
+    boolean casUpdateStatus(Long id, List<String> expectedStatuses, String targetStatus,
+                            String errorMessage, LocalDateTime endTime);
 }

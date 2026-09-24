@@ -79,6 +79,9 @@ public final class AgentChatRuntimeConfigUtil {
         }
 
         overlayBehaviorConfig(runtimeConfig, draftConfig);
+        // 默认开启上下文摘要压缩：历史超过阈值时自动压缩，避免长会话 input token 持续膨胀。
+        // agent 显式配置 enableSummary=false 时不受影响。
+        runtimeConfig.putIfAbsent(ConfigKeys.Agent.ENABLE_SUMMARY, true);
         return runtimeConfig;
     }
 

@@ -27,6 +27,7 @@
           <!-- tool_call: 工具调用发起 -->
           <div v-if="evt.type === 'tool_call'" class="event-call-wrap">
             <div class="event-row event-call">
+                <span class="event-order-badge">{{ getOrder(ti) }}</span>
               <LoadingOutlined v-if="!isCallCompleted(ti)" class="event-icon icon-spinning" />
               <CheckCircleOutlined v-else class="event-icon icon-success" />
               <span class="event-label">
@@ -59,6 +60,7 @@
           </div>
           <!-- tool_result: 执行结果 -->
           <div v-else-if="evt.type === 'tool_result'" class="event-row event-result">
+            <span class="event-order-badge">{{ getOrder(ti) }}</span>
             <CheckCircleOutlined class="event-icon icon-success" />
             <span class="event-label">
               <component :is="resolveEventIcon(evt)" class="event-tool-icon" />
@@ -316,6 +318,41 @@ async function fetchFullResult(index) {
   }
 }
 
+/**
+ * 按出现顺序为每个 tool_call 分配序号（1-based），用于展示"第几个工具调用"。
+ * tool_result / tool_status 通过向前匹配最近同 toolName 的 tool_call 复用同一序号。
+ */
+const toolCallOrderMap = computed(() => {
+  const map = new Map()
+  let order = 0
+  props.toolEvents.forEach((e, i) => {
+    if (e?.type === 'tool_call') {
+      order += 1
+      map.set(i, order)
+    }
+  })
+  return map
+})
+
+function getCallIndexForEvent(evtIndex) {
+  const events = props.toolEvents || []
+  const evt = events[evtIndex]
+  if (!evt) return -1
+  if (evt.type === 'tool_call') return evtIndex
+  for (let i = evtIndex - 1; i >= 0; i--) {
+    const prev = events[i]
+    if (prev?.type === 'tool_call' && prev?.toolName === evt.toolName) return i
+  }
+  return -1
+}
+
+function getOrder(evtIndex) {
+  const callIndex = getCallIndexForEvent(evtIndex)
+  if (callIndex < 0) return ''
+  const ord = toolCallOrderMap.value.get(callIndex)
+  return ord == null ? '' : ord
+}
+
 function formatLength(n) {
   if (typeof n !== 'number' || n <= 0) return ''
   if (n < 1024) return `${n} 字符`
@@ -527,6 +564,23 @@ function formatLength(n) {
       transform: rotate(90deg);
     }
   }
+}
+
+.event-order-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  margin-top: 2px;
+  border-radius: 4px;
+  background: var(--main-600, #1677ff);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .event-args-raw {

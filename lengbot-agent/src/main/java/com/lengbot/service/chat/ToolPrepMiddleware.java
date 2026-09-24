@@ -195,7 +195,15 @@ public class ToolPrepMiddleware implements ChatMiddleware {
             }
 
             // 1.1 知识库工具自动注入：当 Agent 绑定了知识库时，自动加载 type=knowledge 的工具
-            // 排除已被 Agent 手动绑定的工具（mergedToolIds），避免重复注册
+            // 排除已被 Agent 手动绑定的工具（mergedToolIds），避免重复注册。
+            // 开关 autoInjectKnowledgeTools（默认 true）；设为 false 时跳过，避免无关 KNOWLEDGE 工具
+            // 的 input_schema 全量注入推高 system 上下文与 token 消耗。
+            boolean autoInjectKnowledge = true;
+            Object autoInjectVal = configMap.get("autoInjectKnowledgeTools");
+            if (autoInjectVal instanceof Boolean b) {
+                autoInjectKnowledge = b;
+            }
+            if (autoInjectKnowledge) {
             List<Long> knowledgeIds = ctx != null && ctx.getVersionKnowledgeIds() != null
                     ? ctx.getVersionKnowledgeIds() : agentService.getKnowledgeIds(agent.getId());
             if (!knowledgeIds.isEmpty()) {
@@ -214,6 +222,10 @@ public class ToolPrepMiddleware implements ChatMiddleware {
                                 agent.getId(), knowledgeIds.size(), kbToolNames);
                     }
                 }
+            }
+            } else {
+                log.info("[Chat] 知识库工具自动注入已关闭(autoInjectKnowledgeTools=false): agentId={}",
+                        agent.getId());
             }
 
             // 1.2 用户长期记忆工具自动注入：仅在用户显式开启长期记忆后提供

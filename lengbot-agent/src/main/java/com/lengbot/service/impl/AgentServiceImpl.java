@@ -466,6 +466,10 @@ public class AgentServiceImpl extends ServiceImpl<AgentMapper, Agent>
                     }
                 }
             }
+            // 归属校验：防止通过已绑定的他人 knowledgeId 越权读取（IDOR 兜底）
+            for (Long knowledgeId : ids) {
+                knowledgeService.checkMember(knowledgeId);
+            }
             return ids;
         } catch (Exception e) {
             log.warn("[Agent] 解析config.knowledges失败: agentId={}, error={}", agentId, e.getMessage());
@@ -481,6 +485,12 @@ public class AgentServiceImpl extends ServiceImpl<AgentMapper, Agent>
             throw new BizException(ErrorCode.AGENT_KNOWLEDGE_LIMIT);
         }
         Agent agent = checkOwnership(agentId);
+        // 1. 归属校验：禁止把非本人/非共享成员的知识库绑定到 Agent（IDOR 修复点）
+        if (knowledgeIds != null) {
+            for (Long knowledgeId : knowledgeIds) {
+                knowledgeService.checkMember(knowledgeId);
+            }
+        }
         try {
             // 1. 解析现有config
             var configNode = objectMapper.readTree(
@@ -511,6 +521,23 @@ public class AgentServiceImpl extends ServiceImpl<AgentMapper, Agent>
     @Override
     @CacheEvict(value = RedisCacheConfig.CACHE_AGENT_BINDING, key = "#agentId + ':toolIds'")
     public void updateToolBindings(Long agentId, List<Long> toolIds) {
+        // 工具级权限白名单：绑定前校验每个工具的归属。
+        // 仅允许绑定「系统共享工具（userId IS NULL）」或「当前 Agent 属主私有的工具」，
+        // 防止用户 A 将用户 B 的私有 API 工具（含认证凭据/endpoint）绑定到自己 Agent 上盗用。
+        if (toolIds != null && !toolIds.isEmpty()) {
+            Agent agent = checkOwnership(agentId);
+            Long ownerUserId = agent.getUserId();
+            List<Tool> tools = toolService.listByIds(toolIds);
+            for (Tool tool : tools) {
+                boolean shared = tool.getUserId() == null;
+                boolean owned = Objects.equals(tool.getUserId(), ownerUserId);
+                if (!shared && !owned) {
+                    log.warn("[Agent] 拒绝绑定非本人工具: agentId={}, toolId={}, toolName={}, toolOwner={}, currentOwner={}",
+                            agentId, tool.getId(), tool.getName(), tool.getUserId(), ownerUserId);
+                    throw new BizException(ErrorCode.TOOL_NOT_OWNED);
+                }
+            }
+        }
         writeBindingIdsToConfig(agentId, "tools", toolIds, 10, ErrorCode.AGENT_TOOL_LIMIT);
     }
 

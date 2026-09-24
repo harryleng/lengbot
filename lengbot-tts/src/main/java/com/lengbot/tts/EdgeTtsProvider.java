@@ -79,6 +79,8 @@ public class EdgeTtsProvider implements TtsProvider {
     private volatile Set<String> validVoiceNames;
     private volatile long validVoiceExpireAt;
     private static final long VOICE_CACHE_TTL_MS = 10 * 60 * 1000L;
+    /** single-flight placeholder: only the winner fetches over HTTP outside the lock */
+    private volatile CompletableFuture<Set<String>> validVoiceNamesFuture;
 
     @Override
     public TtsAudio synthesize(TtsRequest request) {
@@ -262,25 +264,44 @@ public class EdgeTtsProvider implements TtsProvider {
         if (cached != null && validVoiceExpireAt > now) {
             return cached;
         }
+        // single-flight: only the winner thread runs listVoices() (HTTP) outside the lock.
+        // On cache expiry, other threads share the same future instead of blocking serially on the lock.
+        CompletableFuture<Set<String>> future;
         synchronized (this) {
+            // double-check after acquiring the lock
             if (validVoiceNames != null && validVoiceExpireAt > now) {
                 return validVoiceNames;
             }
-            try {
-                List<TtsVoice> live = listVoices();
-                if (live != null && !live.isEmpty()) {
-                    Set<String> set = live.stream()
+            if (validVoiceNamesFuture == null) {
+                validVoiceNamesFuture = CompletableFuture.supplyAsync(() -> {
+                    List<TtsVoice> live = listVoices();
+                    if (live == null || live.isEmpty()) {
+                        return null;
+                    }
+                    return live.stream()
                             .map(TtsVoice::getName)
                             .filter(n -> n != null && !n.isBlank())
                             .collect(Collectors.toSet());
-                    validVoiceNames = set;
-                    validVoiceExpireAt = now + VOICE_CACHE_TTL_MS;
-                    return set;
-                }
-            } catch (Exception e) {
-                log.warn("[EdgeTTS] 音色清单加载失败，跳过音色校验: {}", e.getMessage());
+                });
+            }
+            future = validVoiceNamesFuture;
+        }
+        try {
+            Set<String> set = future.get(5, TimeUnit.SECONDS);
+            if (set != null && !set.isEmpty()) {
+                validVoiceNames = set;
+                validVoiceExpireAt = System.currentTimeMillis() + VOICE_CACHE_TTL_MS;
+                return set;
             }
             return null;
+        } catch (Exception e) {
+            log.warn("[EdgeTTS] 音色清单加载失败，跳过音色校验: {}", e.getMessage());
+            return null;
+        } finally {
+            // clear the placeholder so the next expiry can re-fetch
+            if (validVoiceNamesFuture == future) {
+                validVoiceNamesFuture = null;
+            }
         }
     }
 

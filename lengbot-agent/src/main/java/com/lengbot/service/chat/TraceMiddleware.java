@@ -229,6 +229,7 @@ public class TraceMiddleware implements ChatMiddleware {
         trace.setStatus(status);
         trace.setInputTokens(ctx.getInputTokenHolder()[0]);
         trace.setOutputTokens(ctx.getOutputTokenHolder()[0]);
+        trace.setPromptCacheHitTokens(ctx.getCachedTokenHolder() != null ? ctx.getCachedTokenHolder()[0] : 0);
         trace.setTotalTokens(ctx.getInputTokenHolder()[0] + ctx.getOutputTokenHolder()[0]);
         trace.setToolCallCount(ctx.getToolCallCountHolder()[0]);
         trace.setTotalDurationMs(durationMs);

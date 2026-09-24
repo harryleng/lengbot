@@ -107,6 +107,22 @@ public class LocalDiskSandboxFs implements SandboxFs {
     }
 
     @Override
+    public void writeBytes(SandboxPath path, byte[] content) {
+        if (path.type() == SandboxPath.PathType.SKILL) {
+            throw new UnsupportedOperationException("Skill 目录为只读，不可写入");
+        }
+        String rel = path.toMinioPath();
+        SandboxPathValidator.checkWritable(rel);
+        Path target = resolveChecked(rel);
+        try {
+            Files.createDirectories(target.getParent());
+            atomicWriteBytes(target, content);
+        } catch (IOException e) {
+            throw new RuntimeException("本地沙盒写入二进制失败: " + rel, e);
+        }
+    }
+
+    @Override
     public void appendFile(SandboxPath path, String content) {
         if (path.type() == SandboxPath.PathType.SKILL) {
             throw new UnsupportedOperationException("Skill 目录为只读，不可追加");
@@ -211,6 +227,13 @@ public class LocalDiskSandboxFs implements SandboxFs {
                 tmp, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
             writer.write(content);
         }
+        Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    /** 原子写字节：tmp 文件 + ATOMIC_MOVE，防半截文件（与 atomicWriteString 同模式） */
+    private static void atomicWriteBytes(Path file, byte[] content) throws IOException {
+        Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+        Files.write(tmp, content, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
         Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     }
 

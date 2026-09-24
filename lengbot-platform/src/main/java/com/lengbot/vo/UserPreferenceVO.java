@@ -25,4 +25,10 @@ public class UserPreferenceVO {
 
     @Schema(description = "记忆作用域：user/agent")
     private String longMemoryScope;
+
+    @Schema(description = "长期记忆是否启用 LLM 语义抽取（false=回退关键词启发式）")
+    private Boolean longMemoryLlmExtract;
+
+    @Schema(description = "记忆抽取专用模型 providerId，空=系统默认")
+    private Long memoryExtractProviderId;
 }

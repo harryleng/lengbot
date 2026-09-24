@@ -40,6 +40,8 @@ public class InitMiddleware implements ChatMiddleware {
     private final ObjectMapper objectMapper;
     private final ProviderResolver providerResolver;
 
+    private final ModelRoutingService modelRoutingService;
+
     @Override
     public Flux<String> execute(ChatContext ctx, ChatMiddlewareChain next) {
         long t0 = System.currentTimeMillis();
@@ -68,6 +70,7 @@ public class InitMiddleware implements ChatMiddleware {
 
         // 3. 解析 config（支持指定版本 / 草稿 / 默认线上），同时提取版本绑定 ID
         Map<String, Object> configMap = resolveRuntimeConfigMap(agent, ctx.getRequest(), ctx);
+        configMap = modelRoutingService.applyRouting(ctx, configMap);
         ctx.setConfigMap(configMap);
         ctx.setProviderId(providerResolver.resolveFromConfig(configMap));
 
@@ -93,6 +96,7 @@ public class InitMiddleware implements ChatMiddleware {
         ctx.setAgent(agent);
 
         Map<String, Object> configMap = resolveRuntimeConfigMap(agent, ctx.getRequest(), ctx);
+        configMap = modelRoutingService.applyRouting(ctx, configMap);
         ctx.setConfigMap(configMap);
         ctx.setProviderId(providerResolver.resolveFromConfig(configMap));
     }

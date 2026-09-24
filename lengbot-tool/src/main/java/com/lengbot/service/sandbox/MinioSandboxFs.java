@@ -5,6 +5,8 @@ import com.lengbot.util.SandboxPathValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -50,6 +52,20 @@ public class MinioSandboxFs implements SandboxFs {
         String minioPath = path.toMinioPath();
         SandboxPathValidator.checkWritable(minioPath);
         minioUtil.uploadString(content, minioPath, "application/octet-stream");
+    }
+
+    @Override
+    public void writeBytes(SandboxPath path, byte[] content) {
+        if (path.type() == SandboxPath.PathType.SKILL) {
+            throw new UnsupportedOperationException("Skill 目录为只读，不可写入");
+        }
+        String minioPath = path.toMinioPath();
+        SandboxPathValidator.checkWritable(minioPath);
+        try (InputStream in = new ByteArrayInputStream(content)) {
+            minioUtil.upload(in, minioPath, content.length, "application/octet-stream");
+        } catch (Exception e) {
+            throw new RuntimeException("MinIO 沙盒写入二进制失败: " + minioPath, e);
+        }
     }
 
     @Override

@@ -110,7 +110,9 @@ public class ModelProviderCacheUtil {
      */
     public void evictProvider(Long providerId) {
         stringRedisTemplate.delete(CACHE_PREFIX + providerId);
-        log.debug("[Cache] 清除提供商缓存: id={}", providerId);
+        // FIX: all 列表缓存中同样存有该 provider 的快照（含凭证），不一并失效会导致改凭证后仍读到旧值。
+        stringRedisTemplate.delete(ALL_PROVIDERS_KEY);
+        log.debug("[Cache] 清除提供商缓存: id={}, 并失效提供商列表缓存", providerId);
     }
 
     /**

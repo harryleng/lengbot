@@ -8,10 +8,12 @@ import com.lengbot.mapper.SubAgentTaskEventMapper;
 import com.lengbot.entity.SubAgentTaskEvent;
 import com.lengbot.subagent.spi.SubAgentTaskRepository;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /** SubAgent 任务数据访问实现。 */
@@ -81,6 +83,32 @@ public class SubAgentTaskRepositoryImpl implements SubAgentTaskRepository {
                 .eq(parentRequestId != null && !parentRequestId.isBlank(),
                         SubAgentRun::getParentRequestId, parentRequestId)
                 .orderByDesc(SubAgentRun::getCreateTime));
+    }
+
+    @Override
+    public List<SubAgentRun> findOrphanRuns(LocalDateTime updateTimeBefore, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 1000));
+        return subAgentRunMapper.selectList(new LambdaQueryWrapper<SubAgentRun>()
+                .in(SubAgentRun::getStatus, List.of("pending", "running"))
+                .lt(SubAgentRun::getUpdateTime, updateTimeBefore)
+                .orderByAsc(SubAgentRun::getUpdateTime)
+                .last("LIMIT " + safeLimit));
+    }
+
+    @Override
+    public boolean casUpdateStatus(Long id, List<String> expectedStatuses, String targetStatus,
+                                   String errorMessage, LocalDateTime endTime) {
+        if (id == null || expectedStatuses == null || expectedStatuses.isEmpty()) {
+            return false;
+        }
+        LambdaUpdateWrapper<SubAgentRun> uw = new LambdaUpdateWrapper<SubAgentRun>()
+                .eq(SubAgentRun::getId, id)
+                .in(SubAgentRun::getStatus, expectedStatuses)
+                .set(SubAgentRun::getStatus, targetStatus)
+                .set(SubAgentRun::getErrorMessage, errorMessage)
+                .set(SubAgentRun::getEndTime, endTime)
+                .set(SubAgentRun::getUpdateTime, LocalDateTime.now());
+        return subAgentRunMapper.update(null, uw) > 0;
     }
 
     @Override

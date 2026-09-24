@@ -22,4 +22,8 @@ public class UserPreferenceUpdateDTO {
     private Integer longMemoryInjectLimit;
 
     private String longMemoryScope;
+
+    private Boolean longMemoryLlmExtract;
+
+    private Long memoryExtractProviderId;
 }

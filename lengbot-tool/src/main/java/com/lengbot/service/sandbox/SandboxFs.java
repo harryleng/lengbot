@@ -44,6 +44,16 @@ public interface SandboxFs {
     void writeFile(SandboxPath path, String content);
 
     /**
+     * 写入二进制文件（覆盖，仅工作区）。Skill 目录为只读，写入抛 {@link UnsupportedOperationException}。
+     * <p>用于 Agent 落地 PDF/PPTX/图片等二进制交付物。工具层需将字节编码为 Base64 后再传入
+     * （见 {@code SandboxFileTool#writeFileBinary}）。底层存储按字节原样落盘，不做任何字符编码。</p>
+     *
+     * @param path    沙盒路径
+     * @param content 文件字节
+     */
+    void writeBytes(SandboxPath path, byte[] content);
+
+    /**
      * 向已有文件追加内容（不存在则创建，仅工作区）。
      * <p>实现需保证追加的原子性/并发安全：本地磁盘用 {@code APPEND} 打开；MinIO 无原生追加语义，
      * 采用「存在则读-拼-写、不存在则直接创建」策略，读失败时抛异常而不是静默覆盖。</p>
