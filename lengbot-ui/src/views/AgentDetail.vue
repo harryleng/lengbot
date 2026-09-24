@@ -499,6 +499,27 @@
                         />
                       </a-form-item>
 
+                      <a-form-item label="混合路由">
+                        <a-switch v-model:checked="agentConfig.modelRoutingEnabled" :disabled="isVersionPreview" />
+                        <span class="tool-option-value">{{ agentConfig.modelRoutingEnabled ? '已启用' : '未启用' }}</span>
+                        <a-tooltip
+                          title="开启后，简单请求（短文本/寒暄、无附件、无@提及）自动使用下方「轻量模型」，复杂请求仍用上方主模型，以降低成本与延迟。规则判定保守，宁可判为复杂。"
+                          overlay-class-name="no-flip-tooltip"
+                          :overlay-style="{ maxWidth: '340px' }"
+                          placement="topLeft"
+                        >
+                          <QuestionCircleOutlined class="field-hint-icon" />
+                        </a-tooltip>
+                      </a-form-item>
+                      <a-form-item v-if="agentConfig.modelRoutingEnabled" label="轻量模型">
+                        <ModelSelect
+                          v-model:provider-id="agentConfig.lightProviderId"
+                          v-model:model-id="agentConfig.lightModelId"
+                          :disabled="isVersionPreview"
+                        />
+                        <div class="prompt-var-tip">简单请求将自动切换到此轻量模型；复杂请求仍用上方主模型。</div>
+                      </a-form-item>
+
                       <!-- 模型能力（嵌套在模型参数内，参考变量配置） -->
                       <div v-if="capabilityFields.length" class="sub-config-card sub-config-card--model">
                         <div class="sub-config-card-header">
@@ -2353,6 +2374,7 @@ const agentConfig = reactive({
   summaryToolResultTokenLimit: 500,
   maxExecutionSteps: 20,
   modelRetryTimes: 2,
+  modelRoutingEnabled: false,
 })
 
 // 数字人配置（仅数字人型 agent 使用），持久化到 agent.config.digitalHuman
