@@ -3,6 +3,8 @@ package com.lengbot.service;
 import io.agentscope.core.embedding.EmbeddingModel;
 import io.agentscope.core.message.TextBlock;
 import reactor.core.publisher.Mono;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
@@ -16,6 +18,8 @@ import java.util.List;
  * @since 1.0.0
  */
 public interface TextEmbeddingService {
+
+    Logger log = LoggerFactory.getLogger(TextEmbeddingService.class);
 
     /**
      * 获取 AgentScope EmbeddingModel 实例
@@ -42,10 +46,26 @@ public interface TextEmbeddingService {
      * @param texts 待嵌入的文本列表
      * @return 嵌入向量列表
      */
+    /**
+     * 批量文本嵌入（同步）。
+     * <p>逐条隔离：单条文本嵌入失败（如超长触发 400）时记录日志并返回占位零向量，
+     * 避免一个坏 chunk 拖垮整批、导致整篇文档入库中断。</p>
+     */
     default List<double[]> embedBatch(List<String> texts) {
         EmbeddingModel model = getEmbeddingModel();
+        int dims = getDimensions();
         return texts.stream()
-                .map(text -> model.embed(TextBlock.builder().text(text).build()).block())
+                .map(text -> {
+                    try {
+                        return model.embed(TextBlock.builder().text(text).build()).block();
+                    } catch (Exception e) {
+                        log.warn("[Embedding] 单条文本嵌入失败，已跳过并返回零向量占位: 长度={}, 预览={}, error={}",
+                                (text == null ? 0 : text.length()),
+                                (text == null ? "" : text.substring(0, Math.min(100, text.length()))),
+                                e.getMessage());
+                        return new double[dims];
+                    }
+                })
                 .toList();
     }
 
