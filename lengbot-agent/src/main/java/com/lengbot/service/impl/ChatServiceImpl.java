@@ -495,6 +495,18 @@ public class ChatServiceImpl implements ChatService {
                         ctx.requestAbort("CLIENT_DISCONNECT");
                         log.info("[Chat] stream cancelled: requestId={}, sessionId={}",
                                 ctx.getRequestId(), ctx.getSessionId());
+                        // 客户端断开/用户停止：补存已生成的 AI 回复片段（标 aborted），
+                        // 避免留下无 ASSISTANT 配对的孤立 USER 消息
+                        try {
+                            Long savedId = persistAssistantReply(ctx);
+                            if (savedId != null) {
+                                log.info("[Chat] 取消时已生成回复片段已补存: requestId={}, assistantMessageId={}",
+                                        ctx.getRequestId(), savedId);
+                            }
+                        } catch (Exception e) {
+                            log.warn("[Chat] 取消时补存 AI 回复失败: requestId={}, {}",
+                                    ctx.getRequestId(), e.getMessage());
+                        }
                     }
                 });
     }
@@ -532,33 +544,14 @@ public class ChatServiceImpl implements ChatService {
         }
 
         try {
-            Long agentId = ctx.getAgent() != null ? ctx.getAgent().getId() : null;
-
-            // 0. 记录 Token 消耗到预算服务
-            if (ctx.getUserId() != null) {
-                tokenBudgetService.recordUsage(ctx.getUserId(), ctx.getInputTokenHolder()[0], ctx.getOutputTokenHolder()[0]);
+            // 1. 持久化 AI 回复（含 Token 配额扣减；取消/停止场景复用同一方法，自动标记 aborted）
+            // 注意：流式链路中 fullReply 已在过程中通过 SensitiveWordFilter 过滤，此处直接使用避免重复过滤
+            Long assistantMessageId = persistAssistantReply(ctx);
+            if (assistantMessageId == null) {
+                return toolEventGenerator.doneWithMetadata(ctx.getUserMessageId(), null, totalTokens, null);
             }
-            // 0.1 API Key 配额扣减
-            Long apiKeyId = ctx.getRequest().getApiKeyId();
-            if (apiKeyId != null) {
-                apiKeyService.checkAndConsumeQuota(apiKeyId, totalTokens);
-            }
-
-            // 1. 持久化 AI 回复
-            // 注意：流式链路中 fullReply 已在过程中通过 SensitiveWordFilter 过滤（processChunk/filterAiOutput）
-            // 此处直接使用，避免重复过滤导致内容不一致（替换策略下多次替换会改变内容）
-            ctx.finalizeInlineThinking();
-            String fullReplyText = ctx.getFullReply().toString();
-            // 仅做数据库安全清理（非法字符），不做敏感词二次过滤
-            String replyToSave = com.lengbot.util.TextNormalizeUtil.sanitizeForAiMessage(fullReplyText, 0);
-            String metadataStr = buildPersistMetadata(ctx, replyToSave);
-            // toolEvents 单独序列化到 message.tool_events 列（与 metadata 解耦）
-            String toolEventsStr = serializeToolEvents(buildPersistToolEvents(ctx, replyToSave));
-            Long assistantMessageId = messageMiddleware.saveMessage(
-                    ctx.getSessionId(), MessageRole.ASSISTANT,
-                    replyToSave, metadataStr, toolEventsStr,
-                    (int) totalTokens, MessageType.TEXT, null, null);
-            ctx.setAssistantMessageId(assistantMessageId);
+            // 取消/停止已标 aborted；此处为 [DONE] 事件重算 metadata 供前端渲染
+            String metadataStr = buildPersistMetadata(ctx, ctx.getFullReply().toString());
 
             // 1.1 批量写入工具调用记录
             if (!ctx.getPendingToolCalls().isEmpty()) {
@@ -571,9 +564,6 @@ public class ChatServiceImpl implements ChatService {
                 }
                 toolCallService.saveBatch(ctx.getPendingToolCalls());
             }
-            ctx.getFullReply().setLength(0);
-            ctx.getFullReply().append(replyToSave);
-
             // 1.2 助手消息已落库，异步生成会话标题（须晚于 TraceMiddleware.doOnComplete）
             scheduleTitleGeneration(ctx);
 
@@ -602,6 +592,62 @@ public class ChatServiceImpl implements ChatService {
             log.error("[Chat] 构建[DONE]事件异常: {}", e.getMessage(), e);
             return DONE_PREFIX;
         }
+    }
+
+    /**
+     * 持久化 AI 回复到消息表，供正常完成（buildDoneEvent）与客户端取消/用户停止（chatStream doFinally）共用。
+     * 幂等：已保存（assistantMessageId != null）直接返回；取消场景 ctx.isAborted() 已由 requestAbort 置位，
+     * buildPersistMetadata 自动标记 aborted=true，前端渲染「输出已中断/已停止」；已生成片段仍完整保存。
+     *
+     * @return assistantMessageId，未保存（无正文/敏感词已落库）返回 null
+     */
+    private Long persistAssistantReply(ChatContext ctx) {
+        // 敏感词拦截：UserSensitiveMiddleware 已落库 USER + ASSISTANT 两条，跳过
+        if (ctx.isSensitiveUserBlocked()) {
+            return ctx.getAssistantMessageId();
+        }
+        // 幂等：已保存过则不再保存，避免 doFinally 与 buildDoneEvent 重复落库
+        if (ctx.getAssistantMessageId() != null) {
+            return ctx.getAssistantMessageId();
+        }
+        ctx.finalizeInlineThinking();
+        String fullReplyText = ctx.getFullReply().toString();
+        // 取消/停止时可能尚未生成任何正文，不落库避免空白 ASSISTANT 消息
+        if (fullReplyText.isBlank()) {
+            return null;
+        }
+        // Token 配额扣减统一在此（两条路径只扣一次）
+        long persistTotalTokens = ctx.getInputTokenHolder()[0] + ctx.getOutputTokenHolder()[0];
+        if (ctx.getUserId() != null) {
+            tokenBudgetService.recordUsage(ctx.getUserId(), ctx.getInputTokenHolder()[0], ctx.getOutputTokenHolder()[0]);
+        }
+        Long apiKeyId = ctx.getRequest().getApiKeyId();
+        if (apiKeyId != null) {
+            apiKeyService.checkAndConsumeQuota(apiKeyId, persistTotalTokens);
+        }
+        // 1. 持久化 AI 回复（fullReply 已过滤，仅做数据库安全清理）
+        String replyToSave = com.lengbot.util.TextNormalizeUtil.sanitizeForAiMessage(fullReplyText, 0);
+        String metadataStr = buildPersistMetadata(ctx, replyToSave);
+        String toolEventsStr = serializeToolEvents(buildPersistToolEvents(ctx, replyToSave));
+        Long assistantMessageId = messageMiddleware.saveMessage(
+                ctx.getSessionId(), MessageRole.ASSISTANT,
+                replyToSave, metadataStr, toolEventsStr,
+                (int) persistTotalTokens, MessageType.TEXT, null, null);
+        ctx.setAssistantMessageId(assistantMessageId);
+        // 1.1 批量写入工具调用记录
+        if (!ctx.getPendingToolCalls().isEmpty()) {
+            java.time.LocalDateTime now = java.time.LocalDateTime.now();
+            for (ToolCall tc : ctx.getPendingToolCalls()) {
+                tc.setMessageId(assistantMessageId);
+                if (tc.getCreatedAt() == null) {
+                    tc.setCreatedAt(now);
+                }
+            }
+            toolCallService.saveBatch(ctx.getPendingToolCalls());
+        }
+        ctx.getFullReply().setLength(0);
+        ctx.getFullReply().append(replyToSave);
+        return assistantMessageId;
     }
 
     /**
