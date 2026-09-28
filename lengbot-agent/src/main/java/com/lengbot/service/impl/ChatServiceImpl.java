@@ -553,17 +553,6 @@ public class ChatServiceImpl implements ChatService {
             // 取消/停止已标 aborted；此处为 [DONE] 事件重算 metadata 供前端渲染
             String metadataStr = buildPersistMetadata(ctx, ctx.getFullReply().toString());
 
-            // 1.1 批量写入工具调用记录
-            if (!ctx.getPendingToolCalls().isEmpty()) {
-                java.time.LocalDateTime now = java.time.LocalDateTime.now();
-                for (ToolCall tc : ctx.getPendingToolCalls()) {
-                    tc.setMessageId(assistantMessageId);
-                    if (tc.getCreatedAt() == null) {
-                        tc.setCreatedAt(now);
-                    }
-                }
-                toolCallService.saveBatch(ctx.getPendingToolCalls());
-            }
             // 1.2 助手消息已落库，异步生成会话标题（须晚于 TraceMiddleware.doOnComplete）
             scheduleTitleGeneration(ctx);
 
