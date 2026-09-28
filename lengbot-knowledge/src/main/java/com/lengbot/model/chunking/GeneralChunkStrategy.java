@@ -119,16 +119,29 @@ public class GeneralChunkStrategy implements ChunkStrategy {
      * 获取文本尾部约 N 个 token 的内容
      */
     private String getTailTokens(String text, int tokenCount, String delimiter) {
+        if (text == null || text.isEmpty() || tokenCount <= 0) {
+            return "";
+        }
+
         String[] parts = text.split(delimiter, -1);
         List<String> tail = new ArrayList<>();
         int accumulated = 0;
 
         for (int i = parts.length - 1; i >= 0; i--) {
             int tokens = TokenUtil.countTokens(parts[i]);
-            if (accumulated + tokens > tokenCount && !tail.isEmpty()) {
+
+            if (accumulated + tokens > tokenCount) {
+                if (!tail.isEmpty()) {
+                    // 预算用尽，停止（不再追加，避免引入多余分隔符）
+                    break;
+                }
+                // 单个 part 就超预算（常见于块内无分隔符）：按 token 边界截取该 part 尾部，
+                // 而不是整段吞掉——否则重叠会变成"上一整块"，导致分块内容成倍膨胀
+                tail.addFirst(TokenUtil.tailTokens(parts[i], tokenCount));
                 break;
             }
-            tail.add(0, parts[i]);
+
+            tail.addFirst(parts[i]);
             accumulated += tokens;
         }
 
