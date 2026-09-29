@@ -984,6 +984,10 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
     /**
      * 判断内容是否过短（可能是扫描件或图片文档）
+     *
+     * <p>注意：当前无调用方，实际的 OCR 触发判据在 {@code DocumentUploadExecutor#needsOcr}。
+     * 这里的「总字符数 < 50」判据已被证明对带书签目录的扫描件 PDF 失效（目录能凑出上千字，
+     * 被误判为内容足够而跳过 OCR）。若将来启用本方法，请先同步为「每页平均字符数」判据。</p>
      */
     private boolean isContentTooShort(String content, String fileType) {
         if (content == null || content.isBlank()) {

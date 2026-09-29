@@ -17,6 +17,8 @@ import com.lengbot.util.TikaUtil;
 import com.lengbot.entity.Task;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
@@ -35,6 +37,16 @@ import java.util.UUID;
 @Component("documentUploadExecutor")
 @RequiredArgsConstructor
 public class DocumentUploadExecutor implements TaskExecutor {
+
+    /**
+     * PDF 扫描件判定阈值：每页平均有效字符数低于该值即视为「无文本层」。
+     * <p>为什么按页均而不是按总长度：扫描件往往带 PDF 书签，Tika 能从中抠出上千字的目录，
+     * 只看总长度会把它误判成「内容足够」，从而永远绕开 OCR。</p>
+     */
+    private static final double MIN_CHARS_PER_PAGE = 20.0;
+
+    /** 拿不到 PDF 页数时的兜底阈值（沿用原判据） */
+    private static final int MIN_TOTAL_CHARS = 50;
 
     private final DocumentService documentService;
     private final KnowledgeService knowledgeService;
@@ -100,7 +112,7 @@ public class DocumentUploadExecutor implements TaskExecutor {
             checkCancelled(task.getId());
 
             // 3. OCR 增强
-            if (ocrEnabled && isContentTooShort(markdownContent, doc.getFileType())) {
+            if (ocrEnabled && needsOcr(markdownContent, doc.getFileType(), temp)) {
                 taskService.updateProgress(task.getId(), 50, "正在OCR识别...");
                 try (InputStream is = Files.newInputStream(temp)) {
                     String ocrContent = tryOcr(is, doc.getFileType());
@@ -157,14 +169,64 @@ public class DocumentUploadExecutor implements TaskExecutor {
         }
     }
 
-    private boolean isContentTooShort(String content, String fileType) {
+    /**
+     * 判断是否需要 OCR 增强。
+     *
+     * @param content  解析器已提取的文本
+     * @param fileType 文件类型
+     * @param file     原始文件（PDF 需要读页数来判断是否为扫描件）
+     */
+    private boolean needsOcr(String content, String fileType, Path file) {
         if (content == null || content.isBlank()) {
             return true;
         }
-        if ("pdf".equals(fileType) || "jpg".equals(fileType) || "jpeg".equals(fileType) || "png".equals(fileType)) {
-            return content.trim().length() < 50;
+        if ("pdf".equals(fileType)) {
+            return isScannedPdf(content, file);
+        }
+        if (isImageType(fileType)) {
+            return content.trim().length() < MIN_TOTAL_CHARS;
         }
         return false;
+    }
+
+    private boolean isImageType(String fileType) {
+        return "jpg".equals(fileType) || "jpeg".equals(fileType) || "png".equals(fileType)
+                || "bmp".equals(fileType) || "tiff".equals(fileType) || "tif".equals(fileType);
+    }
+
+    /**
+     * 扫描件判定：按「每页平均有效字符数」而不是总字符数。
+     * 目录页撑起来的上千字在 500 页的书里摊薄后只有个位数，一眼可辨。
+     */
+    private boolean isScannedPdf(String content, Path file) {
+        int pages = countPdfPages(file);
+        if (pages <= 0) {
+            // 读不到页数（损坏/加密）时退回原判据，不改变既有行为
+            return content.trim().length() < MIN_TOTAL_CHARS;
+        }
+        int effectiveChars = content.replaceAll("\\s+", "").length();
+        double charsPerPage = (double) effectiveChars / pages;
+        if (charsPerPage < MIN_CHARS_PER_PAGE) {
+            log.info("[文档上传执行器] 判定为扫描件PDF, pages={}, effectiveChars={}, charsPerPage={}",
+                    pages, effectiveChars, String.format("%.2f", charsPerPage));
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 读取 PDF 页数，失败返回 -1（交由调用方兜底）
+     */
+    private int countPdfPages(Path file) {
+        if (file == null || !Files.exists(file)) {
+            return -1;
+        }
+        try (PDDocument pdf = Loader.loadPDF(file.toFile())) {
+            return pdf.getNumberOfPages();
+        } catch (Exception e) {
+            log.warn("[文档上传执行器] 读取PDF页数失败, 回退按字符数判断, file={}", file, e);
+            return -1;
+        }
     }
 
     private String tryOcr(InputStream inputStream, String fileType) {
