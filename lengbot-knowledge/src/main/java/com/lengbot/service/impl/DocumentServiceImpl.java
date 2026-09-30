@@ -36,6 +36,7 @@ import com.lengbot.util.ModelCalls;
 import com.lengbot.util.OcrUtil;
 import com.lengbot.util.TextNormalizeUtil;
 import com.lengbot.util.TikaUtil;
+import com.lengbot.util.DocIngestUtil;
 import com.lengbot.util.WebFetchUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +51,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -250,11 +252,43 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             }
         }
 
-        // 2. 解析入库配置
+        // 2. 扫描件补 OCR：预览也要反映真实分块，否则扫描版 PDF 永远只出目录页那点字。
+        //    仅对 PDF/图片且文本层过薄时触发，普通文档零额外开销。与重新入库路径共用同一套判定。
+        if (content != null && !content.isBlank()
+                && ("pdf".equals(doc.getFileType()) || DocIngestUtil.isImageType(doc.getFileType()))) {
+            try (InputStream srcIs = minioUtil.download(doc.getFilePath())) {
+                Path tmp = Files.createTempFile("preview_ocr_", ".bin");
+                try {
+                    Files.copy(srcIs, tmp, StandardCopyOption.REPLACE_EXISTING);
+                    if (DocIngestUtil.isScannedPdf(content, tmp)) {
+                        String ocr;
+                        if ("pdf".equals(doc.getFileType())) {
+                            ocr = ocrUtil.recognizePdf(Files.newInputStream(tmp));
+                        } else {
+                            ocr = ocrUtil.recognizeImage(Files.newInputStream(tmp));
+                        }
+                        if (ocr != null && !ocr.isBlank()) {
+                            content = DocIngestUtil.mergeOcrContent(content, ocr);
+                            log.info("[文档预览] 扫描件OCR完成, documentId={}, ocrLen={}", documentId, ocr.length());
+                        }
+                    }
+                } finally {
+                    Files.deleteIfExists(tmp);
+                }
+            } catch (Exception e) {
+                log.warn("[文档预览] 扫描件OCR失败, documentId={}", documentId, e);
+            }
+        }
+
+        if (content == null || content.isBlank()) {
+            return List.of();
+        }
+
+        // 3. 解析入库配置
         ChunkParams params = parseChunkParams(embeddingJson);
         String strategyName = parseChunkStrategy(embeddingJson);
 
-        // 3. 分块
+        // 4. 分块
         ChunkStrategy strategy = chunkStrategyFactory.getStrategy(strategyName);
         return strategy.split(content, params);
     }
@@ -285,7 +319,46 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
                 }
             }
 
-            // 1.1 解析失败（返回null）时标记失败
+            // 1.05 扫描件 OCR 增强：重新入库时若解析文本过薄且为 PDF/图片，基于原始文件补 OCR。
+            // 否则扫描版 PDF 永远只有目录页那点字（preview 也只会出 3 块），且重新入库无法自愈。
+            if (content != null && !content.isBlank()
+                    && ("pdf".equals(doc.getFileType()) || DocIngestUtil.isImageType(doc.getFileType()))) {
+                try (InputStream srcIs = minioUtil.download(doc.getFilePath())) {
+                    Path tmp = Files.createTempFile("reingest_ocr_", ".bin");
+                    try {
+                        Files.copy(srcIs, tmp, StandardCopyOption.REPLACE_EXISTING);
+                        if (DocIngestUtil.isScannedPdf(content, tmp)) {
+                            progressCallback.accept(8, "检测到扫描件，正在OCR识别...");
+                            String ocr;
+                            if ("pdf".equals(doc.getFileType())) {
+                                ocr = ocrUtil.recognizePdf(Files.newInputStream(tmp));
+                            } else {
+                                ocr = ocrUtil.recognizeImage(Files.newInputStream(tmp));
+                            }
+                            if (ocr != null && !ocr.isBlank()) {
+                                content = DocIngestUtil.mergeOcrContent(content, ocr);
+                                log.info("[文档入库] 重新入库OCR完成, documentId={}, ocrLen={}", documentId, ocr.length());
+                            }
+                        }
+                    } finally {
+                        Files.deleteIfExists(tmp);
+                    }
+                } catch (Exception e) {
+                    log.warn("[文档入库] 重新入库OCR失败, documentId={}", documentId, e);
+                }
+            }
+
+            // 1.1 解析结果回写 MinIO（含OCR结果）：保证 preview-chunks 与入库分块读到的 markdown 一致。
+            if (content != null && !content.isBlank()) {
+                String mdPath = doc.getMarkdownPath();
+                if (mdPath == null || mdPath.isBlank()) {
+                    mdPath = DocIngestUtil.generateMarkdownPath(doc.getKnowledgeId(), doc.getFilePath());
+                }
+                minioUtil.uploadString(content, mdPath, "text/markdown");
+                doc.setMarkdownPath(mdPath);
+            }
+
+            // 1.2 解析失败（返回null）时标记失败
             if (content == null || content.isBlank()) {
                 doc.setStatus(DocumentStatus.FAILED);
                 doc.setErrorMessage("文档解析失败，可能是扫描版PDF、文件损坏或格式不支持");

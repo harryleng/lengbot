@@ -14,6 +14,7 @@ import com.lengbot.util.MinioUtil;
 import com.lengbot.util.OcrUtil;
 import com.lengbot.util.RedisUtil;
 import com.lengbot.util.TikaUtil;
+import com.lengbot.util.DocIngestUtil;
 import com.lengbot.entity.Task;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,16 +38,6 @@ import java.util.UUID;
 @Component("documentUploadExecutor")
 @RequiredArgsConstructor
 public class DocumentUploadExecutor implements TaskExecutor {
-
-    /**
-     * PDF 扫描件判定阈值：每页平均有效字符数低于该值即视为「无文本层」。
-     * <p>为什么按页均而不是按总长度：扫描件往往带 PDF 书签，Tika 能从中抠出上千字的目录，
-     * 只看总长度会把它误判成「内容足够」，从而永远绕开 OCR。</p>
-     */
-    private static final double MIN_CHARS_PER_PAGE = 20.0;
-
-    /** 拿不到 PDF 页数时的兜底阈值（沿用原判据） */
-    private static final int MIN_TOTAL_CHARS = 50;
 
     private final DocumentService documentService;
     private final KnowledgeService knowledgeService;
@@ -112,12 +103,12 @@ public class DocumentUploadExecutor implements TaskExecutor {
             checkCancelled(task.getId());
 
             // 3. OCR 增强
-            if (ocrEnabled && needsOcr(markdownContent, doc.getFileType(), temp)) {
+            if (ocrEnabled || needsOcr(markdownContent, doc.getFileType(), temp)) {
                 taskService.updateProgress(task.getId(), 50, "正在OCR识别...");
                 try (InputStream is = Files.newInputStream(temp)) {
                     String ocrContent = tryOcr(is, doc.getFileType());
                     if (ocrContent != null && !ocrContent.isBlank()) {
-                        markdownContent = mergeOcrContent(markdownContent, ocrContent);
+                        markdownContent = DocIngestUtil.mergeOcrContent(markdownContent, ocrContent);
                         log.info("[文档上传执行器] OCR识别完成, documentId={}, ocrLength={}", documentId, ocrContent.length());
                     }
                 }
@@ -134,7 +125,7 @@ public class DocumentUploadExecutor implements TaskExecutor {
             // 5. 上传 Markdown 到 MinIO
             taskService.updateProgress(task.getId(), 80, "正在保存解析结果...");
             if (markdownContent != null) {
-                String markdownPath = generateMarkdownPath(doc.getKnowledgeId(), doc.getFilePath());
+                String markdownPath = DocIngestUtil.generateMarkdownPath(doc.getKnowledgeId(), doc.getFilePath());
                 minioUtil.uploadString(markdownContent, markdownPath, "text/markdown");
                 doc.setMarkdownPath(markdownPath);
             }
@@ -181,60 +172,21 @@ public class DocumentUploadExecutor implements TaskExecutor {
             return true;
         }
         if ("pdf".equals(fileType)) {
-            return isScannedPdf(content, file);
+            return DocIngestUtil.isScannedPdf(content, file);
         }
-        if (isImageType(fileType)) {
-            return content.trim().length() < MIN_TOTAL_CHARS;
-        }
-        return false;
-    }
-
-    private boolean isImageType(String fileType) {
-        return "jpg".equals(fileType) || "jpeg".equals(fileType) || "png".equals(fileType)
-                || "bmp".equals(fileType) || "tiff".equals(fileType) || "tif".equals(fileType);
-    }
-
-    /**
-     * 扫描件判定：按「每页平均有效字符数」而不是总字符数。
-     * 目录页撑起来的上千字在 500 页的书里摊薄后只有个位数，一眼可辨。
-     */
-    private boolean isScannedPdf(String content, Path file) {
-        int pages = countPdfPages(file);
-        if (pages <= 0) {
-            // 读不到页数（损坏/加密）时退回原判据，不改变既有行为
-            return content.trim().length() < MIN_TOTAL_CHARS;
-        }
-        int effectiveChars = content.replaceAll("\\s+", "").length();
-        double charsPerPage = (double) effectiveChars / pages;
-        if (charsPerPage < MIN_CHARS_PER_PAGE) {
-            log.info("[文档上传执行器] 判定为扫描件PDF, pages={}, effectiveChars={}, charsPerPage={}",
-                    pages, effectiveChars, String.format("%.2f", charsPerPage));
-            return true;
+        if (DocIngestUtil.isImageType(fileType)) {
+            return content.trim().length() < DocIngestUtil.MIN_TOTAL_CHARS;
         }
         return false;
     }
 
-    /**
-     * 读取 PDF 页数，失败返回 -1（交由调用方兜底）
-     */
-    private int countPdfPages(Path file) {
-        if (file == null || !Files.exists(file)) {
-            return -1;
-        }
-        try (PDDocument pdf = Loader.loadPDF(file.toFile())) {
-            return pdf.getNumberOfPages();
-        } catch (Exception e) {
-            log.warn("[文档上传执行器] 读取PDF页数失败, 回退按字符数判断, file={}", file, e);
-            return -1;
-        }
-    }
+    // 扫描件判定 / PDF 页数读取已移至 DocIngestUtil，与重新入库逻辑共用，避免重复魔法数字。
 
     private String tryOcr(InputStream inputStream, String fileType) {
         try {
             if ("pdf".equals(fileType)) {
                 return ocrUtil.recognizePdf(inputStream);
-            } else if ("jpg".equals(fileType) || "jpeg".equals(fileType) || "png".equals(fileType)
-                    || "bmp".equals(fileType) || "tiff".equals(fileType) || "tif".equals(fileType)) {
+            } else if (DocIngestUtil.isImageType(fileType)) {
                 return ocrUtil.recognizeImage(inputStream);
             }
         } catch (Exception e) {
@@ -243,18 +195,7 @@ public class DocumentUploadExecutor implements TaskExecutor {
         return null;
     }
 
-    private String mergeOcrContent(String originalContent, String ocrContent) {
-        if (originalContent == null || originalContent.isBlank()) {
-            return ocrContent;
-        }
-        return originalContent + "\n\n---\n\n## OCR 识别内容\n\n" + ocrContent;
-    }
-
-    private String generateMarkdownPath(Long knowledgeId, String filePath) {
-        String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
-        String baseName = fileName.contains(".") ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
-        return String.format("knowledge/%d/parsed/%s.md", knowledgeId, baseName);
-    }
+    // mergeOcrContent / generateMarkdownPath 已移至 DocIngestUtil。
 
     private void checkCancelled(Long taskId) {
         if (redisUtil.hasCancelSignal(taskId)) {
