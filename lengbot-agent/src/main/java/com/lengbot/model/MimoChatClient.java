@@ -63,7 +63,8 @@ public class MimoChatClient {
         }
         if (attachments != null) {
             for (ChatAttachmentDTO a : attachments) {
-                if ("video".equals(a.getType())) {
+                String type = a.getType();
+                if ("video".equals(type) || "image".equals(type)) {
                     return true;
                 }
             }

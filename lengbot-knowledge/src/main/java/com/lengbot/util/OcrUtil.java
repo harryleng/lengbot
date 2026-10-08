@@ -162,6 +162,37 @@ public class OcrUtil {
         log.info("[OCR] PDF识别完成, 共{}页, 文本长度={}", pageResults.size(), result.length());
         return result;
     }
+    /**
+     * PDF OCR 逐页识别：返回按页码对齐的结果列表（索引 = 页码-1，空白页也占位，便于与 VLM 结果逐页对齐）。
+     *
+     * @param pdfStream PDF 输入流
+     * @return 每页 OCR 文本列表，长度等于 PDF 页数
+     */
+    public List<String> recognizePdfPages(InputStream pdfStream) throws Exception {
+        ensureInitialized();
+
+        List<String> pageResults = new ArrayList<>();
+        try (PDDocument document = Loader.loadPDF(pdfStream.readAllBytes())) {
+            PDFRenderer renderer = new PDFRenderer(document);
+            int totalPages = document.getNumberOfPages();
+            log.info("[OCR] PDF共{}页, 开始逐页识别(对齐模式)", totalPages);
+
+            for (int i = 0; i < totalPages; i++) {
+                BufferedImage image = renderer.renderImageWithDPI(i, 200, ImageType.RGB);
+                Path tempFile = Files.createTempFile("ocr_pdf_", ".png");
+                try {
+                    ImageIO.write(image, "png", tempFile.toFile());
+                    OcrResult result = engine.runOcr(tempFile.toString());
+                    String pageText = result != null ? result.getStrRes().trim() : "";
+                    pageResults.add(pageText);
+                } finally {
+                    Files.deleteIfExists(tempFile);
+                }
+            }
+        }
+        log.info("[OCR] PDF逐页识别完成, 共{}页", pageResults.size());
+        return pageResults;
+    }
 
     /**
      * 确保 OCR 引擎已初始化

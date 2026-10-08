@@ -34,6 +34,7 @@ import com.lengbot.util.DocumentSecurityScanUtil;
 import com.lengbot.util.MinioUtil;
 import com.lengbot.util.ModelCalls;
 import com.lengbot.util.OcrUtil;
+import com.lengbot.util.VisionEnrichUtil;
 import com.lengbot.util.TextNormalizeUtil;
 import com.lengbot.util.TikaUtil;
 import com.lengbot.util.DocIngestUtil;
@@ -104,6 +105,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
     private final ContentDuplicateDetectionUtil contentDuplicateDetectionUtil;
     private final KnowledgeMemberService permissionHelper;
     private final ObjectProvider<DocumentVersionService> documentVersionServiceProvider;
+    private final VisionEnrichUtil visionEnrichUtil;
 
     @Override
     public Document uploadDocument(Long knowledgeId, MultipartFile file, boolean ocrEnabled, String force) {
@@ -254,6 +256,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
         // 2. 扫描件补 OCR：预览也要反映真实分块，否则扫描版 PDF 永远只出目录页那点字。
         //    仅对 PDF/图片且文本层过薄时触发，普通文档零额外开销。与重新入库路径共用同一套判定。
+        boolean scannedPdfHandled = false;
         if (content != null && !content.isBlank()
                 && ("pdf".equals(doc.getFileType()) || DocIngestUtil.isImageType(doc.getFileType()))) {
             try (InputStream srcIs = minioUtil.download(doc.getFilePath())) {
@@ -261,15 +264,22 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
                 try {
                     Files.copy(srcIs, tmp, StandardCopyOption.REPLACE_EXISTING);
                     if (DocIngestUtil.isScannedPdf(content, tmp)) {
-                        String ocr;
                         if ("pdf".equals(doc.getFileType())) {
-                            ocr = ocrUtil.recognizePdf(Files.newInputStream(tmp));
+                            // 1.09 扫描件逐页插值：OCR + VLM 按页码对齐，避免全部堆在文末
+                            List<String> ocrPages = ocrUtil.recognizePdfPages(Files.newInputStream(tmp));
+                            List<String> visionPages = visionEnrichUtil.enrichPdfPages(Files.readAllBytes(tmp));
+                            String perPage = DocIngestUtil.buildScannedPerPageSection(ocrPages, visionPages);
+                            if (!perPage.isBlank()) {
+                                content = content + "\n\n---\n\n" + perPage;
+                            }
+                            scannedPdfHandled = true;
+                            log.info("[文档预览] 扫描件逐页插值完成, documentId={}, pages={}", documentId, ocrPages.size());
                         } else {
-                            ocr = ocrUtil.recognizeImage(Files.newInputStream(tmp));
-                        }
-                        if (ocr != null && !ocr.isBlank()) {
-                            content = DocIngestUtil.mergeOcrContent(content, ocr);
-                            log.info("[文档预览] 扫描件OCR完成, documentId={}, ocrLen={}", documentId, ocr.length());
+                            String ocr = ocrUtil.recognizeImage(Files.newInputStream(tmp));
+                            if (ocr != null && !ocr.isBlank()) {
+                                content = DocIngestUtil.mergeOcrContent(content, ocr);
+                                log.info("[文档预览] 扫描件OCR完成, documentId={}, ocrLen={}", documentId, ocr.length());
+                            }
                         }
                     }
                 } finally {
@@ -282,6 +292,40 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
         if (content == null || content.isBlank()) {
             return List.of();
+        }
+
+        // 1.07 TOC 层级还原：用 PDF 大纲/书签还原层级目录（Tika 平铺会丢失层级）
+        if ("pdf".equals(doc.getFileType())) {
+            try (InputStream tocIs = minioUtil.download(doc.getFilePath())) {
+                byte[] tocBytes = tocIs.readAllBytes();
+                String toc = visionEnrichUtil.extractToc(tocBytes);
+                if (toc != null && !toc.isBlank()) {
+                    content = toc + "\n\n---\n\n" + content;
+                    log.info("[文档预览] TOC层级还原完成, documentId={}, tocLen={}", documentId, toc.length());
+                }
+            } catch (Exception e) {
+                log.warn("[文档预览] TOC层级还原失败(跳过), documentId={}", documentId, e);
+            }
+        }
+
+        // 1.08 VLM 图示增强：关系图/图表送 MiMo 多模态理解，补 Tika/OCR 丢失的视觉结构
+        // 扫描件已在 1.09 逐页插值中完成 VLM，这里跳过避免重复调用
+        if (!scannedPdfHandled && ("pdf".equals(doc.getFileType()) || DocIngestUtil.isImageType(doc.getFileType()))) {
+            try (InputStream visIs = minioUtil.download(doc.getFilePath())) {
+                byte[] visBytes = visIs.readAllBytes();
+                String vision;
+                if ("pdf".equals(doc.getFileType())) {
+                    vision = visionEnrichUtil.enrichPdf(visBytes);
+                } else {
+                    vision = visionEnrichUtil.enrichImage(visBytes, doc.getFileType());
+                }
+                if (vision != null && !vision.isBlank()) {
+                    content = content + "\n\n---\n\n" + vision;
+                    log.info("[文档预览] VLM图示增强完成, documentId={}, visionLen={}", documentId, vision.length());
+                }
+            } catch (Exception e) {
+                log.warn("[文档预览] VLM图示增强失败(跳过), documentId={}", documentId, e);
+            }
         }
 
         // 3. 解析入库配置
@@ -321,6 +365,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
             // 1.05 扫描件 OCR 增强：重新入库时若解析文本过薄且为 PDF/图片，基于原始文件补 OCR。
             // 否则扫描版 PDF 永远只有目录页那点字（preview 也只会出 3 块），且重新入库无法自愈。
+            boolean scannedPdfHandled = false;
             if (content != null && !content.isBlank()
                     && ("pdf".equals(doc.getFileType()) || DocIngestUtil.isImageType(doc.getFileType()))) {
                 try (InputStream srcIs = minioUtil.download(doc.getFilePath())) {
@@ -328,16 +373,24 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
                     try {
                         Files.copy(srcIs, tmp, StandardCopyOption.REPLACE_EXISTING);
                         if (DocIngestUtil.isScannedPdf(content, tmp)) {
-                            progressCallback.accept(8, "检测到扫描件，正在OCR识别...");
-                            String ocr;
                             if ("pdf".equals(doc.getFileType())) {
-                                ocr = ocrUtil.recognizePdf(Files.newInputStream(tmp));
+                                // 1.09 扫描件逐页插值：OCR + VLM 按页码对齐，避免全部堆在文末
+                                progressCallback.accept(8, "检测到扫描件，正在逐页OCR/视觉识别...");
+                                List<String> ocrPages = ocrUtil.recognizePdfPages(Files.newInputStream(tmp));
+                                List<String> visionPages = visionEnrichUtil.enrichPdfPages(Files.readAllBytes(tmp));
+                                String perPage = DocIngestUtil.buildScannedPerPageSection(ocrPages, visionPages);
+                                if (!perPage.isBlank()) {
+                                    content = content + "\n\n---\n\n" + perPage;
+                                }
+                                scannedPdfHandled = true;
+                                log.info("[文档入库] 扫描件逐页插值完成, documentId={}, pages={}", documentId, ocrPages.size());
                             } else {
-                                ocr = ocrUtil.recognizeImage(Files.newInputStream(tmp));
-                            }
-                            if (ocr != null && !ocr.isBlank()) {
-                                content = DocIngestUtil.mergeOcrContent(content, ocr);
-                                log.info("[文档入库] 重新入库OCR完成, documentId={}, ocrLen={}", documentId, ocr.length());
+                                progressCallback.accept(8, "检测到扫描件，正在OCR识别...");
+                                String ocr = ocrUtil.recognizeImage(Files.newInputStream(tmp));
+                                if (ocr != null && !ocr.isBlank()) {
+                                    content = DocIngestUtil.mergeOcrContent(content, ocr);
+                                    log.info("[文档入库] 重新入库OCR完成, documentId={}, ocrLen={}", documentId, ocr.length());
+                                }
                             }
                         }
                     } finally {
@@ -350,6 +403,41 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
             // 1.1 解析结果回写 MinIO（含OCR结果）：保证 preview-chunks 与入库分块读到的 markdown 一致。
             if (content != null && !content.isBlank()) {
+            // 1.08 VLM 图示增强：关系图/图表送 MiMo 多模态理解，补 Tika/OCR 丢失的视觉结构
+            // 扫描件已在 1.09 逐页插值中完成 VLM，这里跳过避免重复调用
+            if (!scannedPdfHandled && content != null && !content.isBlank()
+                    && ("pdf".equals(doc.getFileType()) || DocIngestUtil.isImageType(doc.getFileType()))) {
+                try (InputStream visIs = minioUtil.download(doc.getFilePath())) {
+                    byte[] visBytes = visIs.readAllBytes();
+                    String vision;
+                    if ("pdf".equals(doc.getFileType())) {
+                        vision = visionEnrichUtil.enrichPdf(visBytes);
+                    } else {
+                        vision = visionEnrichUtil.enrichImage(visBytes, doc.getFileType());
+                    }
+                    if (vision != null && !vision.isBlank()) {
+                        content = content + "\n\n---\n\n" + vision;
+                        log.info("[文档入库] VLM图示增强完成, documentId={}, visionLen={}", documentId, vision.length());
+                    }
+                } catch (Exception e) {
+                    log.warn("[文档入库] VLM图示增强失败(跳过), documentId={}", documentId, e);
+                }
+            }
+
+            // 1.07 TOC 层级还原：用 PDF 大纲/书签还原层级目录（Tika 平铺会丢失层级）
+            if ("pdf".equals(doc.getFileType())) {
+                try (InputStream tocIs = minioUtil.download(doc.getFilePath())) {
+                    byte[] tocBytes = tocIs.readAllBytes();
+                    String toc = visionEnrichUtil.extractToc(tocBytes);
+                    if (toc != null && !toc.isBlank()) {
+                        content = toc + "\n\n---\n\n" + content;
+                        log.info("[文档入库] TOC层级还原完成, documentId={}, tocLen={}", documentId, toc.length());
+                    }
+                } catch (Exception e) {
+                    log.warn("[文档入库] TOC层级还原失败(跳过), documentId={}", documentId, e);
+                }
+            }
+
                 String mdPath = doc.getMarkdownPath();
                 if (mdPath == null || mdPath.isBlank()) {
                     mdPath = DocIngestUtil.generateMarkdownPath(doc.getKnowledgeId(), doc.getFilePath());

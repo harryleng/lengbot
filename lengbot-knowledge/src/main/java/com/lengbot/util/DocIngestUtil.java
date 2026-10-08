@@ -5,6 +5,7 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * 文档入库共享工具：扫描件判定、markdown 路径生成、OCR 内容合并。
@@ -78,4 +79,36 @@ public final class DocIngestUtil {
         }
         return originalContent + "\n\n---\n\n## OCR 识别内容\n\n" + ocrContent;
     }
+    /**
+     * 扫描件「逐页插值」装配：把按页码对齐的 OCR 文本与 VLM 视觉描述，
+     * 拼成「## 第 N 页」分块结构，避免所有页内容堆在文末导致分块/检索丢失页码对齐。
+     * 仅保留「OCR 或 VLM 至少其一非空」的页；空白页跳过。
+     *
+     * @param ocrPages    逐页 OCR 文本（索引 = 页码-1，长度应等于页数）
+     * @param visionPages 逐页 VLM 描述（索引 = 页码-1，允许比 ocrPages 短）
+     * @return 逐页插值的 Markdown 片段，无内容返回空串
+     */
+    public static String buildScannedPerPageSection(List<String> ocrPages, List<String> visionPages) {
+        if (ocrPages == null || ocrPages.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        int n = ocrPages.size();
+        for (int i = 0; i < n; i++) {
+            String ocr = ocrPages.get(i);
+            String vis = (visionPages != null && i < visionPages.size()) ? visionPages.get(i) : "";
+            if ((ocr == null || ocr.isBlank()) && (vis == null || vis.isBlank())) {
+                continue;
+            }
+            sb.append("\n\n## 第 ").append(i + 1).append(" 页\n\n");
+            if (ocr != null && !ocr.isBlank()) {
+                sb.append(ocr.trim()).append("\n\n");
+            }
+            if (vis != null && !vis.isBlank()) {
+                sb.append("### 图示说明\n\n").append(vis.trim()).append("\n\n");
+            }
+        }
+        return sb.toString().strip();
+    }
+
 }
