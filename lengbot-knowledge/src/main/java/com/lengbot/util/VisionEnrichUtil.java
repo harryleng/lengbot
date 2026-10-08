@@ -71,9 +71,9 @@ public class VisionEnrichUtil {
      * PDF 图示增强：渲染「含内嵌图或整页无文字」的页送 VLM，返回拼装好的描述文本（无图则为 null）。
      */
     public String enrichPdf(byte[] pdfBytes) {
-        ModelProvider provider = resolveMimoProvider();
-        if (provider == null) {
-            log.warn("[Vision] 无可用 MiMo 多模态 Provider，跳过图示增强");
+        VisionTarget vt = resolveVisionTarget();
+        if (vt == null) {
+            log.warn("[Vision] 无可用视觉模型 Provider（请在 provider 管理界面为某 Provider 添加 vision 类型模型），跳过图示增强");
             return null;
         }
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
@@ -99,7 +99,7 @@ public class VisionEnrichUtil {
                 }
                 BufferedImage img = renderer.renderImageWithDPI(i, RENDER_DPI, ImageType.RGB);
                 byte[] png = toPng(img);
-                String desc = describe(provider, png, "image/png");
+                String desc = describe(vt.provider(), png, "image/png", vt.model());
                 if (isUseful(desc)) {
                     sb.append("\n\n## 图示说明（第").append(i + 1).append("页）\n\n").append(desc.trim());
                 }
@@ -121,10 +121,10 @@ public class VisionEnrichUtil {
      * @return 每页视觉描述列表（长度 = min(总页数, MAX_PAGES)）
      */
     public List<String> enrichPdfPages(byte[] pdfBytes) {
-        ModelProvider provider = resolveMimoProvider();
+        VisionTarget vt = resolveVisionTarget();
         List<String> pages = new ArrayList<>();
-        if (provider == null) {
-            log.warn("[Vision] 无可用 MiMo 多模态 Provider，跳过逐页图示增强");
+        if (vt == null) {
+            log.warn("[Vision] 无可用视觉模型 Provider（请在 provider 管理界面为某 Provider 添加 vision 类型模型），跳过逐页图示增强");
             return pages;
         }
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
@@ -148,7 +148,7 @@ public class VisionEnrichUtil {
                 if (visual && vlmCalls < MAX_VLM_PAGES) {
                     BufferedImage img = renderer.renderImageWithDPI(i, RENDER_DPI, ImageType.RGB);
                     byte[] png = toPng(img);
-                    String d = describe(provider, png, "image/png");
+                    String d = describe(vt.provider(), png, "image/png", vt.model());
                     if (isUseful(d)) {
                         desc = d.trim();
                     }
@@ -178,11 +178,11 @@ public class VisionEnrichUtil {
      * 单张上传图片图示增强。fileType 形如 pdf/jpg/png，用于推导 mime。
      */
     public String enrichImage(byte[] imageBytes, String fileType) {
-        ModelProvider provider = resolveMimoProvider();
-        if (provider == null) {
+        VisionTarget vt = resolveVisionTarget();
+        if (vt == null) {
             return null;
         }
-        String desc = describe(provider, imageBytes, deriveMime(fileType));
+        String desc = describe(vt.provider(), imageBytes, deriveMime(fileType), vt.model());
         boolean ok = isUseful(desc);
         log.info("[Vision] 单图图示增强完成: fileType={}, 是否产出描述={}", fileType, ok);
         return ok ? desc : null;
@@ -252,7 +252,7 @@ public class VisionEnrichUtil {
         return bos.toByteArray();
     }
 
-    private String describe(ModelProvider provider, byte[] imageBytes, String mimeType) {
+    private String describe(ModelProvider provider, byte[] imageBytes, String mimeType, String model) {
         try {
             String dataUrl = "data:" + (mimeType != null ? mimeType : "image/png")
                     + ";base64," + Base64.getEncoder().encodeToString(imageBytes);
@@ -260,7 +260,7 @@ public class VisionEnrichUtil {
             userContent.add(Map.of("type", "text", "text", VLM_PROMPT));
             userContent.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl)));
             Map<String, Object> body = Map.of(
-                    "model", MODEL,
+                    "model", model,
                     "messages", List.of(Map.of("role", "user", "content", userContent)),
                     "stream", false,
                     "thinking", Map.of("type", "disabled"));
@@ -273,7 +273,7 @@ public class VisionEnrichUtil {
                     .build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
-                log.warn("[Vision] MiMo 返回 HTTP {}: {}", resp.statusCode(), resp.body());
+                log.warn("[Vision] 视觉模型返回 HTTP {}: {}", resp.statusCode(), resp.body());
                 return null;
             }
             JsonNode root = objectMapper.readTree(resp.body());
@@ -296,21 +296,48 @@ public class VisionEnrichUtil {
                 }
             }
         } catch (Exception e) {
-            log.warn("[Vision] MiMo 多模态调用失败: {}", e.getMessage());
+            log.warn("[Vision] 视觉模型调用失败: {}", e.getMessage());
         }
         return null;
     }
 
-    private ModelProvider resolveMimoProvider() {
+    /**
+     * 解析可用的视觉模型 Provider：优先取「注册了 vision 类型模型」的 Provider（视觉模型无关，支持 MIMO/DeepSeek-VL/通义千问VL/Ollama 视觉等任意 OpenAI 兼容端点）；
+     * 兜底仍支持「只配了 MIMO Provider、未单独登记 vision 模型」的旧用法。无则返回 null。
+     */
+    private VisionTarget resolveVisionTarget() {
         try {
-            return modelProviderService.listAllActive().stream()
-                    .filter(p -> p.getType() == ModelProviderType.MIMO)
-                    .findFirst()
+            // 1) 优先：注册了 vision 类型模型的 Provider（模型名取自 model 表，不再写死）
+            List<ModelProviderService.ProviderWithModelsVO> vps = modelProviderService.listWithModels("vision");
+            ModelProviderService.ProviderWithModelsVO chosen = vps.stream()
+                    .filter(v -> v.models() != null && !v.models().isEmpty())
+                    .min(java.util.Comparator.comparingInt(v -> v.type() == ModelProviderType.MIMO ? 0 : 1))
                     .orElse(null);
+            if (chosen != null) {
+                ModelProvider provider = modelProviderService.getById(chosen.id());
+                if (provider != null) {
+                    String model = chosen.models().get(0).getName();
+                    if (model == null || model.isBlank()) {
+                        model = MODEL;
+                    }
+                    return new VisionTarget(provider, model);
+                }
+            }
+            // 2) 兜底：旧用法，仅配了 MIMO Provider（模型名沿用默认常量）
+            ModelProvider mimo = modelProviderService.listAllActive().stream()
+                    .filter(p -> p.getType() == ModelProviderType.MIMO)
+                    .findFirst().orElse(null);
+            if (mimo != null) {
+                return new VisionTarget(mimo, MODEL);
+            }
+            return null;
         } catch (Exception e) {
             return null;
         }
     }
+
+    /** 视觉模型目标：Provider + 实际模型名。 */
+    private record VisionTarget(ModelProvider provider, String model) {}
 
     private String normalizeBaseUrl(String baseUrl) {
         if (baseUrl == null || baseUrl.isBlank()) {
