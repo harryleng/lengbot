@@ -182,13 +182,15 @@ public class DocumentUploadExecutor implements TaskExecutor {
 
     // 扫描件判定 / PDF 页数读取已移至 DocIngestUtil，与重新入库逻辑共用，避免重复魔法数字。
 
-    private String tryOcr(InputStream inputStream, String fileType) {
+    private String tryOcr(InputStream inputStream, String fileType) throws TaskCancelledException {
         try {
             if ("pdf".equals(fileType)) {
                 return ocrUtil.recognizePdf(inputStream);
             } else if (DocIngestUtil.isImageType(fileType)) {
                 return ocrUtil.recognizeImage(inputStream);
             }
+        } catch (TaskCancelledException e) {
+            throw e;
         } catch (Exception e) {
             log.warn("[OCR] 识别失败, fileType={}", fileType, e);
         }

@@ -2,6 +2,7 @@ package com.lengbot.util;
 
 import com.benjaminwan.ocrlibrary.OcrResult;
 import com.lengbot.config.OcrProperties;
+import com.lengbot.common.task.TaskCancelledException;
 import com.lengbot.dto.OcrHealthResultDTO;
 import io.github.mymonstercat.Model;
 import io.github.mymonstercat.ocr.InferenceEngine;
@@ -95,6 +96,9 @@ public class OcrUtil {
      */
     public String recognizeImage(InputStream imageStream) throws Exception {
         ensureInitialized();
+        if (Thread.interrupted()) {
+            throw new TaskCancelledException("OCR 被取消(任务删除/取消)");
+        }
 
         Path tempFile = Files.createTempFile("ocr_", ".png");
         try {
@@ -137,6 +141,9 @@ public class OcrUtil {
             log.info("[OCR] PDF共{}页, 开始逐页识别", totalPages);
 
             for (int i = 0; i < totalPages; i++) {
+                if (Thread.interrupted()) {
+                    throw new TaskCancelledException("OCR 被取消(任务删除/取消)");
+                }
                 if (listener != null) {
                     listener.onPage(i + 1, totalPages);
                 }
@@ -178,6 +185,9 @@ public class OcrUtil {
             log.info("[OCR] PDF共{}页, 开始逐页识别(对齐模式)", totalPages);
 
             for (int i = 0; i < totalPages; i++) {
+                if (Thread.interrupted()) {
+                    throw new TaskCancelledException("OCR 被取消(任务删除/取消)");
+                }
                 BufferedImage image = renderer.renderImageWithDPI(i, 200, ImageType.RGB);
                 Path tempFile = Files.createTempFile("ocr_pdf_", ".png");
                 try {

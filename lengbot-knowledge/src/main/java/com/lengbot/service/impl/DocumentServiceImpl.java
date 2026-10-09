@@ -25,6 +25,7 @@ import com.lengbot.model.chunking.ChunkStrategy;
 import com.lengbot.model.chunking.ChunkStrategyFactory;
 import com.lengbot.entity.Task;
 import com.lengbot.enums.TaskType;
+import com.lengbot.enums.TaskStatus;
 import com.lengbot.enums.KnowledgeRole;
 import com.lengbot.service.*;
 import com.lengbot.service.DocumentVersionService;
@@ -754,6 +755,9 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
         // 权限校验：需要DEVELOPER及以上权限
         permissionHelper.checkPermission(doc.getKnowledgeId(), KnowledgeRole.DEVELOPER);
 
+        // 0. 取消该文档关联的活跃上传/入库任务，避免文档已删但后台 OCR/入库仍在执行
+        cancelActiveTasksForDocument(documentId);
+
         // 1. 删除 MinIO 中的原始文件
         safeDeleteMinio(doc.getFilePath(), "原始文件");
 
@@ -784,6 +788,24 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
         knowledgeServiceProvider.getObject().updateStats(doc.getKnowledgeId(), -1, -chunkCount, -tokenCount);
     }
 
+    /**
+     * 删除文档前取消其关联的活跃上传/入库任务（PENDING/RUNNING/PENDING_RETRY）。
+     * 避免文档已删但后台 OCR/入库任务仍继续执行（典型现象：删了文档还在打印 OCR 日志）。
+     */
+    private void cancelActiveTasksForDocument(Long documentId) {
+        try {
+            List<Task> active = taskService.list(new LambdaQueryWrapper<Task>()
+                    .eq(Task::getRefId, documentId)
+                    .in(Task::getStatus, TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.PENDING_RETRY));
+            for (Task t : active) {
+                boolean ok = taskService.requestCancel(t.getId());
+                log.info("[文档删除] 取消关联任务, taskId={}, type={}, cancelled={}", t.getId(), t.getType(), ok);
+            }
+        } catch (Exception e) {
+            log.warn("[文档删除] 取消关联任务失败(不影响删除流程), documentId={}", documentId, e);
+        }
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int deleteByKnowledgeIdCascade(Long knowledgeId) {
@@ -809,6 +831,11 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
         // 5. 一次 IN 删 chunk（按 docIds）
         chunkService.remove(new LambdaQueryWrapper<Chunk>().in(Chunk::getDocumentId, docIds));
+
+        // 5.5 取消该知识库下所有文档关联的活跃上传/入库任务
+        for (Long id : docIds) {
+            cancelActiveTasksForDocument(id);
+        }
 
         // 6. 一次 IN 删 document
         removeByIds(docIds);
