@@ -724,6 +724,106 @@ public class MilvusUtil {
         return convertResults(resp, 0);
     }
 
+    /**
+     * 向量检索（带文档元数据过滤，Phase 3）
+     * <p>documentIds 非空时仅返回匹配指定文档的向量结果；document_id 在 collection 为 VarChar，expr 用字符串字面量。</p>
+     */
+    public List<Map<String, Object>> searchVector(Long knowledgeId, float[] queryVector,
+                                                   int topK, double threshold, int ef,
+                                                   List<Long> documentIds) {
+        String collName = collectionName(knowledgeId);
+        var reqBuilder = SearchReq.builder()
+                .collectionName(collName)
+                .data(List.of(new FloatVec(queryVector)))
+                .annsField("embedding")
+                .topK(topK)
+                .metricType(IndexParam.MetricType.COSINE)
+                .searchParams(Map.of("params", String.format(Locale.ROOT, "{\"ef\":%d}", ef)))
+                .outputFields(List.of("id", "document_id", "content"));
+        if (documentIds != null && !documentIds.isEmpty()) {
+            reqBuilder = reqBuilder.filter(buildDocIdExpr(documentIds));
+        }
+        SearchResp resp = getClient().search(reqBuilder.build());
+        return convertResults(resp, threshold);
+    }
+
+    /**
+     * BM25 关键词检索（带文档元数据过滤，Phase 3）
+     */
+    public List<Map<String, Object>> searchKeyword(Long knowledgeId, String queryText,
+                                                    int topK, float dropRatioSearch,
+                                                    List<Long> documentIds) {
+        String collName = collectionName(knowledgeId);
+        var reqBuilder = SearchReq.builder()
+                .collectionName(collName)
+                .data(List.of(new SparseFloatVec(sparseFromString(queryText))))
+                .annsField("content_sparse")
+                .topK(topK)
+                .metricType(IndexParam.MetricType.IP)
+                .searchParams(Map.of("drop_ratio_search", dropRatioSearch))
+                .outputFields(List.of("id", "document_id", "content"));
+        if (documentIds != null && !documentIds.isEmpty()) {
+            reqBuilder = reqBuilder.filter(buildDocIdExpr(documentIds));
+        }
+        SearchResp resp = getClient().search(reqBuilder.build());
+        return convertResults(resp, 0);
+    }
+
+    /**
+     * 混合检索（带文档元数据过滤，Phase 3）
+     */
+    public List<Map<String, Object>> searchHybrid(Long knowledgeId, String queryText,
+                                                   float[] queryVector, int topK,
+                                                   float vectorWeight, float bm25Weight,
+                                                   int bm25TopK, float dropRatioSearch,
+                                                   List<Long> documentIds) {
+        String collName = collectionName(knowledgeId);
+        String bm25Params = String.format(Locale.ROOT, "{\"drop_ratio_search\":%.6f}", dropRatioSearch);
+        var vectorReqB = AnnSearchReq.builder()
+                .vectorFieldName("embedding")
+                .vectors(List.of(new FloatVec(queryVector)))
+                .topK(bm25TopK)
+                .metricType(IndexParam.MetricType.COSINE);
+        if (documentIds != null && !documentIds.isEmpty()) {
+            vectorReqB = vectorReqB.expr(buildDocIdExpr(documentIds));
+        }
+        AnnSearchReq vectorReq = vectorReqB.build();
+        var bm25ReqB = AnnSearchReq.builder()
+                .vectorFieldName("content_sparse")
+                .vectors(List.of(new SparseFloatVec(sparseFromString(queryText))))
+                .topK(bm25TopK)
+                .metricType(IndexParam.MetricType.IP)
+                .params(bm25Params);
+        if (documentIds != null && !documentIds.isEmpty()) {
+            bm25ReqB = bm25ReqB.expr(buildDocIdExpr(documentIds));
+        }
+        AnnSearchReq bm25Req = bm25ReqB.build();
+        WeightedRanker ranker = WeightedRanker.builder()
+                .weights(List.of(vectorWeight, bm25Weight))
+                .build();
+        var reqBuilder = HybridSearchReq.builder()
+                .collectionName(collName)
+                .searchRequests(List.of(vectorReq, bm25Req))
+                .ranker(ranker)
+                .topK(topK)
+                .outFields(List.of("id", "document_id", "content"));
+        SearchResp resp = getClient().hybridSearch(reqBuilder.build());
+        return convertResults(resp, 0);
+    }
+
+    /**
+     * 构造 Milvus document_id 过滤表达式（VarChar 类型，用字符串字面量）
+     */
+    private static String buildDocIdExpr(List<Long> documentIds) {
+        StringBuilder sb = new StringBuilder("document_id in [");
+        for (int i = 0; i < documentIds.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append('"').append(documentIds.get(i)).append('"');
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
     // ==================== 内部工具方法 ====================
 
     /**

@@ -119,6 +119,11 @@ public interface KnowledgeService extends IService<Knowledge> {
     void generateExampleQuestions(Long knowledgeId, Long documentId);
 
     /**
+     * 生成文档摘要与结构化元数据（Phase 2），结果合并写入 Document.metadata
+     */
+    void generateDocumentSummary(Long knowledgeId, Long documentId);
+
+    /**
      * 获取示例问题列表
      *
      * @param knowledgeId 知识库ID

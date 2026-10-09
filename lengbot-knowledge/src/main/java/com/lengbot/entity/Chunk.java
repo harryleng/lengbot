@@ -49,6 +49,10 @@ public class Chunk {
     @Schema(description = "Token数量")
     private Integer tokenCount;
 
+    @TableField("parent_content")
+    @Schema(description = "父块全文缓存（父子分块模式，命中子块时回填上下文）")
+    private String parentContent;
+
     @TableField(value = "metadata", typeHandler = JsonbTypeHandler.class, jdbcType = JdbcType.OTHER)
     @Schema(description = "分块元数据")
     private String metadata;

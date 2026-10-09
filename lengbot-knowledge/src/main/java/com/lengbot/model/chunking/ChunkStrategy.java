@@ -25,4 +25,12 @@ public interface ChunkStrategy {
      * @return 分块后的内容列表
      */
     List<String> split(String content, ChunkParams params);
+
+    /**
+     * 结构化分块（支持父子分块）。
+     * 默认实现将 split 结果包装为单级叶子块；父子策略重写此方法返回携带父块全文的子块。
+     */
+    default List<ChunkBlock> splitStructured(String content, ChunkParams params) {
+        return split(content, params).stream().map(ChunkBlock::leaf).toList();
+    }
 }

@@ -80,19 +80,23 @@ public interface EmbeddingMapper extends BaseMapper<Embedding> {
      * @param threshold   相似度阈值（0-1），低于此值的结果不返回
      * @return 检索结果（chunk_id, content, document_name, score）
      */
-    @Select("SELECT c.id AS chunk_id, c.content, c.knowledge_id, c.document_id, " +
+    @Select("<script>" +
+            "SELECT c.id AS chunk_id, c.content, c.knowledge_id, c.document_id, " +
             "d.name AS document_name, " +
-            "1 - (e.vector <=> #{vector}::vector) AS score " +
+            "1 - (e.vector &lt;=&gt; #{vector}::vector) AS score " +
             "FROM embedding e " +
             "JOIN chunk c ON e.chunk_id = c.id " +
             "JOIN document d ON c.document_id = d.id " +
             "WHERE e.knowledge_id = #{knowledgeId} AND d.deleted = 0 AND c.status = 'vectorized' " +
-            "AND (1 - (e.vector <=> #{vector}::vector)) >= #{threshold} " +
-            "ORDER BY e.vector <=> #{vector}::vector LIMIT #{topK}")
+            "<if test=\"metadataFilter != null and metadataFilter != ''\"> AND d.metadata @&gt; #{metadataFilter}::jsonb </if>" +
+            "AND (1 - (e.vector &lt;=&gt; #{vector}::vector)) &gt;= #{threshold} " +
+            "ORDER BY e.vector &lt;=&gt; #{vector}::vector LIMIT #{topK}" +
+            "</script>")
     List<Map<String, Object>> searchSimilarWithThreshold(@Param("vector") String vector,
                                                           @Param("knowledgeId") Long knowledgeId,
                                                           @Param("topK") int topK,
-                                                          @Param("threshold") double threshold);
+                                                          @Param("threshold") double threshold,
+                                                          @Param("metadataFilter") String metadataFilter);
 
     /**
      * 批量存储向量
@@ -138,18 +142,22 @@ public interface EmbeddingMapper extends BaseMapper<Embedding> {
      * @param topK        返回数量
      * @return 检索结果（chunk_id, content, document_id, document_name, score）
      */
-    @Select("SELECT c.id AS chunk_id, c.content, c.knowledge_id, c.document_id, " +
+    @Select("<script>" +
+            "SELECT c.id AS chunk_id, c.content, c.knowledge_id, c.document_id, " +
             "d.name AS document_name, " +
             "ts_rank(c.content_tsv, query) AS score " +
             "FROM chunk c " +
             "JOIN document d ON c.document_id = d.id " +
             "CROSS JOIN plainto_tsquery('simple', #{query}) query " +
             "WHERE c.knowledge_id = #{knowledgeId} AND d.deleted = 0 " +
+            "<if test=\"metadataFilter != null and metadataFilter != ''\"> AND d.metadata @&gt; #{metadataFilter}::jsonb </if>" +
             "AND c.content_tsv @@ query " +
-            "ORDER BY score DESC LIMIT #{topK}")
+            "ORDER BY score DESC LIMIT #{topK}" +
+            "</script>")
     List<Map<String, Object>> searchByFullText(@Param("query") String query,
                                                 @Param("knowledgeId") Long knowledgeId,
-                                                @Param("topK") int topK);
+                                                @Param("topK") int topK,
+                                                @Param("metadataFilter") String metadataFilter);
 
     // ========== QA Pair 向量操作 ==========
 

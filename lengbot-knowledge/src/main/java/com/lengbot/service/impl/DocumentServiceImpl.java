@@ -23,6 +23,7 @@ import com.lengbot.mapper.DocumentMapper;
 import com.lengbot.model.chunking.ChunkParams;
 import com.lengbot.model.chunking.ChunkStrategy;
 import com.lengbot.model.chunking.ChunkStrategyFactory;
+import com.lengbot.model.chunking.ChunkBlock;
 import com.lengbot.entity.Task;
 import com.lengbot.enums.TaskType;
 import com.lengbot.enums.TaskStatus;
@@ -464,10 +465,10 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             ChunkParams params = parseChunkParams(embeddingJson);
             String strategyName = parseChunkStrategy(embeddingJson);
             ChunkStrategy strategy = chunkStrategyFactory.getStrategy(strategyName);
-            List<String> chunks = strategy.split(content, params);
+            List<ChunkBlock> blocks = strategy.splitStructured(content, params);
 
             // 2.1 分块结果为空（所有分片低于最小token阈值）
-            if (chunks.isEmpty()) {
+            if (blocks.isEmpty()) {
                 throw new BizException(ErrorCode.DOCUMENT_CHUNKS_TOO_SHORT);
             }
 
@@ -475,13 +476,14 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             progressCallback.accept(30, "正在保存分块...");
             long totalTokens = 0;
             List<Chunk> chunkEntities = new ArrayList<>();
-            for (int i = 0; i < chunks.size(); i++) {
-                String chunkContent = TextNormalizeUtil.normalizeChunkContent(chunks.get(i));
+            for (int i = 0; i < blocks.size(); i++) {
+                String chunkContent = TextNormalizeUtil.normalizeChunkContent(blocks.get(i).getContent());
                 Chunk chunk = new Chunk();
                 chunk.setDocumentId(doc.getId());
                 chunk.setKnowledgeId(doc.getKnowledgeId());
                 chunk.setChunkIndex(i);
                 chunk.setContent(chunkContent);
+                chunk.setParentContent(blocks.get(i).getParentContent());
                 chunk.setTokenCount(com.lengbot.model.chunking.TokenUtil.countTokens(chunkContent));
                 chunk.setStatus(ChunkStatus.CHUNKED);
                 chunkEntities.add(chunk);
@@ -491,13 +493,13 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
             // 4. 更新文档状态为向量化中
             doc.setStatus(DocumentStatus.PROCESSING);
-            doc.setChunkCount(chunks.size());
+            doc.setChunkCount(blocks.size());
             doc.setTokenCount(totalTokens);
             updateById(doc);
 
             // 5. 更新知识库统计
-            knowledgeServiceProvider.getObject().updateStats(doc.getKnowledgeId(), 1, chunks.size(), (int) totalTokens);
-            log.info("[文档入库] 分块完成, documentId={}, chunks={}, strategy={}", documentId, chunks.size(), strategyName);
+            knowledgeServiceProvider.getObject().updateStats(doc.getKnowledgeId(), 1, blocks.size(), (int) totalTokens);
+            log.info("[文档入库] 分块完成, documentId={}, chunks={}, strategy={}", documentId, blocks.size(), strategyName);
 
             // 6. 向量化（单独归因：向量化失败不再被外层 catch 误报为"分块失败"）
             try {
@@ -606,6 +608,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             // 同步触发示例问题生成
             try {
                 knowledgeServiceProvider.getObject().generateExampleQuestions(knowledgeId, documentId);
+                knowledgeServiceProvider.getObject().generateDocumentSummary(knowledgeId, documentId);
             } catch (Exception e) {
                 log.warn("[文档入库] 示例问题生成失败, documentId={}", documentId, e);
             }

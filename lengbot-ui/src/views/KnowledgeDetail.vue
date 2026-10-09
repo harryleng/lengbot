@@ -257,6 +257,11 @@
                 </template>
               </template>
             </div>
+            <div class="rag-meta-filter">
+              <span class="meta-filter-label">元数据过滤:</span>
+              <a-input v-model:value="metadataFilterCategory" placeholder="类别(如 合同)" size="small" style="width:150px" />
+              <a-input v-model:value="metadataFilterTags" placeholder="标签,逗号分隔(如 财务,制度)" size="small" style="width:220px" />
+            </div>
             <div class="rag-input">
               <input v-model="ragQuestion" placeholder="输入测试问题..." @keydown="onRagKeydown" />
               <a-tooltip title="检索配置">
@@ -462,6 +467,10 @@
                   {{
                     currentDoc?.embeddingJson ? parseIngestConfig(currentDoc.embeddingJson).chunkStrategy || '-' : '-'
                   }}
+                </a-descriptions-item>
+                <a-descriptions-item label="文档摘要">
+                  <span v-if="docSummary" style="white-space: pre-wrap; line-height: 1.6">{{ docSummary }}</span>
+                  <span v-else class="doc-muted">-</span>
                 </a-descriptions-item>
               </a-descriptions>
             </div>
@@ -868,6 +877,7 @@
               <a-select-option value="separator">严格分隔 - 遇分隔符即切分</a-select-option>
               <a-select-option value="qa">问答对分块 - 适合FAQ/客服对话</a-select-option>
               <a-select-option value="laws">法规分块 - 按条款结构切分</a-select-option>
+              <a-select-option value="parent-child">父子分块 - 子块精准召回+父块完整上下文</a-select-option>
             </a-select>
             <div
               v-if="ingestForm.chunkStrategy === 'general' && knowledgeDefaultStrategy"
@@ -1509,6 +1519,8 @@ const evalTabRef = ref(null)
 const benchmarksTabRef = ref(null)
 const qaPairsTabRef = ref(null)
 const ragQuestion = ref('')
+const metadataFilterCategory = ref('')
+const metadataFilterTags = ref('')
 const ragHistory = ref([])
 const ragLoading = ref(false)
 const ragRef = ref(null)
@@ -1606,6 +1618,18 @@ const ingestDoc = ref(null)
 const ingestSubmitting = ref(false)
 const ingestPreviewing = ref(false)
 const previewChunksList = ref([])
+
+// 文档摘要（Phase 2）：从 Document.metadata JSON 读取
+// 文档摘要（Phase 2）：从 Document.metadata JSON 读取
+const docMeta = computed(() => {
+  try {
+    return currentDoc.value?.metadata ? JSON.parse(currentDoc.value.metadata) : {}
+  } catch {
+    return {}
+  }
+})
+const docSummary = computed(() => docMeta.value?.summary || '')
+const docTags = computed(() => docMeta.value?.tags || [])
 const ingestForm = reactive({
   chunkStrategy: 'general',
   chunkSize: 512,
@@ -2503,7 +2527,16 @@ async function askRag() {
   })
 
   try {
-    const res = await searchKnowledge(knowledgeId, q, searchOverrides.value)
+    const overrides = { ...(searchOverrides.value || {}) }
+    if (metadataFilterCategory.value.trim() || metadataFilterTags.value.trim()) {
+      const mf = {}
+      const cat = metadataFilterCategory.value.trim()
+      const tags = metadataFilterTags.value.split(',').map(t => t.trim()).filter(Boolean)
+      if (cat) mf.category = cat
+      if (tags.length) mf.tags = tags
+      overrides.metadataFilter = mf
+    }
+    const res = await searchKnowledge(knowledgeId, q, overrides)
     turn.results = res.data || []
   } catch (e) {
     // interceptor 已处理错误提示

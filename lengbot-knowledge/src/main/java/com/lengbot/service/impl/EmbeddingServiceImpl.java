@@ -22,6 +22,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import org.springframework.transaction.annotation.Transactional;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -65,6 +66,9 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
     private static final int DEFAULT_RRF_K = 60;
 
     /** Milvus 集合存在性缓存，避免每次检索前 RPC 调用 hasCollection */
+    private static final String METADATA_FILTER_KEY = "metadataFilter";
+    private static final String METADATA_FILTER_JSON_KEY = "metadataFilterJson";
+    private static final String METADATA_DOC_IDS_KEY = "metadataDocIds";
     private final ConcurrentHashMap<Long, Boolean> collectionExistsCache = new ConcurrentHashMap<>();
 
     /** 向量路由缓存：knowledgeId → 是否为 Milvus 类型（知识库类型创建后不变） */
@@ -191,6 +195,14 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
     public List<Map<String, Object>> searchSimilarSql(Long knowledgeId, float[] queryVector,
                                                        int topK, double threshold,
                                                        Map<String, Object> queryParams) {
+        // 0. 元数据过滤（Phase 3）：基于 Document.metadata JSONB 过滤检索范围
+        List<Long> filteredDocIds = resolveMetadataFilterDocIds(knowledgeId, queryParams);
+        if (filteredDocIds != null && filteredDocIds.isEmpty()) {
+            // 有过滤条件但无匹配文档 → 直接短路返回空结果
+            log.info("[Embedding] 元数据过滤后无匹配文档, knowledgeId={}", knowledgeId);
+            return List.of();
+        }
+
         // 1. 常规检索（Milvus 或 pgvector）
         List<Map<String, Object>> results;
         if (shouldRouteToMilvus(knowledgeId)) {
@@ -205,7 +217,39 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
         // 3. Reranker（可选）
         results = applyReranker(results, queryParams, topK);
 
-        return limitResults(results, topK);
+        // 4. 父子分块回填：命中子块若携带 parent_content（父块全文缓存），用父块全文替换 content，
+        //    保证返回给大模型的上下文完整（父块不单独入库，仅缓存全文到子块）
+        List<Map<String, Object>> limited = limitResults(results, topK);
+        enrichWithParentContent(limited);
+        return limited;
+    }
+
+    /**
+     * 父子分块回填：批量按 chunk_id 取出 parent_content，命中子块时用父块全文替换 content。
+     * 统一覆盖 pgvector 与 Milvus 两条检索路径（都在 searchSimilarSql 末尾执行）。
+     */
+    private void enrichWithParentContent(List<Map<String, Object>> results) {
+        if (results == null || results.isEmpty()) {
+            return;
+        }
+        java.util.ArrayList<Long> ids = new java.util.ArrayList<>();
+        for (Map<String, Object> row : results) {
+            long id = getChunkId(row);
+            if (id > 0) {
+                ids.add(id);
+            }
+        }
+        if (ids.isEmpty()) {
+            return;
+        }
+        java.util.Map<Long, Chunk> chunkMap = chunkService.listByIds(ids).stream()
+                .collect(java.util.stream.Collectors.toMap(Chunk::getId, c -> c));
+        for (Map<String, Object> row : results) {
+            Chunk c = chunkMap.get(getChunkId(row));
+            if (c != null && c.getParentContent() != null && !c.getParentContent().isBlank()) {
+                row.put("content", c.getParentContent());
+            }
+        }
     }
 
     /**
@@ -217,18 +261,19 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
         // 设置 ef_search 提升召回率（SET LOCAL 仅对当前事务生效），透传 query_params.hnsw_ef_search
         int hnswEf = getIntParam(queryParams, "hnsw_ef_search", DEFAULT_HNSW_EF_SEARCH);
         embeddingMapper.setHnswEfSearch(Math.max(hnswEf, topK));
+        String metadataFilter = queryParams != null ? (String) queryParams.get(METADATA_FILTER_JSON_KEY) : null;
         String searchMode = queryParams != null && queryParams.get("search_mode") instanceof String s
                 ? s : SEARCH_MODE_HYBRID;
 
         return switch (searchMode) {
             case SEARCH_MODE_KEYWORD -> {
                 String queryText = getQueryParam(queryParams, "query_text", "");
-                yield embeddingMapper.searchByFullText(queryText, knowledgeId, topK);
+                yield embeddingMapper.searchByFullText(queryText, knowledgeId, topK, metadataFilter);
             }
-            case SEARCH_MODE_HYBRID -> searchPgHybrid(knowledgeId, queryVector, topK, threshold, queryParams);
+            case SEARCH_MODE_HYBRID -> searchPgHybrid(knowledgeId, queryVector, topK, threshold, queryParams, metadataFilter);
             default -> {
                 String vectorStr = toVectorString(queryVector);
-                yield embeddingMapper.searchSimilarWithThreshold(vectorStr, knowledgeId, topK, threshold);
+                yield embeddingMapper.searchSimilarWithThreshold(vectorStr, knowledgeId, topK, threshold, metadataFilter);
             }
         };
     }
@@ -279,7 +324,7 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
      */
     private List<Map<String, Object>> searchPgHybrid(Long knowledgeId, float[] queryVector,
                                                       int topK, double threshold,
-                                                      Map<String, Object> params) {
+                                                      Map<String, Object> params, String metadataFilter) {
         String queryText = getQueryParam(params, "query_text", "");
         int recallTopK = Math.max(topK * 3, getIntParam(params, "recall_top_k", 30));
         float vectorWeight = getFloatParam(params, "vector_weight", 0.7f);
@@ -287,9 +332,9 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
 
         String vectorStr = toVectorString(queryVector);
         List<Map<String, Object>> vectorResults = embeddingMapper.searchSimilarWithThreshold(
-                vectorStr, knowledgeId, recallTopK, 0);
+                vectorStr, knowledgeId, recallTopK, 0, metadataFilter);
         List<Map<String, Object>> keywordResults = embeddingMapper.searchByFullText(
-                queryText, knowledgeId, recallTopK);
+                queryText, knowledgeId, recallTopK, metadataFilter);
 
         return rrfFusion(vectorResults, keywordResults, vectorWeight, keywordWeight, topK, threshold,
                 getIntParam(params, "rrf_k", DEFAULT_RRF_K));
@@ -347,6 +392,52 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
                     return row;
                 })
                 .toList();
+    }
+
+    /**
+     * 解析元数据过滤条件（Phase 3）：将 queryParams.metadataFilter 转为 document.metadata JSONB 过滤，
+     * 返回匹配的文档ID列表（null 表示无过滤条件）。
+     */
+    private List<Long> resolveMetadataFilterDocIds(Long knowledgeId, Map<String, Object> queryParams) {
+        if (queryParams == null) {
+            return null;
+        }
+        Object mf = queryParams.get(METADATA_FILTER_KEY);
+        if (mf == null) {
+            return null;
+        }
+        String json = toMetadataFilterJson(mf);
+        if (json == null || json.isBlank() || "{}".equals(json)) {
+            return null;
+        }
+        try {
+            LambdaQueryWrapper<Document> w = new LambdaQueryWrapper<>();
+            w.eq(Document::getKnowledgeId, knowledgeId)
+             .eq(Document::getDeleted, 0)
+             .apply("metadata @> {0}::jsonb", json);
+            List<Long> ids = documentMapper.selectList(w).stream().map(Document::getId).toList();
+            queryParams.put(METADATA_FILTER_JSON_KEY, json);
+            queryParams.put(METADATA_DOC_IDS_KEY, ids);
+            return ids;
+        } catch (Exception e) {
+            log.warn("[Embedding] 元数据过滤解析失败, knowledgeId={}, error={}", knowledgeId, e.getMessage());
+            return null;
+        }
+    }
+
+    private String toMetadataFilterJson(Object mf) {
+        try {
+            if (mf instanceof String st) {
+                String t = st.trim();
+                return t.startsWith("{") ? t : null;
+            }
+            if (mf instanceof Map) {
+                return new ObjectMapper().writeValueAsString(mf);
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private long getChunkId(Map<String, Object> row) {
@@ -423,6 +514,7 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
         }
 
         List<Map<String, Object>> results;
+        List<Long> docIds = queryParams != null ? (List<Long>) queryParams.get(METADATA_DOC_IDS_KEY) : null;
         switch (searchMode) {
             case SEARCH_MODE_KEYWORD -> {
                 String queryText = queryParams != null && queryParams.get("query_text") instanceof String s
@@ -431,7 +523,7 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
                         ? n.intValue() : topK * 3;
                 bm25TopK = Math.max(topK, bm25TopK);
                 float dropRatioSearch = getFloatParam(queryParams, "bm25_drop_ratio_search", 0.0f);
-                results = milvusUtil.searchKeyword(knowledgeId, queryText, bm25TopK, dropRatioSearch);
+                results = milvusUtil.searchKeyword(knowledgeId, queryText, bm25TopK, dropRatioSearch, docIds);
             }
             case SEARCH_MODE_HYBRID -> {
                 String queryText = queryParams != null && queryParams.get("query_text") instanceof String s
@@ -445,13 +537,13 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
                 bm25TopK = Math.max(topK, bm25TopK);
                 float dropRatioSearch = getFloatParam(queryParams, "bm25_drop_ratio_search", 0.0f);
                 results = milvusUtil.searchHybrid(knowledgeId, queryText, queryVector,
-                        topK, vectorWeight, bm25Weight, bm25TopK, dropRatioSearch);
+                        topK, vectorWeight, bm25Weight, bm25TopK, dropRatioSearch, docIds);
             }
             default -> {
                 // 透传 query_params.milvus_search_ef 控制召回精度（HNSW ef 参数）
                 int milvusEf = getIntParam(queryParams, "milvus_search_ef", DEFAULT_MILVUS_SEARCH_EF);
                 results = milvusUtil.searchVector(knowledgeId, queryVector, topK, threshold,
-                        Math.max(milvusEf, topK));
+                        Math.max(milvusEf, topK), docIds);
             }
         }
 
