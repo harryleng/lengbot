@@ -82,7 +82,7 @@ public class GraphExtractionExecutor implements TaskExecutor {
         String providerName = payload.has("providerName") ? payload.get("providerName").asText("") : "";
         String schema = payload.has("schema") ? payload.get("schema").asText("") : "";
         if (schema.isBlank()) schema = null;
-        int concurrency = payload.has("concurrency") ? payload.get("concurrency").asInt(50) : 50;
+        int concurrency = payload.has("concurrency") ? payload.get("concurrency").asInt(8) : 8;
         concurrency = Math.max(1, Math.min(concurrency, 1000));
         Map<String, Object> modelParams = null;
         if (payload.has("modelParams") && payload.get("modelParams").isObject()) {

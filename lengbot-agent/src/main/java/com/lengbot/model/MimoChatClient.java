@@ -275,7 +275,12 @@ public class MimoChatClient {
             body.put("top_p", toDouble(config.get("topP")));
         }
         if (config.containsKey("maxTokens")) {
-            body.put("max_completion_tokens", toInt(config.get("maxTokens")));
+            // 普通模型(DeepSeek / GPT 等)用 max_tokens；仅 OpenAI 推理模型(o-series)用 max_completion_tokens
+            if (Boolean.TRUE.equals(config.get(ConfigKeys.Agent.ENABLE_REASONING))) {
+                body.put("max_completion_tokens", toInt(config.get("maxTokens")));
+            } else {
+                body.put("max_tokens", toInt(config.get("maxTokens")));
+            }
         }
         if (config.containsKey("presencePenalty")) {
             body.put("presence_penalty", toDouble(config.get("presencePenalty")));
