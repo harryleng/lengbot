@@ -336,7 +336,12 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
         // 4. 分块
         ChunkStrategy strategy = chunkStrategyFactory.getStrategy(strategyName);
-        return strategy.split(content, params);
+        List<String> chunks = strategy.split(content, params);
+        // 4.1 规范化（与入库同一条链）：折叠异常空白、清理控制字符，保证预览与最终入库内容一致
+        boolean collapseWs = params.isCollapseWhitespace();
+        return chunks.stream()
+                .map(c -> TextNormalizeUtil.normalizeChunkContent(c, collapseWs))
+                .toList();
     }
 
     @Override
@@ -477,7 +482,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             long totalTokens = 0;
             List<Chunk> chunkEntities = new ArrayList<>();
             for (int i = 0; i < blocks.size(); i++) {
-                String chunkContent = TextNormalizeUtil.normalizeChunkContent(blocks.get(i).getContent());
+                String chunkContent = TextNormalizeUtil.normalizeChunkContent(blocks.get(i).getContent(), params.isCollapseWhitespace());
                 Chunk chunk = new Chunk();
                 chunk.setDocumentId(doc.getId());
                 chunk.setKnowledgeId(doc.getKnowledgeId());
@@ -557,32 +562,57 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             int batchEnd = Math.min(batchStart + EMBED_BATCH_SIZE, total);
             List<Chunk> batch = chunks.subList(batchStart, batchEnd);
 
-            // 3.1 批量调用 EmbeddingService
+            // 3.1 批量调用 EmbeddingService（单条失败返回 null，已隔离）
             List<String> texts = batch.stream().map(Chunk::getContent).toList();
-            List<float[]> vectors;
+            List<double[]> rawVectors;
             try {
-                vectors = embedBatch(texts);
+                rawVectors = embedBatchRaw(texts);
             } catch (Exception e) {
                 log.error("[向量化] 批量Embedding失败, batchStart={}", batchStart, e);
-                // 批量失败时标记该批次所有chunk为失败（1 条 SQL）
+                // 批量异常时标记该批次所有chunk为失败（1 条 SQL）
                 batch.forEach(c -> c.setStatus(ChunkStatus.FAILED));
                 chunkService.updateBatchById(batch);
                 failed += batch.size();
                 continue;
             }
 
-            // 3.2 批量更新chunk状态为向量化中
-            List<Long> chunkIds = batch.stream().map(Chunk::getId).toList();
-            batch.forEach(c -> c.setStatus(ChunkStatus.VECTORIZING));
+            // 3.1.1 过滤嵌入失败的 chunk（null 向量）：成功项入库，失败项标记 FAILED 不写脏零向量
+            List<Long> okChunkIds = new java.util.ArrayList<>();
+            List<float[]> okVectors = new java.util.ArrayList<>();
+            java.util.Set<Long> failedIds = new java.util.HashSet<>();
+            for (int i = 0; i < batch.size(); i++) {
+                double[] v = rawVectors.get(i);
+                if (v == null) {
+                    failedIds.add(batch.get(i).getId());
+                    continue;
+                }
+                okChunkIds.add(batch.get(i).getId());
+                okVectors.add(ModelCalls.toFloatArray(v));
+            }
+            if (okVectors.isEmpty()) {
+                log.error("[向量化] 整批嵌入失败, 跳过入库, documentId={}, batchStart={}", documentId, batchStart);
+                batch.forEach(c -> c.setStatus(ChunkStatus.FAILED));
+                chunkService.updateBatchById(batch);
+                failed += batch.size();
+                continue;
+            }
+
+            // 3.2 批量更新chunk状态（成功=向量化中, 失败=FAILED）
+            for (Chunk c : batch) {
+                c.setStatus(failedIds.contains(c.getId()) ? ChunkStatus.FAILED : ChunkStatus.VECTORIZING);
+            }
             chunkService.updateBatchById(batch);
 
-            // 3.3 批量存储向量（传 knowledgeId 支持 Milvus 路由）
-            ((EmbeddingServiceImpl) embeddingService).batchSaveVectors(knowledgeId, chunkIds, modelName, vectors);
+            // 3.3 仅对成功 chunk 批量存储向量（传 knowledgeId 支持 Milvus 路由）
+            ((EmbeddingServiceImpl) embeddingService).batchSaveVectors(knowledgeId, okChunkIds, modelName, okVectors);
 
-            // 3.4 批量更新chunk状态为已向量化
-            batch.forEach(c -> c.setStatus(ChunkStatus.VECTORIZED));
+            // 3.4 批量更新chunk状态（成功=已向量化, 失败=FAILED）
+            for (Chunk c : batch) {
+                c.setStatus(failedIds.contains(c.getId()) ? ChunkStatus.FAILED : ChunkStatus.VECTORIZED);
+            }
             chunkService.updateBatchById(batch);
-            success += batch.size();
+            success += okChunkIds.size();
+            failed += failedIds.size();
 
             // 3.5 报告进度
             int progress = (int) ((batchEnd * 1.0 / total) * 100);
@@ -642,8 +672,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
      * @param texts 文本列表
      * @return 向量列表（float[]），与输入文本一一对应
      */
-    private List<float[]> embedBatch(List<String> texts) {
-        return ModelCalls.toFloatArrays(textEmbeddingService.embedBatch(texts));
+    private List<double[]> embedBatchRaw(List<String> texts) {
+        return textEmbeddingService.embedBatch(texts);
     }
 
     @Override
@@ -1073,6 +1103,9 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             }
             if (node.has("chunkDelimiter") && !node.get("chunkDelimiter").asText("").isBlank()) {
                 params.setDelimiter(node.get("chunkDelimiter").asText("\n"));
+            }
+            if (node.has("collapseWhitespace")) {
+                params.setCollapseWhitespace(node.get("collapseWhitespace").asBoolean(false));
             }
         } catch (Exception e) {
             log.warn("[DocumentService] 解析embeddingJson失败, 使用默认参数", e);

@@ -19,4 +19,7 @@ public class ChunkParams {
 
     /** 分隔符 */
     private String delimiter = "\n";
+
+    /** 是否折叠连续空白（Dify remove_extra_spaces 等价）：连续空格/换行/制表符折叠为单个空格，默认关闭 */
+    private boolean collapseWhitespace = false;
 }

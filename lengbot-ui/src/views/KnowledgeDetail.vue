@@ -910,6 +910,10 @@
           <a-form-item label="分块分隔符">
             <a-input v-model:value="ingestForm.chunkDelimiter" placeholder="默认按换行符分隔" allow-clear />
           </a-form-item>
+          <a-form-item label="折叠连续空白">
+            <a-switch v-model:checked="ingestForm.collapseWhitespace" checked-children="开" un-checked-children="关" />
+            <span class="url-hint">连续空格/换行/制表符折叠为单个空格（对齐 Dify 规则）</span>
+          </a-form-item>
         </a-form>
 
         <!-- 预览分块 -->
@@ -1635,6 +1639,7 @@ const ingestForm = reactive({
   chunkSize: 512,
   chunkOverlap: 10,
   chunkDelimiter: '',
+  collapseWhitespace: false,
 })
 
 // 编辑弹窗
@@ -2178,6 +2183,7 @@ async function handlePreviewChunks() {
       chunkSize: ingestForm.chunkSize,
       chunkOverlap: ingestForm.chunkOverlap,
       chunkDelimiter: ingestForm.chunkDelimiter || null,
+      collapseWhitespace: ingestForm.collapseWhitespace || false,
     }
     const res = await previewChunks(ingestDoc.value.id, data)
     previewChunksList.value = res.data || []
@@ -2200,6 +2206,7 @@ async function handleIngest() {
       chunkSize: ingestForm.chunkSize,
       chunkOverlap: ingestForm.chunkOverlap,
       chunkDelimiter: ingestForm.chunkDelimiter || null,
+      collapseWhitespace: ingestForm.collapseWhitespace || false,
     }
     await ingestDocument(ingestDoc.value.id, data)
     message.success('入库任务已提交，可在「任务中心」查看进度')

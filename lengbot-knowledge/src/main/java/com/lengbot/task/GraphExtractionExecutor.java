@@ -507,18 +507,36 @@ public class GraphExtractionExecutor implements TaskExecutor {
             entityContents.add(name + (desc.isBlank() ? "" : ": " + desc));
         }
 
-        // 2. 确保 Milvus Entity Collection 存在
+        // 2. 确保 Milvus Entity Collection 存在（维度来自首个成功嵌入的向量）
         if (!milvusUtil.hasEntityCollection(knowledgeId)) {
-            List<float[]> sampleVectors = batchEmbed(entityContents.subList(0, Math.min(1, entityContents.size())));
-            if (sampleVectors.isEmpty()) return;
-            milvusUtil.createEntityCollection(knowledgeId, sampleVectors.get(0).length);
+            float[] sampleVec = firstNonNullVector(batchEmbed(entityContents.subList(0, Math.min(1, entityContents.size()))));
+            if (sampleVec == null) {
+                log.warn("[图谱向量] Entity 向量采样全部失败, 跳过 Entity 向量写入: knowledgeId={}", knowledgeId);
+            } else {
+                milvusUtil.createEntityCollection(knowledgeId, sampleVec.length);
+            }
         }
 
-        // 3. 批量生成 Entity Embedding 并写入
-        List<float[]> entityVectors = batchEmbed(entityContents);
-        if (!entityVectors.isEmpty()) {
-            milvusUtil.insertEntityVectors(knowledgeId, entityIds, entityContents, entityVectors);
-            log.info("[图谱向量] Entity 向量写入完成: knowledgeId={}, count={}", knowledgeId, entityIds.size());
+        // 3. 批量生成 Entity Embedding 并写入（失败条目与 entityIds/entityContents 同步过滤，避免错位写入脏数据）
+        List<float[]> entityVectorsRaw = batchEmbed(entityContents);
+        List<Long> okEntityIds = new ArrayList<>();
+        List<String> okEntityContents = new ArrayList<>();
+        List<float[]> okEntityVectors = new ArrayList<>();
+        for (int k = 0; k < entityVectorsRaw.size(); k++) {
+            float[] v = entityVectorsRaw.get(k);
+            if (v == null) {
+                log.warn("[图谱向量] Entity 向量嵌入失败, 跳过: {}", entityContents.get(k));
+                continue;
+            }
+            okEntityIds.add(entityIds.get(k));
+            okEntityContents.add(entityContents.get(k));
+            okEntityVectors.add(v);
+        }
+        if (!okEntityVectors.isEmpty() && milvusUtil.hasEntityCollection(knowledgeId)) {
+            milvusUtil.insertEntityVectors(knowledgeId, okEntityIds, okEntityContents, okEntityVectors);
+            log.info("[图谱向量] Entity 向量写入完成: knowledgeId={}, count={}", knowledgeId, okEntityIds.size());
+        } else if (!okEntityVectors.isEmpty()) {
+            log.warn("[图谱向量] Entity Collection 不存在, 跳过 Entity 向量写入: knowledgeId={}", knowledgeId);
         }
 
         // 4. 从 Neo4j 查询所有 Triple
@@ -553,18 +571,40 @@ public class GraphExtractionExecutor implements TaskExecutor {
             tripleContents.add(headName + " " + relType + " " + tailName);
         }
 
-        // 5. 确保 Milvus Triple Collection 存在
+        // 5. 确保 Milvus Triple Collection 存在（维度来自首个成功嵌入的向量）
         if (!milvusUtil.hasTripleCollection(knowledgeId)) {
-            List<float[]> sampleVectors = batchEmbed(tripleContents.subList(0, Math.min(1, tripleContents.size())));
-            if (sampleVectors.isEmpty()) return;
-            milvusUtil.createTripleCollection(knowledgeId, sampleVectors.get(0).length);
+            float[] sampleVec = firstNonNullVector(batchEmbed(tripleContents.subList(0, Math.min(1, tripleContents.size()))));
+            if (sampleVec == null) {
+                log.warn("[图谱向量] Triple 向量采样全部失败, 跳过 Triple 向量写入: knowledgeId={}", knowledgeId);
+            } else {
+                milvusUtil.createTripleCollection(knowledgeId, sampleVec.length);
+            }
         }
 
-        // 6. 批量生成 Triple Embedding 并写入
-        List<float[]> tripleVectors = batchEmbed(tripleContents);
-        if (!tripleVectors.isEmpty()) {
-            milvusUtil.insertTripleVectors(knowledgeId, tripleIds, tripleContents, sourceIds, targetIds, tripleVectors);
-            log.info("[图谱向量] Triple 向量写入完成: knowledgeId={}, count={}", knowledgeId, tripleIds.size());
+        // 6. 批量生成 Triple Embedding 并写入（失败条目与 tripleIds/sourceIds/targetIds/tripleContents 同步过滤）
+        List<float[]> tripleVectorsRaw = batchEmbed(tripleContents);
+        List<Long> okTripleIds = new ArrayList<>();
+        List<String> okTripleContents = new ArrayList<>();
+        List<Long> okSourceIds = new ArrayList<>();
+        List<Long> okTargetIds = new ArrayList<>();
+        List<float[]> okTripleVectors = new ArrayList<>();
+        for (int k = 0; k < tripleVectorsRaw.size(); k++) {
+            float[] v = tripleVectorsRaw.get(k);
+            if (v == null) {
+                log.warn("[图谱向量] Triple 向量嵌入失败, 跳过: {}", tripleContents.get(k));
+                continue;
+            }
+            okTripleIds.add(tripleIds.get(k));
+            okTripleContents.add(tripleContents.get(k));
+            okSourceIds.add(sourceIds.get(k));
+            okTargetIds.add(targetIds.get(k));
+            okTripleVectors.add(v);
+        }
+        if (!okTripleVectors.isEmpty() && milvusUtil.hasTripleCollection(knowledgeId)) {
+            milvusUtil.insertTripleVectors(knowledgeId, okTripleIds, okTripleContents, okSourceIds, okTargetIds, okTripleVectors);
+            log.info("[图谱向量] Triple 向量写入完成: knowledgeId={}, count={}", knowledgeId, okTripleIds.size());
+        } else if (!okTripleVectors.isEmpty()) {
+            log.warn("[图谱向量] Triple Collection 不存在, 跳过 Triple 向量写入: knowledgeId={}", knowledgeId);
         }
     }
 
@@ -582,23 +622,39 @@ public class GraphExtractionExecutor implements TaskExecutor {
             List<String> batch = texts.subList(i, end);
             try {
                 List<double[]> batchVectors = textEmbeddingService.embedBatch(batch);
-                for (double[] vec : batchVectors) {
+                for (int j = 0; j < batchVectors.size(); j++) {
+                    double[] vec = batchVectors.get(j);
+                    if (vec == null) {
+                        // 嵌入失败已被 TextEmbeddingService 隔离(返回 null)，保留 null 占位以维持 1:1 对齐，由调用方过滤
+                        allVectors.add(null);
+                        continue;
+                    }
                     float[] fVec = new float[vec.length];
-                    for (int j = 0; j < vec.length; j++) {
-                        fVec[j] = (float) vec[j];
+                    for (int k = 0; k < vec.length; k++) {
+                        fVec[k] = (float) vec[k];
                     }
                     allVectors.add(fVec);
                 }
             } catch (Exception e) {
-                log.warn("[图谱向量] Embedding 生成失败: batch=[{}, {}), error={}", i, end, e.getMessage());
-                // 填充零向量保持对齐
-                int dim = allVectors.isEmpty() ? 768 : allVectors.get(0).length;
+                log.warn("[图谱向量] 整批 Embedding 生成失败(已隔离, 不写零向量): batch=[{}, {}), error={}", i, end, e.getMessage());
+                // 失败时以 null 占位维持对齐，避免脏零向量入库
                 for (int j = 0; j < batch.size(); j++) {
-                    allVectors.add(new float[dim]);
+                    allVectors.add(null);
                 }
             }
         }
         return allVectors;
+    }
+
+    /**
+     * 取首个非 null 的向量（用于采样确定集合维度）；全部失败时返回 null
+     */
+    private float[] firstNonNullVector(List<float[]> vectors) {
+        if (vectors == null) return null;
+        for (float[] v : vectors) {
+            if (v != null) return v;
+        }
+        return null;
     }
 
     private long snowflakeId() {

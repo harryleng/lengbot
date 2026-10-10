@@ -18,21 +18,49 @@ public final class TextNormalizeUtil {
             "[\u200B\u200C\u200D\uFEFF\uFFFE\uFFFF]");
     /** 目录页的点号引导线（dot leader）：连续大量点号会触发 embedding 服务（SiliconFlow 等）对连续重复字符的 token 限制 → 400 */
     private static final Pattern DOT_LEADER = Pattern.compile("\\.{16,}");
+    /** 连续空白折叠（Dify remove_extra_spaces 等价）：连续空格/换行/制表符统一折叠为单个空格 */
+    private static final Pattern WHITESPACE_RUN = Pattern.compile("\\s+");
 
     private TextNormalizeUtil() {
     }
 
     /**
-     * 分块入库前规范化
+     * 分块入库前规范化（不折叠连续空白，保持向后兼容）
      *
      * @param content 原始分块内容
      * @return 规范化后的内容
      */
     public static String normalizeChunkContent(String content) {
+        return normalizeChunkContent(content, false);
+    }
+
+    /**
+     * 分块入库前规范化
+     *
+     * @param content           原始分块内容
+     * @param collapseWhitespace 是否折叠连续空白（Dify remove_extra_spaces 等价），由入库配置 collapseWhitespace 控制
+     * @return 规范化后的内容
+     */
+    public static String normalizeChunkContent(String content, boolean collapseWhitespace) {
         if (content == null || content.isBlank()) {
             return content;
         }
-        return normalizeInternal(content, true);
+        String normalized = normalizeInternal(content, true);
+        return collapseWhitespace ? collapseWhitespace(normalized) : normalized;
+    }
+
+    /**
+     * 折叠连续空白（Dify remove_extra_spaces 等价）：连续空格/换行/制表符统一折叠为单个空格。
+     * <p>注意：会把块内换行也折叠成单行，适用于希望消除排版噪声的场景；默认关闭。</p>
+     *
+     * @param content 已规范化的文本
+     * @return 折叠后的单行文本
+     */
+    public static String collapseWhitespace(String content) {
+        if (content == null || content.isEmpty()) {
+            return content;
+        }
+        return WHITESPACE_RUN.matcher(content).replaceAll(" ").strip();
     }
 
     /**
