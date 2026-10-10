@@ -150,6 +150,13 @@ public class MilvusUtil {
         return "kb_" + knowledgeId + "_triple";
     }
 
+    /**
+     * 获取 Community Collection 名称（GraphRAG 社区摘要向量）
+     */
+    public static String communityCollectionName(Long knowledgeId) {
+        return "kb_" + knowledgeId + "_community";
+    }
+
     // ==================== Collection 管理 ====================
 
     /**
@@ -272,6 +279,13 @@ public class MilvusUtil {
         return hasCollectionByName(tripleCollectionName(knowledgeId));
     }
 
+    /**
+     * 判断 Community Collection 是否存在
+     */
+    public boolean hasCommunityCollection(Long knowledgeId) {
+        return hasCollectionByName(communityCollectionName(knowledgeId));
+    }
+
     private boolean hasCollectionByName(String collName) {
         try {
             DescribeCollectionResp desc = getClient().describeCollection(
@@ -305,6 +319,19 @@ public class MilvusUtil {
     public void createTripleCollection(Long knowledgeId, int dimension) {
         String collName = tripleCollectionName(knowledgeId);
         createGraphCollection(collName, dimension, true);
+    }
+
+    /**
+     * 为知识库创建 Community Collection（存储社区摘要向量）
+     * <p>字段与 Entity Collection 一致: id(VarChar PK), content(VarChar),
+     * embedding(FloatVector), content_sparse(SparseFloatVector)</p>
+     *
+     * @param knowledgeId 知识库ID
+     * @param dimension   向量维度
+     */
+    public void createCommunityCollection(Long knowledgeId, int dimension) {
+        String collName = communityCollectionName(knowledgeId);
+        createGraphCollection(collName, dimension, false);
     }
 
     /**
@@ -439,6 +466,37 @@ public class MilvusUtil {
         log.info("[Milvus] Triple 向量写入: collection={}, count={}", collName, tripleIds.size());
     }
 
+    /**
+     * 删除知识库的 Community Collection（社区摘要重算后重建，保证幂等）
+     */
+    public void dropCommunityCollection(Long knowledgeId) {
+        dropByName(communityCollectionName(knowledgeId));
+    }
+
+    /**
+     * 批量写入 Community 摘要向量
+     *
+     * @param knowledgeId   知识库ID
+     * @param communityIds  社区ID列表
+     * @param contents      社区摘要文本列表
+     * @param vectors       向量列表
+     */
+    public void insertCommunityVectors(Long knowledgeId, List<Integer> communityIds,
+                                        List<String> contents, List<float[]> vectors) {
+        String collName = communityCollectionName(knowledgeId);
+        List<JsonObject> rows = new ArrayList<>(communityIds.size());
+        for (int i = 0; i < communityIds.size(); i++) {
+            JsonObject row = new JsonObject();
+            row.addProperty("id", String.valueOf(communityIds.get(i)));
+            row.addProperty("content", contents.get(i));
+            row.add("embedding", GSON.toJsonTree(vectors.get(i)));
+            row.add("content_sparse", GSON.toJsonTree(sparseFromString(contents.get(i))));
+            rows.add(row);
+        }
+        getClient().insert(InsertReq.builder().collectionName(collName).data(rows).build());
+        log.info("[Milvus] Community 向量写入: collection={}, count={}", collName, communityIds.size());
+    }
+
     // ==================== 图检索向量搜索 ====================
 
     /**
@@ -496,11 +554,40 @@ public class MilvusUtil {
     }
 
     /**
-     * 删除知识库的图检索 Collections（Entity + Triple）
+     * Community 摘要向量检索（GraphRAG 全局检索）
+     * <p>用查询向量直接匹配社区高层摘要，回答「整个库在讲什么」这类宏观问题。</p>
+     *
+     * @param knowledgeId 知识库ID
+     * @param queryVector 查询向量
+     * @param topK        返回社区数量
+     * @return 检索结果（id=community_id, content=社区摘要, score=相似度）
+     */
+    public List<Map<String, Object>> searchCommunities(Long knowledgeId, float[] queryVector, int topK) {
+        String collName = communityCollectionName(knowledgeId);
+        if (!hasCollectionByName(collName)) {
+            return List.of();
+        }
+
+        SearchReq req = SearchReq.builder()
+                .collectionName(collName)
+                .data(List.of(new FloatVec(queryVector)))
+                .annsField("embedding")
+                .topK(topK)
+                .metricType(IndexParam.MetricType.COSINE)
+                .outputFields(List.of("id", "content"))
+                .build();
+
+        SearchResp resp = getClient().search(req);
+        return convertGraphResults(resp);
+    }
+
+    /**
+     * 删除知识库的图检索 Collections（Entity + Triple + Community）
      */
     public void dropGraphCollections(Long knowledgeId) {
         dropByName(entityCollectionName(knowledgeId));
         dropByName(tripleCollectionName(knowledgeId));
+        dropByName(communityCollectionName(knowledgeId));
     }
 
     private void dropByName(String collName) {

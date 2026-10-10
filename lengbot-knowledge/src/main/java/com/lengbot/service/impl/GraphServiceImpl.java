@@ -106,6 +106,79 @@ public class GraphServiceImpl implements GraphService {
     }
 
     @Override
+    public Long detectCommunities(Long knowledgeId) {
+        checkNeo4jAvailable();
+        permissionHelper.checkPermission(knowledgeId, KnowledgeRole.DEVELOPER);
+
+        Knowledge knowledge = knowledgeService().getById(knowledgeId);
+        if (knowledge == null) {
+            throw new BizException(ErrorCode.KNOWLEDGE_NOT_FOUND);
+        }
+
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("knowledgeId", knowledgeId);
+
+            var task = taskService.createTask(com.lengbot.enums.TaskType.COMMUNITY_DETECT,
+                    "社区检测", knowledge.getUserId(), knowledgeId,
+                    objectMapper.writeValueAsString(payload));
+
+            log.info("[图谱] 社区检测任务已提交: knowledgeId={}, taskId={}", knowledgeId, task.getId());
+            return task.getId();
+        } catch (Exception e) {
+            log.error("[图谱] 社区检测任务提交失败: knowledgeId={}, error={}", knowledgeId, e.getMessage(), e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    @Override
+    public Long summarizeCommunities(Long knowledgeId, CommunitySummaryDTO request) {
+        checkNeo4jAvailable();
+        permissionHelper.checkPermission(knowledgeId, KnowledgeRole.DEVELOPER);
+
+        Knowledge knowledge = knowledgeService().getById(knowledgeId);
+        if (knowledge == null) {
+            throw new BizException(ErrorCode.KNOWLEDGE_NOT_FOUND);
+        }
+
+        // 允许用户不传 body，全部走默认配置
+        CommunitySummaryDTO cfg = request != null ? request : new CommunitySummaryDTO();
+
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("knowledgeId", knowledgeId);
+            if (cfg.getProviderId() != null) {
+                payload.put("providerId", cfg.getProviderId());
+            }
+            if (cfg.getModelId() != null && !cfg.getModelId().isBlank()) {
+                payload.put("modelId", cfg.getModelId().trim());
+            }
+            if (cfg.getConcurrency() != null) {
+                payload.put("concurrency", Math.max(1, Math.min(cfg.getConcurrency(), 32)));
+            }
+            if (cfg.getMaxTriples() != null) {
+                payload.put("maxTriples", Math.max(1, cfg.getMaxTriples()));
+            }
+            if (cfg.getMaxEntities() != null) {
+                payload.put("maxEntities", Math.max(1, cfg.getMaxEntities()));
+            }
+            if (cfg.getModelParams() != null && !cfg.getModelParams().isEmpty()) {
+                payload.put("modelParams", cfg.getModelParams());
+            }
+
+            var task = taskService.createTask(com.lengbot.enums.TaskType.COMMUNITY_SUMMARY,
+                    "社区摘要", knowledge.getUserId(), knowledgeId,
+                    objectMapper.writeValueAsString(payload));
+
+            log.info("[图谱] 社区摘要任务已提交: knowledgeId={}, taskId={}", knowledgeId, task.getId());
+            return task.getId();
+        } catch (Exception e) {
+            log.error("[图谱] 社区摘要任务提交失败: knowledgeId={}, error={}", knowledgeId, e.getMessage(), e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    @Override
     public Long autoExtractFromDocument(Long knowledgeId, Long documentId) {
         if (!neo4jUtil.isAvailable()) {
             return null;

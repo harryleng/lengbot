@@ -891,13 +891,20 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeMapper, Knowledge
         normalized.put("qa_priority", boolParam(source, "qa_priority", true));
 
         if (milvus) {
-            normalized.put("use_graph_retrieval", boolParam(source, "use_graph_retrieval", false));
+            boolean graphEnabled = boolParam(source, "use_graph_retrieval", false);
+            normalized.put("use_graph_retrieval", graphEnabled);
             normalized.put("graph_entity_top_k", intParam(source, "graph_entity_top_k", 10, 1, 100));
             normalized.put("graph_triple_top_k", intParam(source, "graph_triple_top_k", 10, 1, 100));
             normalized.put("graph_max_nodes", intParam(source, "graph_max_nodes", 100, 10, 500));
             normalized.put("graph_top_k", intParam(source, "graph_top_k", 5, 1, 50));
             normalized.put("graph_weight", doubleParam(source, "graph_weight", 0.3, 0.0, 1.0));
             normalized.put("ppr_damping", doubleParam(source, "ppr_damping", 0.85, 0.0, 1.0));
+            normalized.put("ppr_iterations", intParam(source, "ppr_iterations", 15, 1, 100));
+            normalized.put("rrf_k", intParam(source, "rrf_k", 60, 1, 200));
+            // 社区摘要（GraphRAG 全局检索）：UI 未显式配置时默认跟随图检索开关，用户可单独关闭
+            normalized.put("use_community_retrieval", boolParam(source, "use_community_retrieval", graphEnabled));
+            normalized.put("graph_community_top_k", intParam(source, "graph_community_top_k", 3, 1, 50));
+            normalized.put("community_weight", doubleParam(source, "community_weight", 0.3, 0.0, 1.0));
         }
 
         return normalized;

@@ -2,6 +2,7 @@ package com.lengbot.controller;
 
 import com.lengbot.common.Result;
 import com.lengbot.vo.GraphEdgeVO;
+import com.lengbot.dto.CommunitySummaryDTO;
 import com.lengbot.dto.GraphExtractDTO;
 import com.lengbot.dto.GraphImportDTO;
 import com.lengbot.vo.GraphNodeVO;
@@ -35,6 +36,19 @@ public class KnowledgeGraphController {
     public Result<Long> extractGraph(@PathVariable Long id,
                                      @Valid @RequestBody GraphExtractDTO request) {
         return Result.ok(graphService.extractFromDocument(id, request));
+    }
+
+    @Operation(summary = "触发社区检测（GraphRAG社区总结第1步，需要DEVELOPER及以上权限）")
+    @PostMapping("/{id}/graph/community/detect")
+    public Result<Long> detectCommunities(@PathVariable Long id) {
+        return Result.ok(graphService.detectCommunities(id));
+    }
+
+    @Operation(summary = "触发社区摘要生成（GraphRAG社区总结第2步，需要DEVELOPER及以上权限）")
+    @PostMapping("/{id}/graph/community/summarize")
+    public Result<Long> summarizeCommunities(@PathVariable Long id,
+                                             @RequestBody(required = false) CommunitySummaryDTO request) {
+        return Result.ok(graphService.summarizeCommunities(id, request));
     }
 
     @Operation(summary = "批量导入三元组（需要DEVELOPER及以上权限）")

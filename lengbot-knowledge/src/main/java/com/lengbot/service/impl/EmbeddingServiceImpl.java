@@ -65,6 +65,9 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
     /** RRF 平滑常量：标准值 60，越小越偏向高排名项 */
     private static final int DEFAULT_RRF_K = 60;
 
+    /** 社区摘要 pseudo-chunk 的负 ID 起始偏移，避免与图检索实体/三元组已占用的负 ID 撞号 */
+    private static final long COMMUNITY_CHUNK_ID_OFFSET = 1000L;
+
     /** Milvus 集合存在性缓存，避免每次检索前 RPC 调用 hasCollection */
     private static final String METADATA_FILTER_KEY = "metadataFilter";
     private static final String METADATA_FILTER_JSON_KEY = "metadataFilterJson";
@@ -625,7 +628,11 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
                                                            int topK, Map<String, Object> queryParams) {
         boolean useGraph = queryParams != null
                 && Boolean.TRUE.equals(queryParams.get("use_graph_retrieval"));
-        if (!useGraph || !shouldRouteToMilvus(knowledgeId)) {
+        // 社区摘要（全局检索）默认跟随图检索开关；显式传 use_community_retrieval 可单独开/关
+        boolean communityExplicit = queryParams != null && queryParams.containsKey("use_community_retrieval");
+        boolean useCommunity = queryParams != null
+                && (communityExplicit ? Boolean.TRUE.equals(queryParams.get("use_community_retrieval")) : useGraph);
+        if ((!useGraph && !useCommunity) || !shouldRouteToMilvus(knowledgeId)) {
             return results;
         }
 
@@ -633,28 +640,48 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
         int graphTripleTopK = getIntParam(queryParams, "graph_triple_top_k", 10);
         int graphMaxNodes = getIntParam(queryParams, "graph_max_nodes", 100);
         int graphTopK = getIntParam(queryParams, "graph_top_k", 5);
+        int graphCommunityTopK = getIntParam(queryParams, "graph_community_top_k", 3);
         double graphWeight = getFloatParam(queryParams, "graph_weight", 0.3f);
+        double communityWeight = getFloatParam(queryParams, "community_weight", 0.3f);
         double pprDamping = getFloatParam(queryParams, "ppr_damping", 0.85f);
         int pprIterations = getIntParam(queryParams, "ppr_iterations", DEFAULT_PPR_ITERATIONS);
         int rrfK = getIntParam(queryParams, "rrf_k", DEFAULT_RRF_K);
 
         try {
-            String queryText = getQueryParam(queryParams, "query_text", "");
-            List<Map<String, Object>> graphResults = graphRetrievalUtil.search(
-                    knowledgeId, queryVector, queryText, graphEntityTopK, graphTripleTopK,
-                    graphMaxNodes, graphTopK, pprDamping, pprIterations);
+            List<Map<String, Object>> fused = results;
 
-            if (graphResults.isEmpty()) {
-                return results;
+            // 路线一：局部图检索（种子实体/三元组 → 2-hop 子图 → PPR 排序）
+            if (useGraph) {
+                String queryText = getQueryParam(queryParams, "query_text", "");
+                List<Map<String, Object>> graphResults = graphRetrievalUtil.search(
+                        knowledgeId, queryVector, queryText, graphEntityTopK, graphTripleTopK,
+                        graphMaxNodes, graphTopK, pprDamping, pprIterations);
+
+                // 图检索是合成语料，没有真实 chunk_id：用负数占位避免与原文分块撞号
+                for (int i = 0; i < graphResults.size(); i++) {
+                    graphResults.get(i).put("chunk_id", -(i + 1L));
+                }
+                if (!graphResults.isEmpty()) {
+                    // RRF 融合：常规结果权重=1.0，图结果权重=graphWeight
+                    fused = rrfFusion(fused, graphResults, 1.0f, (float) graphWeight, topK, 0, rrfK);
+                }
             }
 
-            // 为图检索结果分配唯一负数 chunk_id，避免与常规结果冲突
-            for (int i = 0; i < graphResults.size(); i++) {
-                graphResults.get(i).put("chunk_id", -(i + 1L));
+            // 路线二：全局检索（社区摘要），接「整个库在讲什么」这类宏观问题
+            if (useCommunity) {
+                List<Map<String, Object>> communityResults =
+                        graphRetrievalUtil.searchCommunities(knowledgeId, queryVector, graphCommunityTopK);
+
+                // 从 1000 起编号，避开上面已占用的负 ID 区间
+                for (int i = 0; i < communityResults.size(); i++) {
+                    communityResults.get(i).put("chunk_id", -(COMMUNITY_CHUNK_ID_OFFSET + i + 1L));
+                }
+                if (!communityResults.isEmpty()) {
+                    fused = rrfFusion(fused, communityResults, 1.0f, (float) communityWeight, topK, 0, rrfK);
+                }
             }
 
-            // RRF 融合：常规结果权重=1.0，图检索结果权重=graphWeight
-            return rrfFusion(results, graphResults, 1.0f, (float) graphWeight, topK, 0, rrfK);
+            return fused;
         } catch (Exception e) {
             log.error("[Embedding] 图检索异常，返回常规结果: {}", e.getMessage(), e);
             return results;

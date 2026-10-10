@@ -426,4 +426,61 @@ public class GraphRetrievalUtil {
 
         return results;
     }
+
+    // ==================== 社区摘要检索（GraphRAG 全局检索） ====================
+
+    /**
+     * 社区摘要检索：用查询向量直接匹配「一簇实体的高层归纳」，
+     * 输出一条可参与 RRF 融合的 pseudo-chunk。
+     * <p>与 {@link #search} 的分工：实体/三元组那条路线是<b>局部检索</b>，
+     * 回答「某个实体跟什么有关」；社区摘要是<b>全局检索</b>，
+     * 回答「这个语料库整体在讲什么、有哪些大主题」。
+     * 宏观问题在原文分块里往往找不到任何一段能直接命中，
+     * 只有这种事先归纳好的高层文本才能接住。</p>
+     *
+     * <p>前置条件：已运行「社区检测」+「社区摘要」，且摘要已完成向量化写入
+     * Milvus Community Collection（见 CommunitySummarizeExecutor）。</p>
+     *
+     * @param knowledgeId 知识库ID
+     * @param queryVector 查询向量
+     * @param topK        命中社区数量（默认建议 3）
+     * @return 至多 1 条合成语料；社区摘要未就绪时返回空列表
+     */
+    public List<Map<String, Object>> searchCommunities(Long knowledgeId, float[] queryVector, int topK) {
+        if (!isAvailable()) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> hits = milvusUtil.searchCommunities(knowledgeId, queryVector, topK);
+        if (hits.isEmpty()) {
+            log.debug("[GraphRetrieval] 社区摘要无命中（可能未生成/未向量化）, knowledgeId={}", knowledgeId);
+            return List.of();
+        }
+
+        double maxScore = 0.0;
+        StringBuilder sb = new StringBuilder();
+        for (Map<String, Object> hit : hits) {
+            Object content = hit.get("content");
+            if (content == null) {
+                continue;
+            }
+            Object score = hit.get("score");
+            if (score instanceof Number n) {
+                maxScore = Math.max(maxScore, n.doubleValue());
+            }
+            sb.append("【社区 ").append(hit.get("id")).append("】")
+              .append(content).append("\n\n");
+        }
+        if (sb.length() == 0) {
+            return List.of();
+        }
+
+        Map<String, Object> communityResult = new LinkedHashMap<>();
+        communityResult.put("chunk_id", 0L);
+        communityResult.put("content", sb.toString().strip());
+        communityResult.put("document_id", 0L);
+        communityResult.put("document_name", "图谱-社区摘要");
+        communityResult.put("score", maxScore);
+        return List.of(communityResult);
+    }
 }
