@@ -14,6 +14,7 @@ import com.lengbot.dto.IngestDTO;
 import com.lengbot.vo.UrlFetchPreviewVO;
 import com.lengbot.dto.UrlSaveDTO;
 import com.lengbot.entity.Chunk;
+import com.lengbot.util.TextCleanRule;
 import com.lengbot.entity.Document;
 import com.lengbot.entity.Knowledge;
 import com.lengbot.enums.ChunkStatus;
@@ -336,6 +337,9 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
         // 4. 分块
         ChunkStrategy strategy = chunkStrategyFactory.getStrategy(strategyName);
+        if (params.getTextCleanRules() != null && !params.getTextCleanRules().isEmpty()) {
+            content = TextNormalizeUtil.applyCleanRules(content, params.getTextCleanRules());
+        }
         List<String> chunks = strategy.split(content, params);
         // 4.1 规范化（与入库同一条链）：折叠异常空白、清理控制字符，保证预览与最终入库内容一致
         boolean collapseWs = params.isCollapseWhitespace();
@@ -470,6 +474,9 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             ChunkParams params = parseChunkParams(embeddingJson);
             String strategyName = parseChunkStrategy(embeddingJson);
             ChunkStrategy strategy = chunkStrategyFactory.getStrategy(strategyName);
+            if (params.getTextCleanRules() != null && !params.getTextCleanRules().isEmpty()) {
+                content = TextNormalizeUtil.applyCleanRules(content, params.getTextCleanRules());
+            }
             List<ChunkBlock> blocks = strategy.splitStructured(content, params);
 
             // 2.1 分块结果为空（所有分片低于最小token阈值）
@@ -1106,6 +1113,16 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             }
             if (node.has("collapseWhitespace")) {
                 params.setCollapseWhitespace(node.get("collapseWhitespace").asBoolean(false));
+            }
+            if (node.has("textCleanRules") && node.get("textCleanRules").isArray()) {
+                java.util.ArrayList<TextCleanRule> rules = new java.util.ArrayList<>();
+                for (com.fasterxml.jackson.databind.JsonNode r : node.get("textCleanRules")) {
+                    TextCleanRule rule = new TextCleanRule();
+                    if (r.has("regex")) rule.setRegex(r.get("regex").asText());
+                    if (r.has("replacement")) rule.setReplacement(r.get("replacement").asText(""));
+                    if (rule.getRegex() != null && !rule.getRegex().isBlank()) rules.add(rule);
+                }
+                params.setTextCleanRules(rules);
             }
         } catch (Exception e) {
             log.warn("[DocumentService] 解析embeddingJson失败, 使用默认参数", e);

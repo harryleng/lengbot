@@ -545,6 +545,10 @@
                 <a-tag color="blue">分片大小：{{ parseIngestConfig(currentDoc.embeddingJson).chunkSize || '-' }}</a-tag>
                 <a-tag color="blue">重叠：{{ parseIngestConfig(currentDoc.embeddingJson).chunkOverlap ?? '-' }}</a-tag>
                 <a-tag v-if="parseIngestConfig(currentDoc.embeddingJson).chunkDelimiter" color="blue">
+                  <a-tag v-if="(parseIngestConfig(currentDoc.embeddingJson).textCleanRules || []).length" color="purple">
+                    清洗规则：{{ parseIngestConfig(currentDoc.embeddingJson).textCleanRules.length }} 条
+                  </a-tag>
+
                   分隔符：{{ parseIngestConfig(currentDoc.embeddingJson).chunkDelimiter }}
                 </a-tag>
               </div>
@@ -913,6 +917,18 @@
           <a-form-item label="折叠连续空白">
             <a-switch v-model:checked="ingestForm.collapseWhitespace" checked-children="开" un-checked-children="关" />
             <span class="url-hint">连续空格/换行/制表符折叠为单个空格（对齐 Dify 规则）</span>
+          </a-form-item>
+          <a-form-item label="文本清洗规则">
+            <div class="clean-rules">
+              <div v-for="(rule, idx) in ingestForm.textCleanRules" :key="idx" style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+                <a-input v-model:value="rule.regex" placeholder="正则，如 第\d+页" style="width:44%" />
+                <span class="clean-rule-arrow">→</span>
+                <a-input v-model:value="rule.replacement" placeholder="替换为（留空=删除），支持 $1" style="width:40%" />
+                <a-button type="link" danger size="small" @click="ingestForm.textCleanRules.splice(idx, 1)">删除</a-button>
+              </div>
+              <a-button size="small" @click="ingestForm.textCleanRules.push({ regex: '', replacement: '' })">+ 添加规则</a-button>
+              <div class="url-hint">分块前对整篇文档生效：删除页眉页脚、水印、特定符号等。replacement 留空=删除匹配内容，支持 $1 捕获组。</div>
+            </div>
           </a-form-item>
         </a-form>
 
@@ -1640,6 +1656,7 @@ const ingestForm = reactive({
   chunkOverlap: 10,
   chunkDelimiter: '',
   collapseWhitespace: false,
+  textCleanRules: [],
 })
 
 // 编辑弹窗
@@ -2208,6 +2225,7 @@ async function handleIngest() {
       chunkDelimiter: ingestForm.chunkDelimiter || null,
       collapseWhitespace: ingestForm.collapseWhitespace || false,
     }
+    data.textCleanRules = (ingestForm.textCleanRules || []).filter(r => r && r.regex && String(r.regex).trim()).map(r => ({ regex: String(r.regex).trim(), replacement: r.replacement || '' }))
     await ingestDocument(ingestDoc.value.id, data)
     message.success('入库任务已提交，可在「任务中心」查看进度')
     ingestVisible.value = false

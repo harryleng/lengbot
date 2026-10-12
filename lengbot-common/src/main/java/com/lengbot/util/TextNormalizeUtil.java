@@ -1,6 +1,9 @@
 package com.lengbot.util;
 
+import java.util.List;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 文本规范化工具：清理入库/检索内容中的异常换行与空白，避免干扰模型 Markdown 输出
@@ -20,6 +23,8 @@ public final class TextNormalizeUtil {
     private static final Pattern DOT_LEADER = Pattern.compile("\\.{16,}");
     /** 连续空白折叠（Dify remove_extra_spaces 等价）：连续空格/换行/制表符统一折叠为单个空格 */
     private static final Pattern WHITESPACE_RUN = Pattern.compile("\\s+");
+
+    private static final Logger log = LoggerFactory.getLogger(TextNormalizeUtil.class);
 
     private TextNormalizeUtil() {
     }
@@ -56,6 +61,33 @@ public final class TextNormalizeUtil {
      * @param content 已规范化的文本
      * @return 折叠后的单行文本
      */
+    public static String applyCleanRules(String content, List<TextCleanRule> rules) {
+        if (content == null || rules == null || rules.isEmpty()) {
+            return content;
+        }
+        String result = content;
+        for (TextCleanRule rule : rules) {
+            if (rule == null || rule.getRegex() == null || rule.getRegex().isBlank()) {
+                continue;
+            }
+            Pattern p;
+            try {
+                p = Pattern.compile(rule.getRegex());
+            } catch (Exception e) {
+                log.warn("[TextNormalize] 清洗规则正则编译失败, 已跳过: regex={}", rule.getRegex());
+                continue;
+            }
+            String replacement = rule.getReplacement() == null ? "" : rule.getReplacement();
+            try {
+                result = p.matcher(result).replaceAll(replacement);
+            } catch (Exception e) {
+                // 字面量 '$' 非合法组引用时按字面量替换
+                result = p.matcher(result).replaceAll(java.util.regex.Matcher.quoteReplacement(replacement));
+            }
+        }
+        return result;
+    }
+
     public static String collapseWhitespace(String content) {
         if (content == null || content.isEmpty()) {
             return content;
