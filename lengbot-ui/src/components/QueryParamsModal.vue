@@ -398,6 +398,31 @@
             </template>
           </template>
         </template>
+
+        <!-- 外接 Elasticsearch BM25（真 BM25 关键词检索） -->
+        <a-divider style="margin: 12px 0" />
+        <a-form-item>
+          <template #label>
+            <span>外接 ES BM25 关键词</span>
+            <a-tooltip title="外接 Elasticsearch 做真 BM25 关键词检索（中文需装 IK 分词插件），与向量检索做 RRF 融合。需服务端 elasticsearch.enabled=true 且已建索引；关闭时回退到内置检索。">
+              <QuestionCircleOutlined class="field-tip-icon" />
+            </a-tooltip>
+          </template>
+          <a-switch v-model:checked="form.use_es_bm25" />
+        </a-form-item>
+
+        <template v-if="form.use_es_bm25">
+          <a-form-item>
+            <template #label>
+              <span>ES BM25 权重</span>
+              <a-tooltip title="RRF 融合中 ES BM25 关键词这一路的权重，建议 0.2-0.5，过大会挤占语义分块">
+                <QuestionCircleOutlined class="field-tip-icon" />
+              </a-tooltip>
+            </template>
+            <a-input-number v-model:value="form.es_weight" :min="0" :max="1" :step="0.1" style="width: 100%" />
+          </a-form-item>
+        </template>
+
       </a-form>
     </div>
 
@@ -461,6 +486,8 @@ const pgDefaults = {
   graph_top_k: 5,
   graph_weight: 0.3,
   ppr_damping: 0.85,
+  use_es_bm25: false,
+  es_weight: 0.3,
 }
 
 const milvusDefaults = {
@@ -491,6 +518,8 @@ const milvusDefaults = {
   use_community_retrieval: true,
   graph_community_top_k: 3,
   community_weight: 0.3,
+  use_es_bm25: false,
+  es_weight: 0.3,
 }
 
 const form = reactive({ ...pgDefaults })

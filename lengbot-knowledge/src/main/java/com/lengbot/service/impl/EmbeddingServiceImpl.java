@@ -14,6 +14,7 @@ import com.lengbot.service.ChunkService;
 import com.lengbot.service.EmbeddingService;
 import com.lengbot.service.KnowledgeService;
 import com.lengbot.util.GraphRetrievalUtil;
+import com.lengbot.util.ElasticsearchUtil;
 import com.lengbot.util.MilvusUtil;
 import com.lengbot.util.RerankerUtil;
 import com.lengbot.util.VectorUtil;
@@ -49,6 +50,7 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
     private final ChunkService chunkService;
     private final RerankerUtil rerankerUtil;
     private final GraphRetrievalUtil graphRetrievalUtil;
+    private final ElasticsearchUtil esUtil;
     /** 延迟解析：KnowledgeServiceImpl 反向依赖 EmbeddingService，ObjectProvider 取 bean 时打破构造期循环 */
     private final ObjectProvider<KnowledgeService> knowledgeServiceProvider;
 
@@ -80,7 +82,7 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
     public EmbeddingServiceImpl(EmbeddingMapper embeddingMapper, MilvusUtil milvusUtil,
                                 DocumentMapper documentMapper, ChunkService chunkService,
                                 ObjectProvider<KnowledgeService> knowledgeServiceProvider,
-                                RerankerUtil rerankerUtil, GraphRetrievalUtil graphRetrievalUtil) {
+                                RerankerUtil rerankerUtil, GraphRetrievalUtil graphRetrievalUtil, ElasticsearchUtil esUtil) {
         this.embeddingMapper = embeddingMapper;
         this.milvusUtil = milvusUtil;
         this.documentMapper = documentMapper;
@@ -88,6 +90,7 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
         this.knowledgeServiceProvider = knowledgeServiceProvider;
         this.rerankerUtil = rerankerUtil;
         this.graphRetrievalUtil = graphRetrievalUtil;
+        this.esUtil = esUtil;
     }
 
     @Override
@@ -632,7 +635,16 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
         boolean communityExplicit = queryParams != null && queryParams.containsKey("use_community_retrieval");
         boolean useCommunity = queryParams != null
                 && (communityExplicit ? Boolean.TRUE.equals(queryParams.get("use_community_retrieval")) : useGraph);
-        if ((!useGraph && !useCommunity) || !shouldRouteToMilvus(knowledgeId)) {
+        // ES BM25 关键词召回：enabled 时默认开启（真实 chunk_id 参与 RRF，与向量同 id 自然加权）；可显式 use_es_bm25=false 关闭
+        boolean useEs = queryParams != null && queryParams.containsKey("use_es_bm25")
+                ? Boolean.TRUE.equals(queryParams.get("use_es_bm25"))
+                : (esUtil != null && esUtil.isAvailable());
+        if (useEs && (esUtil == null || !esUtil.isAvailable())) {
+            useEs = false;
+        }
+        boolean graphOk = useGraph && shouldRouteToMilvus(knowledgeId);
+        boolean communityOk = useCommunity && shouldRouteToMilvus(knowledgeId);
+        if (!graphOk && !communityOk && !useEs) {
             return results;
         }
 
@@ -651,7 +663,7 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
             List<Map<String, Object>> fused = results;
 
             // 路线一：局部图检索（种子实体/三元组 → 2-hop 子图 → PPR 排序）
-            if (useGraph) {
+            if (graphOk) {
                 String queryText = getQueryParam(queryParams, "query_text", "");
                 List<Map<String, Object>> graphResults = graphRetrievalUtil.search(
                         knowledgeId, queryVector, queryText, graphEntityTopK, graphTripleTopK,
@@ -668,7 +680,7 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
             }
 
             // 路线二：全局检索（社区摘要），接「整个库在讲什么」这类宏观问题
-            if (useCommunity) {
+            if (communityOk) {
                 List<Map<String, Object>> communityResults =
                         graphRetrievalUtil.searchCommunities(knowledgeId, queryVector, graphCommunityTopK);
 
@@ -678,6 +690,16 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
                 }
                 if (!communityResults.isEmpty()) {
                     fused = rrfFusion(fused, communityResults, 1.0f, (float) communityWeight, topK, 0, rrfK);
+                }
+            }
+
+            // 路线三：ES BM25 关键词召回（真实分块，chunk_id 为正，与向量路同 id 自然加权）
+            if (useEs) {
+                String queryText = getQueryParam(queryParams, "query_text", "");
+                double esWeight = getFloatParam(queryParams, "es_weight", 0.3f);
+                List<Map<String, Object>> esResults = esUtil.searchBm25(knowledgeId, queryText, topK * 3);
+                if (!esResults.isEmpty()) {
+                    fused = rrfFusion(fused, esResults, 1.0f, (float) esWeight, topK, 0, rrfK);
                 }
             }
 

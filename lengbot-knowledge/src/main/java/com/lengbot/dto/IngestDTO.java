@@ -5,6 +5,9 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+import java.util.List;
+
+import com.lengbot.util.TextCleanRule;
 
 /**
  * 文档入库请求DTO
@@ -32,4 +35,7 @@ public class IngestDTO {
 
     /** 是否折叠连续空白（Dify remove_extra_spaces 等价）：连续空格/换行/制表符折叠为单个空格，默认关闭 */
     private Boolean collapseWhitespace;
+
+    /** 文本清洗规则：入库分块前对文档内容做正则替换/删除（replacement 为空表示删除，支持 $1 捕获组） */
+    private List<TextCleanRule> textCleanRules;
 }

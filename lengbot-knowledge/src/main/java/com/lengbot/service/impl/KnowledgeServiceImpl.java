@@ -889,6 +889,8 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeMapper, Knowledge
         normalized.put("qa_top_k", intParam(source, "qa_top_k", 3, 1, 20));
         normalized.put("qa_threshold", doubleParam(source, "qa_threshold", 0.85, 0.0, 1.0));
         normalized.put("qa_priority", boolParam(source, "qa_priority", true));
+        normalized.put("use_es_bm25", boolParam(source, "use_es_bm25", false));
+        normalized.put("es_weight", doubleParam(source, "es_weight", 0.3, 0.0, 1.0));
 
         if (milvus) {
             boolean graphEnabled = boolParam(source, "use_graph_retrieval", false);

@@ -42,6 +42,7 @@ import com.lengbot.util.TextNormalizeUtil;
 import com.lengbot.util.TikaUtil;
 import com.lengbot.util.DocIngestUtil;
 import com.lengbot.util.WebFetchUtil;
+import com.lengbot.util.ElasticsearchUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -96,6 +97,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
     private final ChunkStrategyFactory chunkStrategyFactory;
     /** 向量存储与相似度检索服务 */
     private final EmbeddingService embeddingService;
+    private final ElasticsearchUtil esUtil;
 
     /** 文本向量生成服务（AgentScope 引擎） */
     private final TextEmbeddingService textEmbeddingService;
@@ -503,6 +505,21 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             }
             chunkService.saveBatch(chunkEntities);
 
+            // ES BM25 关键词索引（enabled=false 时 ElasticsearchUtil 内部空操作，不影响现有流程）
+            if (esUtil.isAvailable()) {
+                esUtil.deleteByDocumentId(doc.getKnowledgeId(), doc.getId());
+                esUtil.createIndex(doc.getKnowledgeId());
+                List<Map<String, Object>> esDocs = chunkEntities.stream().map(ch -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("content", ch.getContent());
+                    m.put("document_id", ch.getDocumentId());
+                    m.put("knowledge_id", ch.getKnowledgeId());
+                    m.put("chunk_id", ch.getId());
+                    return m;
+                }).collect(java.util.stream.Collectors.toList());
+                esUtil.bulkIndexChunks(doc.getKnowledgeId(), esDocs);
+            }
+
             // 4. 更新文档状态为向量化中
             doc.setStatus(DocumentStatus.PROCESSING);
             doc.setChunkCount(blocks.size());
@@ -812,6 +829,10 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
         // 5. 删除文档关联的向量
         embeddingService.deleteByDocumentId(documentId);
+        // 5.1 删除文档关联的 ES BM25 索引（enabled=false 时空操作）
+        if (esUtil.isAvailable()) {
+            esUtil.deleteByDocumentId(doc.getKnowledgeId(), documentId);
+        }
 
         // 6. 删除文档关联的分片
         chunkService.remove(new LambdaQueryWrapper<Chunk>().eq(Chunk::getDocumentId, documentId));
@@ -868,6 +889,10 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
         // 4. 一次按 knowledgeId 删 embedding（PG + Milvus，内部已封装）
         embeddingService.deleteByKnowledgeId(knowledgeId);
+        // 删除知识库关联的 ES BM25 索引（enabled=false 时空操作）
+        if (esUtil.isAvailable()) {
+            esUtil.deleteIndex(knowledgeId);
+        }
 
         // 5. 一次 IN 删 chunk（按 docIds）
         chunkService.remove(new LambdaQueryWrapper<Chunk>().in(Chunk::getDocumentId, docIds));
