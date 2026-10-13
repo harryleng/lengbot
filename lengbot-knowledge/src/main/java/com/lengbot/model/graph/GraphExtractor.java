@@ -15,6 +15,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.JsonToken;
+import java.io.IOException;
 
 /**
  * 知识图谱实体关系抽取器（基于 LLM）
@@ -94,7 +99,8 @@ public class GraphExtractor {
 
             List<Msg> messages = new ArrayList<>();
             messages.add(Msgs.system(systemPrompt));
-            messages.add(Msgs.user("请从以下文本中抽取实体和关系三元组：\n\n" + truncated));
+            messages.add(Msgs.user("请从以下文本中抽取实体和关系三元组：\n\n" + truncated
+                    + "\n\n要求：紧凑 JSON 输出，不要换行、不要缩进、不要 markdown 代码块。"));
 
             var response = ctx.call(messages);
             String text = Msgs.extractText(response);
@@ -187,7 +193,8 @@ public class GraphExtractor {
 
             List<Msg> messages = new ArrayList<>();
             messages.add(Msgs.system(systemPrompt));
-            messages.add(Msgs.user("请从以下文本中抽取实体和关系三元组（文本包含多个段落，请分别抽取）：\n\n" + finalText));
+            messages.add(Msgs.user("请从以下文本中抽取实体和关系三元组（文本包含多个段落，请分别抽取）：\n\n" + finalText
+                    + "\n\n要求：紧凑 JSON 输出，不要换行、不要缩进、不要 markdown 代码块。"));
 
             var response = ctx.call(messages);
             String text = Msgs.extractText(response);
@@ -227,33 +234,69 @@ public class GraphExtractor {
         if (text == null || text.isBlank()) {
             return Collections.emptyList();
         }
-        try {
-            // 去除可能的 markdown 代码块标记
-            String json = text.strip();
-            if (json.startsWith("```")) {
-                json = json.replaceAll("^```(json)?\\s*", "").replaceAll("\\s*```$", "");
+        // 去除可能的 markdown 代码块标记
+        String json = text.strip();
+        if (json.startsWith("```")) {
+            json = json.replaceAll("^```(json)?\\s*", "").replaceAll("\\s*```$", "");
+        }
+        List<GraphTripleDTO> triples = new ArrayList<>();
+        boolean truncated = false;
+        try (JsonParser parser = objectMapper.getFactory().createParser(json)) {
+            if (parser.nextToken() != JsonToken.START_ARRAY) {
+                log.warn("[图谱抽取] 三元组解析失败：根元素不是 JSON 数组, text={}",
+                        text.length() > 200 ? text.substring(0, 200) : text);
+                return Collections.emptyList();
             }
-            List<Map<String, Object>> rawList = objectMapper.readValue(json, new TypeReference<>() {});
-            List<GraphTripleDTO> triples = new ArrayList<>();
-            for (Map<String, Object> raw : rawList) {
-                GraphTripleDTO dto = new GraphTripleDTO();
-                dto.setHead(getString(raw, "head"));
-                dto.setHeadType(getString(raw, "headType"));
-                dto.setHeadDesc(getString(raw, "headDesc"));
-                dto.setRelation(getString(raw, "relation"));
-                dto.setRelationDesc(getString(raw, "relationDesc"));
-                dto.setTail(getString(raw, "tail"));
-                dto.setTailType(getString(raw, "tailType"));
-                dto.setTailDesc(getString(raw, "tailDesc"));
-                if (dto.getHead() != null && dto.getRelation() != null && dto.getTail() != null) {
+            while (parser.nextToken() != JsonToken.END_ARRAY) {
+                Map<String, Object> raw;
+                try {
+                    raw = parser.readValueAs(Map.class);
+                } catch (JsonParseException eof) {
+                    // 模型输出被 maxTokens 截断（Unexpected end-of-input），停在最后完整对象处
+                    truncated = true;
+                    break;
+                }
+                GraphTripleDTO dto = toTripleDto(raw);
+                if (dto != null) {
                     triples.add(dto);
                 }
             }
-            return triples;
-        } catch (Exception e) {
-            log.warn("[图谱抽取] 三元组解析失败: text={}", text.length() > 200 ? text.substring(0, 200) : text, e);
+        } catch (JsonProcessingException e) {
+            log.warn("[图谱抽取] 三元组解析失败: text={}",
+                    text.length() > 200 ? text.substring(0, 200) : text, e);
+            return Collections.emptyList();
+        } catch (IOException e) {
+            log.warn("[图谱抽取] 三元组解析 IO 异常: {}", e.toString());
             return Collections.emptyList();
         }
+        if (truncated) {
+            if (triples.isEmpty()) {
+                log.warn("[图谱抽取] 三元组输出被截断，且无完整三元组可抢救: text={}",
+                        text.length() > 200 ? text.substring(0, 200) : text);
+            } else {
+                log.info("[图谱抽取] 三元组输出被截断，已抢救 {} 条完整三元组", triples.size());
+            }
+        }
+        return triples;
+    }
+
+    private GraphTripleDTO toTripleDto(Map<String, Object> raw) {
+        if (raw == null) {
+            return null;
+        }
+        GraphTripleDTO dto = new GraphTripleDTO();
+        dto.setHead(getString(raw, "head"));
+        dto.setHeadType(getString(raw, "headType"));
+        dto.setHeadDesc(getString(raw, "headDesc"));
+        dto.setRelation(getString(raw, "relation"));
+        dto.setRelationDesc(getString(raw, "relationDesc"));
+        dto.setTail(getString(raw, "tail"));
+        dto.setTailType(getString(raw, "tailType"));
+        dto.setTailDesc(getString(raw, "tailDesc"));
+        if (dto.getHead() != null && dto.getRelation() != null && dto.getTail() != null) {
+            return dto;
+        }
+        return null;
     }
 
     /**

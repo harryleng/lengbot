@@ -461,6 +461,10 @@ public class StandaloneGraphServiceImpl implements StandaloneGraphService {
                 List<double[]> batchVectors = textEmbeddingService.embedBatch(batch);
                 for (int j = 0; j < batch.size(); j++) {
                     double[] dVec = batchVectors.get(j);
+                    if (dVec == null) {
+                        log.warn("[独立图谱] 实体向量嵌入失败, 跳过: {}", batch.get(j));
+                        continue;
+                    }
                     float[] fVec = new float[dVec.length];
                     for (int k = 0; k < dVec.length; k++) {
                         fVec[k] = (float) dVec[k];

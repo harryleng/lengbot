@@ -90,6 +90,39 @@ public final class TokenUtil {
     }
 
     /**
+     * 取文本尾部最多 maxTokens 个 token 的内容
+     * <p>用于分块重叠：当整段都超预算时，按 token 边界截取尾部，
+     * 避免把整段原文当重叠拼到下一段前面造成内容膨胀</p>
+     *
+     * @param text      原文
+     * @param maxTokens 期望保留的尾部 token 数
+     * @return 尾部片段（不会超过 maxTokens 个 token）
+     */
+    public static String tailTokens(String text, int maxTokens) {
+        if (text == null || text.isEmpty() || maxTokens <= 0) {
+            return "";
+        }
+
+        Matcher matcher = TOKEN_PATTERN.matcher(text);
+        List<Integer> tokenEnds = new ArrayList<>();
+        while (matcher.find()) {
+            tokenEnds.add(matcher.end());
+        }
+
+        int total = tokenEnds.size();
+        if (total == 0) {
+            return "";
+        }
+        if (total <= maxTokens) {
+            return text;
+        }
+
+        // 末 maxTokens 个 token 的起点 = 倒数第 (maxTokens+1) 个 token 的结束位置
+        int start = tokenEnds.get(total - maxTokens - 1);
+        return text.substring(start);
+    }
+
+    /**
      * 过滤低于最小 token 数的碎片分块
      *
      * @param chunks 原始分块列表

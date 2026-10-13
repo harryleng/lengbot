@@ -84,6 +84,7 @@
           :placeholder="inputPlaceholder"
           @update:model-value="$emit('update:input', $event)"
           @send="$emit('send')"
+          @paste="onPaste"
         />
         <div class="chat-input-actions">
           <div v-if="voiceListening" class="voice-listening-indicator">
@@ -225,6 +226,22 @@ function onPickFile() {
 
 function onFileSelected(e) {
   emit('file-selected', e)
+}
+
+function onPaste(e) {
+  const items = e.clipboardData && e.clipboardData.items
+  if (!items) return
+  const files = []
+  for (const item of items) {
+    if (item.kind === 'file' && item.type && item.type.indexOf('image/') === 0) {
+      const file = item.getAsFile()
+      if (file) files.push(file)
+    }
+  }
+  if (files.length > 0) {
+    e.preventDefault()
+    emit('file-selected', { target: { files } })
+  }
 }
 
 defineExpose({

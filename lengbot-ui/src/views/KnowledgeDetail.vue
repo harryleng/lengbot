@@ -257,6 +257,11 @@
                 </template>
               </template>
             </div>
+            <div class="rag-meta-filter">
+              <span class="meta-filter-label">元数据过滤:</span>
+              <a-input v-model:value="metadataFilterCategory" placeholder="类别(如 合同)" size="small" style="width:150px" />
+              <a-input v-model:value="metadataFilterTags" placeholder="标签,逗号分隔(如 财务,制度)" size="small" style="width:220px" />
+            </div>
             <div class="rag-input">
               <input v-model="ragQuestion" placeholder="输入测试问题..." @keydown="onRagKeydown" />
               <a-tooltip title="检索配置">
@@ -463,6 +468,10 @@
                     currentDoc?.embeddingJson ? parseIngestConfig(currentDoc.embeddingJson).chunkStrategy || '-' : '-'
                   }}
                 </a-descriptions-item>
+                <a-descriptions-item label="文档摘要">
+                  <span v-if="docSummary" style="white-space: pre-wrap; line-height: 1.6">{{ docSummary }}</span>
+                  <span v-else class="doc-muted">-</span>
+                </a-descriptions-item>
               </a-descriptions>
             </div>
             <div v-if="parseDuplicateDetails(currentDoc?.duplicateDetails).length > 0" class="doc-info-section">
@@ -536,6 +545,10 @@
                 <a-tag color="blue">分片大小：{{ parseIngestConfig(currentDoc.embeddingJson).chunkSize || '-' }}</a-tag>
                 <a-tag color="blue">重叠：{{ parseIngestConfig(currentDoc.embeddingJson).chunkOverlap ?? '-' }}</a-tag>
                 <a-tag v-if="parseIngestConfig(currentDoc.embeddingJson).chunkDelimiter" color="blue">
+                  <a-tag v-if="(parseIngestConfig(currentDoc.embeddingJson).textCleanRules || []).length" color="purple">
+                    清洗规则：{{ parseIngestConfig(currentDoc.embeddingJson).textCleanRules.length }} 条
+                  </a-tag>
+
                   分隔符：{{ parseIngestConfig(currentDoc.embeddingJson).chunkDelimiter }}
                 </a-tag>
               </div>
@@ -868,6 +881,7 @@
               <a-select-option value="separator">严格分隔 - 遇分隔符即切分</a-select-option>
               <a-select-option value="qa">问答对分块 - 适合FAQ/客服对话</a-select-option>
               <a-select-option value="laws">法规分块 - 按条款结构切分</a-select-option>
+              <a-select-option value="parent-child">父子分块 - 子块精准召回+父块完整上下文</a-select-option>
             </a-select>
             <div
               v-if="ingestForm.chunkStrategy === 'general' && knowledgeDefaultStrategy"
@@ -899,6 +913,22 @@
           </a-form-item>
           <a-form-item label="分块分隔符">
             <a-input v-model:value="ingestForm.chunkDelimiter" placeholder="默认按换行符分隔" allow-clear />
+          </a-form-item>
+          <a-form-item label="折叠连续空白">
+            <a-switch v-model:checked="ingestForm.collapseWhitespace" checked-children="开" un-checked-children="关" />
+            <span class="url-hint">连续空格/换行/制表符折叠为单个空格（对齐 Dify 规则）</span>
+          </a-form-item>
+          <a-form-item label="文本清洗规则">
+            <div class="clean-rules">
+              <div v-for="(rule, idx) in ingestForm.textCleanRules" :key="idx" style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+                <a-input v-model:value="rule.regex" placeholder="正则，如 第\d+页" style="width:44%" />
+                <span class="clean-rule-arrow">→</span>
+                <a-input v-model:value="rule.replacement" placeholder="替换为（留空=删除），支持 $1" style="width:40%" />
+                <a-button type="link" danger size="small" @click="ingestForm.textCleanRules.splice(idx, 1)">删除</a-button>
+              </div>
+              <a-button size="small" @click="ingestForm.textCleanRules.push({ regex: '', replacement: '' })">+ 添加规则</a-button>
+              <div class="url-hint">分块前对整篇文档生效：删除页眉页脚、水印、特定符号等。replacement 留空=删除匹配内容，支持 $1 捕获组。</div>
+            </div>
           </a-form-item>
         </a-form>
 
@@ -1509,6 +1539,8 @@ const evalTabRef = ref(null)
 const benchmarksTabRef = ref(null)
 const qaPairsTabRef = ref(null)
 const ragQuestion = ref('')
+const metadataFilterCategory = ref('')
+const metadataFilterTags = ref('')
 const ragHistory = ref([])
 const ragLoading = ref(false)
 const ragRef = ref(null)
@@ -1606,11 +1638,25 @@ const ingestDoc = ref(null)
 const ingestSubmitting = ref(false)
 const ingestPreviewing = ref(false)
 const previewChunksList = ref([])
+
+// 文档摘要（Phase 2）：从 Document.metadata JSON 读取
+// 文档摘要（Phase 2）：从 Document.metadata JSON 读取
+const docMeta = computed(() => {
+  try {
+    return currentDoc.value?.metadata ? JSON.parse(currentDoc.value.metadata) : {}
+  } catch {
+    return {}
+  }
+})
+const docSummary = computed(() => docMeta.value?.summary || '')
+const docTags = computed(() => docMeta.value?.tags || [])
 const ingestForm = reactive({
   chunkStrategy: 'general',
   chunkSize: 512,
   chunkOverlap: 10,
   chunkDelimiter: '',
+  collapseWhitespace: false,
+  textCleanRules: [],
 })
 
 // 编辑弹窗
@@ -2154,6 +2200,7 @@ async function handlePreviewChunks() {
       chunkSize: ingestForm.chunkSize,
       chunkOverlap: ingestForm.chunkOverlap,
       chunkDelimiter: ingestForm.chunkDelimiter || null,
+      collapseWhitespace: ingestForm.collapseWhitespace || false,
     }
     const res = await previewChunks(ingestDoc.value.id, data)
     previewChunksList.value = res.data || []
@@ -2176,7 +2223,9 @@ async function handleIngest() {
       chunkSize: ingestForm.chunkSize,
       chunkOverlap: ingestForm.chunkOverlap,
       chunkDelimiter: ingestForm.chunkDelimiter || null,
+      collapseWhitespace: ingestForm.collapseWhitespace || false,
     }
+    data.textCleanRules = (ingestForm.textCleanRules || []).filter(r => r && r.regex && String(r.regex).trim()).map(r => ({ regex: String(r.regex).trim(), replacement: r.replacement || '' }))
     await ingestDocument(ingestDoc.value.id, data)
     message.success('入库任务已提交，可在「任务中心」查看进度')
     ingestVisible.value = false
@@ -2503,7 +2552,16 @@ async function askRag() {
   })
 
   try {
-    const res = await searchKnowledge(knowledgeId, q, searchOverrides.value)
+    const overrides = { ...(searchOverrides.value || {}) }
+    if (metadataFilterCategory.value.trim() || metadataFilterTags.value.trim()) {
+      const mf = {}
+      const cat = metadataFilterCategory.value.trim()
+      const tags = metadataFilterTags.value.split(',').map(t => t.trim()).filter(Boolean)
+      if (cat) mf.category = cat
+      if (tags.length) mf.tags = tags
+      overrides.metadataFilter = mf
+    }
+    const res = await searchKnowledge(knowledgeId, q, overrides)
     turn.results = res.data || []
   } catch (e) {
     // interceptor 已处理错误提示

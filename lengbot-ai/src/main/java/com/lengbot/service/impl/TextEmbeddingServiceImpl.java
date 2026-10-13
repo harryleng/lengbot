@@ -247,6 +247,9 @@ public class TextEmbeddingServiceImpl implements TextEmbeddingService {
      */
     private static class HttpDirectEmbeddingModel implements EmbeddingModel {
 
+        /** 单条输入最大字符数（安全护栏）：bge-m3 等模型上限约 8192 token，按字符保守截断，避免触发 400（code 20015）。 */
+        private static final int MAX_INPUT_CHARS = 8000;
+
         private final String apiKey;
         private final String baseUrl;
         private final String modelName;
@@ -270,6 +273,13 @@ public class TextEmbeddingServiceImpl implements TextEmbeddingService {
         public Mono<double[]> embed(ContentBlock contentBlock) {
             return Mono.fromCallable(() -> {
                 String text = extractText(contentBlock);
+                // 长度护栏：超出模型最大输入长度则截断，避免 Embedding API 返回 400（参数非法）。
+                if (text.length() > MAX_INPUT_CHARS) {
+                    log.warn("[Embedding] 输入文本超长被截断: 原长度={}, 截断至={}, 预览={}",
+                            text.length(), MAX_INPUT_CHARS,
+                            text.substring(0, Math.min(120, text.length())));
+                    text = text.substring(0, MAX_INPUT_CHARS);
+                }
                 String url = (baseUrl != null && !baseUrl.isBlank()
                         ? baseUrl.replaceAll("/+$", "")
                         : "https://api.openai.com/v1") + "/embeddings";
@@ -290,7 +300,9 @@ public class TextEmbeddingServiceImpl implements TextEmbeddingService {
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
                 if (response.statusCode() != 200) {
                     throw new IllegalStateException("Embedding API 返回 HTTP " + response.statusCode()
-                            + ": " + response.body());
+                            + ": " + response.body()
+                            + " | input长度=" + text.length()
+                            + ", 预览=" + text.substring(0, Math.min(100, text.length())));
                 }
                 return parseEmbedding(response.body());
             });

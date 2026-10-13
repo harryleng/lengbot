@@ -20,6 +20,7 @@ import com.lengbot.util.ToolIoSchemaUtil;
 import com.lengbot.util.ValidatingToolCallback;
 import com.lengbot.util.ToolRateLimiter;
 import com.lengbot.util.RateLimitedToolCallback;
+import com.lengbot.tool.builtin.BuiltinToolCallbackFactory;
 import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.tool.ToolBase;
@@ -59,6 +60,7 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, Tool>
     private final ObjectProvider<DefaultAgentIdProvider> defaultAgentIdProvider;
     private final ToolInputSchemaValidator toolInputSchemaValidator;
     private final ToolRateLimiter toolRateLimiter;
+    private final BuiltinToolCallbackFactory builtinToolCallbackFactory;
 
     /** 启动时扫描缓存的内置 ToolBase 列表 */
     private volatile List<ToolBase> cachedBuiltinCallbacks;
@@ -69,7 +71,8 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, Tool>
                            com.fasterxml.jackson.databind.ObjectMapper objectMapper,
                            ObjectProvider<DefaultAgentIdProvider> defaultAgentIdProvider,
                            ToolInputSchemaValidator toolInputSchemaValidator,
-                           ToolRateLimiter toolRateLimiter) {
+                           ToolRateLimiter toolRateLimiter,
+                           BuiltinToolCallbackFactory builtinToolCallbackFactory) {
         this.applicationContext = applicationContext;
         this.toolArgsSanitizer = toolArgsSanitizer;
         this.apiToolExecutionService = apiToolExecutionService;
@@ -77,6 +80,7 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, Tool>
         this.defaultAgentIdProvider = defaultAgentIdProvider;
         this.toolInputSchemaValidator = toolInputSchemaValidator;
         this.toolRateLimiter = toolRateLimiter;
+        this.builtinToolCallbackFactory = builtinToolCallbackFactory;
     }
 
     @Override
@@ -362,11 +366,21 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, Tool>
     private List<ToolBase> scanBuiltinToolCallbacks() {
         try {
             List<ToolBase> callbacks = new ArrayList<>();
+            // 内置工具（write_todos / present_artifacts / ocr_parse_file）改由 BuiltinToolCallbackFactory 以 ToolBase 提供，
+            // 使引擎调用时透传非空 ToolCallParam（含 RuntimeContext 的 agentId/sessionId），
+            // 修复原先 Toolkit.registerTool 反射路径下 ToolCallParam 不被注入、导致上下文为 null 的隐患。
+            callbacks.addAll(builtinToolCallbackFactory.buildCallbacks());
             Map<String, Object> beans = applicationContext.getBeansWithAnnotation(org.springframework.stereotype.Component.class);
 
             for (Object bean : beans.values()) {
                 // 解包 CGLIB 代理，获取真实类
                 Class<?> clazz = getTargetClass(bean);
+                // 以下内置工具改由 BuiltinToolCallbackFactory 提供 ToolBase，跳过反射注册（避免 context=null 空指针）
+                if (clazz == com.lengbot.tool.builtin.WriteTodosTool.class
+                        || clazz == com.lengbot.tool.builtin.PresentArtifactsTool.class
+                        || clazz == com.lengbot.tool.builtin.OcrParseFileTool.class) continue;
+                // 知识库工具改由 KnowledgeToolCallbackFactory 提供 ToolBase，跳过反射注册（避免 context=null 空指针）
+                if (clazz.getPackageName().startsWith("com.lengbot.agent.tool.knowledge")) continue;
                 // 直接遍历类声明的方法（跳过编译器生成的桥方法和synthetic方法）
                 for (Method method : clazz.getDeclaredMethods()) {
                     if (method.isSynthetic() || method.isBridge()) continue;

@@ -14,6 +14,7 @@ import com.lengbot.dto.IngestDTO;
 import com.lengbot.vo.UrlFetchPreviewVO;
 import com.lengbot.dto.UrlSaveDTO;
 import com.lengbot.entity.Chunk;
+import com.lengbot.util.TextCleanRule;
 import com.lengbot.entity.Document;
 import com.lengbot.entity.Knowledge;
 import com.lengbot.enums.ChunkStatus;
@@ -23,8 +24,10 @@ import com.lengbot.mapper.DocumentMapper;
 import com.lengbot.model.chunking.ChunkParams;
 import com.lengbot.model.chunking.ChunkStrategy;
 import com.lengbot.model.chunking.ChunkStrategyFactory;
+import com.lengbot.model.chunking.ChunkBlock;
 import com.lengbot.entity.Task;
 import com.lengbot.enums.TaskType;
+import com.lengbot.enums.TaskStatus;
 import com.lengbot.enums.KnowledgeRole;
 import com.lengbot.service.*;
 import com.lengbot.service.DocumentVersionService;
@@ -34,8 +37,10 @@ import com.lengbot.util.DocumentSecurityScanUtil;
 import com.lengbot.util.MinioUtil;
 import com.lengbot.util.ModelCalls;
 import com.lengbot.util.OcrUtil;
+import com.lengbot.util.VisionEnrichUtil;
 import com.lengbot.util.TextNormalizeUtil;
 import com.lengbot.util.TikaUtil;
+import com.lengbot.util.DocIngestUtil;
 import com.lengbot.util.WebFetchUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +55,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -102,6 +108,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
     private final ContentDuplicateDetectionUtil contentDuplicateDetectionUtil;
     private final KnowledgeMemberService permissionHelper;
     private final ObjectProvider<DocumentVersionService> documentVersionServiceProvider;
+    private final VisionEnrichUtil visionEnrichUtil;
 
     @Override
     public Document uploadDocument(Long knowledgeId, MultipartFile file, boolean ocrEnabled, String force) {
@@ -250,13 +257,95 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             }
         }
 
-        // 2. 解析入库配置
+        // 2. 扫描件补 OCR：预览也要反映真实分块，否则扫描版 PDF 永远只出目录页那点字。
+        //    仅对 PDF/图片且文本层过薄时触发，普通文档零额外开销。与重新入库路径共用同一套判定。
+        boolean scannedPdfHandled = false;
+        if (content != null && !content.isBlank()
+                && ("pdf".equals(doc.getFileType()) || DocIngestUtil.isImageType(doc.getFileType()))) {
+            try (InputStream srcIs = minioUtil.download(doc.getFilePath())) {
+                Path tmp = Files.createTempFile("preview_ocr_", ".bin");
+                try {
+                    Files.copy(srcIs, tmp, StandardCopyOption.REPLACE_EXISTING);
+                    if (DocIngestUtil.isScannedPdf(content, tmp)) {
+                        if ("pdf".equals(doc.getFileType())) {
+                            // 1.09 扫描件逐页插值：OCR + VLM 按页码对齐，避免全部堆在文末
+                            List<String> ocrPages = ocrUtil.recognizePdfPages(Files.newInputStream(tmp));
+                            List<String> visionPages = visionEnrichUtil.enrichPdfPages(Files.readAllBytes(tmp));
+                            String perPage = DocIngestUtil.buildScannedPerPageSection(ocrPages, visionPages);
+                            if (!perPage.isBlank()) {
+                                content = content + "\n\n---\n\n" + perPage;
+                            }
+                            scannedPdfHandled = true;
+                            log.info("[文档预览] 扫描件逐页插值完成, documentId={}, pages={}", documentId, ocrPages.size());
+                        } else {
+                            String ocr = ocrUtil.recognizeImage(Files.newInputStream(tmp));
+                            if (ocr != null && !ocr.isBlank()) {
+                                content = DocIngestUtil.mergeOcrContent(content, ocr);
+                                log.info("[文档预览] 扫描件OCR完成, documentId={}, ocrLen={}", documentId, ocr.length());
+                            }
+                        }
+                    }
+                } finally {
+                    Files.deleteIfExists(tmp);
+                }
+            } catch (Exception e) {
+                log.warn("[文档预览] 扫描件OCR失败, documentId={}", documentId, e);
+            }
+        }
+
+        if (content == null || content.isBlank()) {
+            return List.of();
+        }
+
+        // 1.07 TOC 层级还原：用 PDF 大纲/书签还原层级目录（Tika 平铺会丢失层级）
+        if ("pdf".equals(doc.getFileType())) {
+            try (InputStream tocIs = minioUtil.download(doc.getFilePath())) {
+                byte[] tocBytes = tocIs.readAllBytes();
+                String toc = visionEnrichUtil.extractToc(tocBytes);
+                if (toc != null && !toc.isBlank()) {
+                    content = toc + "\n\n---\n\n" + content;
+                    log.info("[文档预览] TOC层级还原完成, documentId={}, tocLen={}", documentId, toc.length());
+                }
+            } catch (Exception e) {
+                log.warn("[文档预览] TOC层级还原失败(跳过), documentId={}", documentId, e);
+            }
+        }
+
+        // 1.08 VLM 图示增强：关系图/图表送 MiMo 多模态理解，补 Tika/OCR 丢失的视觉结构
+        // 扫描件已在 1.09 逐页插值中完成 VLM，这里跳过避免重复调用
+        if (!scannedPdfHandled && ("pdf".equals(doc.getFileType()) || DocIngestUtil.isImageType(doc.getFileType()))) {
+            try (InputStream visIs = minioUtil.download(doc.getFilePath())) {
+                byte[] visBytes = visIs.readAllBytes();
+                String vision;
+                if ("pdf".equals(doc.getFileType())) {
+                    vision = visionEnrichUtil.enrichPdf(visBytes);
+                } else {
+                    vision = visionEnrichUtil.enrichImage(visBytes, doc.getFileType());
+                }
+                if (vision != null && !vision.isBlank()) {
+                    content = content + "\n\n---\n\n" + vision;
+                    log.info("[文档预览] VLM图示增强完成, documentId={}, visionLen={}", documentId, vision.length());
+                }
+            } catch (Exception e) {
+                log.warn("[文档预览] VLM图示增强失败(跳过), documentId={}", documentId, e);
+            }
+        }
+
+        // 3. 解析入库配置
         ChunkParams params = parseChunkParams(embeddingJson);
         String strategyName = parseChunkStrategy(embeddingJson);
 
-        // 3. 分块
+        // 4. 分块
         ChunkStrategy strategy = chunkStrategyFactory.getStrategy(strategyName);
-        return strategy.split(content, params);
+        if (params.getTextCleanRules() != null && !params.getTextCleanRules().isEmpty()) {
+            content = TextNormalizeUtil.applyCleanRules(content, params.getTextCleanRules());
+        }
+        List<String> chunks = strategy.split(content, params);
+        // 4.1 规范化（与入库同一条链）：折叠异常空白、清理控制字符，保证预览与最终入库内容一致
+        boolean collapseWs = params.isCollapseWhitespace();
+        return chunks.stream()
+                .map(c -> TextNormalizeUtil.normalizeChunkContent(c, collapseWs))
+                .toList();
     }
 
     @Override
@@ -285,7 +374,90 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
                 }
             }
 
-            // 1.1 解析失败（返回null）时标记失败
+            // 1.05 扫描件 OCR 增强：重新入库时若解析文本过薄且为 PDF/图片，基于原始文件补 OCR。
+            // 否则扫描版 PDF 永远只有目录页那点字（preview 也只会出 3 块），且重新入库无法自愈。
+            boolean scannedPdfHandled = false;
+            if (content != null && !content.isBlank()
+                    && ("pdf".equals(doc.getFileType()) || DocIngestUtil.isImageType(doc.getFileType()))) {
+                try (InputStream srcIs = minioUtil.download(doc.getFilePath())) {
+                    Path tmp = Files.createTempFile("reingest_ocr_", ".bin");
+                    try {
+                        Files.copy(srcIs, tmp, StandardCopyOption.REPLACE_EXISTING);
+                        if (DocIngestUtil.isScannedPdf(content, tmp)) {
+                            if ("pdf".equals(doc.getFileType())) {
+                                // 1.09 扫描件逐页插值：OCR + VLM 按页码对齐，避免全部堆在文末
+                                progressCallback.accept(8, "检测到扫描件，正在逐页OCR/视觉识别...");
+                                List<String> ocrPages = ocrUtil.recognizePdfPages(Files.newInputStream(tmp));
+                                List<String> visionPages = visionEnrichUtil.enrichPdfPages(Files.readAllBytes(tmp));
+                                String perPage = DocIngestUtil.buildScannedPerPageSection(ocrPages, visionPages);
+                                if (!perPage.isBlank()) {
+                                    content = content + "\n\n---\n\n" + perPage;
+                                }
+                                scannedPdfHandled = true;
+                                log.info("[文档入库] 扫描件逐页插值完成, documentId={}, pages={}", documentId, ocrPages.size());
+                            } else {
+                                progressCallback.accept(8, "检测到扫描件，正在OCR识别...");
+                                String ocr = ocrUtil.recognizeImage(Files.newInputStream(tmp));
+                                if (ocr != null && !ocr.isBlank()) {
+                                    content = DocIngestUtil.mergeOcrContent(content, ocr);
+                                    log.info("[文档入库] 重新入库OCR完成, documentId={}, ocrLen={}", documentId, ocr.length());
+                                }
+                            }
+                        }
+                    } finally {
+                        Files.deleteIfExists(tmp);
+                    }
+                } catch (Exception e) {
+                    log.warn("[文档入库] 重新入库OCR失败, documentId={}", documentId, e);
+                }
+            }
+
+            // 1.1 解析结果回写 MinIO（含OCR结果）：保证 preview-chunks 与入库分块读到的 markdown 一致。
+            if (content != null && !content.isBlank()) {
+            // 1.08 VLM 图示增强：关系图/图表送 MiMo 多模态理解，补 Tika/OCR 丢失的视觉结构
+            // 扫描件已在 1.09 逐页插值中完成 VLM，这里跳过避免重复调用
+            if (!scannedPdfHandled && content != null && !content.isBlank()
+                    && ("pdf".equals(doc.getFileType()) || DocIngestUtil.isImageType(doc.getFileType()))) {
+                try (InputStream visIs = minioUtil.download(doc.getFilePath())) {
+                    byte[] visBytes = visIs.readAllBytes();
+                    String vision;
+                    if ("pdf".equals(doc.getFileType())) {
+                        vision = visionEnrichUtil.enrichPdf(visBytes);
+                    } else {
+                        vision = visionEnrichUtil.enrichImage(visBytes, doc.getFileType());
+                    }
+                    if (vision != null && !vision.isBlank()) {
+                        content = content + "\n\n---\n\n" + vision;
+                        log.info("[文档入库] VLM图示增强完成, documentId={}, visionLen={}", documentId, vision.length());
+                    }
+                } catch (Exception e) {
+                    log.warn("[文档入库] VLM图示增强失败(跳过), documentId={}", documentId, e);
+                }
+            }
+
+            // 1.07 TOC 层级还原：用 PDF 大纲/书签还原层级目录（Tika 平铺会丢失层级）
+            if ("pdf".equals(doc.getFileType())) {
+                try (InputStream tocIs = minioUtil.download(doc.getFilePath())) {
+                    byte[] tocBytes = tocIs.readAllBytes();
+                    String toc = visionEnrichUtil.extractToc(tocBytes);
+                    if (toc != null && !toc.isBlank()) {
+                        content = toc + "\n\n---\n\n" + content;
+                        log.info("[文档入库] TOC层级还原完成, documentId={}, tocLen={}", documentId, toc.length());
+                    }
+                } catch (Exception e) {
+                    log.warn("[文档入库] TOC层级还原失败(跳过), documentId={}", documentId, e);
+                }
+            }
+
+                String mdPath = doc.getMarkdownPath();
+                if (mdPath == null || mdPath.isBlank()) {
+                    mdPath = DocIngestUtil.generateMarkdownPath(doc.getKnowledgeId(), doc.getFilePath());
+                }
+                minioUtil.uploadString(content, mdPath, "text/markdown");
+                doc.setMarkdownPath(mdPath);
+            }
+
+            // 1.2 解析失败（返回null）时标记失败
             if (content == null || content.isBlank()) {
                 doc.setStatus(DocumentStatus.FAILED);
                 doc.setErrorMessage("文档解析失败，可能是扫描版PDF、文件损坏或格式不支持");
@@ -302,10 +474,13 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             ChunkParams params = parseChunkParams(embeddingJson);
             String strategyName = parseChunkStrategy(embeddingJson);
             ChunkStrategy strategy = chunkStrategyFactory.getStrategy(strategyName);
-            List<String> chunks = strategy.split(content, params);
+            if (params.getTextCleanRules() != null && !params.getTextCleanRules().isEmpty()) {
+                content = TextNormalizeUtil.applyCleanRules(content, params.getTextCleanRules());
+            }
+            List<ChunkBlock> blocks = strategy.splitStructured(content, params);
 
             // 2.1 分块结果为空（所有分片低于最小token阈值）
-            if (chunks.isEmpty()) {
+            if (blocks.isEmpty()) {
                 throw new BizException(ErrorCode.DOCUMENT_CHUNKS_TOO_SHORT);
             }
 
@@ -313,13 +488,14 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             progressCallback.accept(30, "正在保存分块...");
             long totalTokens = 0;
             List<Chunk> chunkEntities = new ArrayList<>();
-            for (int i = 0; i < chunks.size(); i++) {
-                String chunkContent = TextNormalizeUtil.normalizeChunkContent(chunks.get(i));
+            for (int i = 0; i < blocks.size(); i++) {
+                String chunkContent = TextNormalizeUtil.normalizeChunkContent(blocks.get(i).getContent(), params.isCollapseWhitespace());
                 Chunk chunk = new Chunk();
                 chunk.setDocumentId(doc.getId());
                 chunk.setKnowledgeId(doc.getKnowledgeId());
                 chunk.setChunkIndex(i);
                 chunk.setContent(chunkContent);
+                chunk.setParentContent(blocks.get(i).getParentContent());
                 chunk.setTokenCount(com.lengbot.model.chunking.TokenUtil.countTokens(chunkContent));
                 chunk.setStatus(ChunkStatus.CHUNKED);
                 chunkEntities.add(chunk);
@@ -329,13 +505,13 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
             // 4. 更新文档状态为向量化中
             doc.setStatus(DocumentStatus.PROCESSING);
-            doc.setChunkCount(chunks.size());
+            doc.setChunkCount(blocks.size());
             doc.setTokenCount(totalTokens);
             updateById(doc);
 
             // 5. 更新知识库统计
-            knowledgeServiceProvider.getObject().updateStats(doc.getKnowledgeId(), 1, chunks.size(), (int) totalTokens);
-            log.info("[文档入库] 分块完成, documentId={}, chunks={}, strategy={}", documentId, chunks.size(), strategyName);
+            knowledgeServiceProvider.getObject().updateStats(doc.getKnowledgeId(), 1, blocks.size(), (int) totalTokens);
+            log.info("[文档入库] 分块完成, documentId={}, chunks={}, strategy={}", documentId, blocks.size(), strategyName);
 
             // 6. 向量化（单独归因：向量化失败不再被外层 catch 误报为"分块失败"）
             try {
@@ -393,32 +569,57 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             int batchEnd = Math.min(batchStart + EMBED_BATCH_SIZE, total);
             List<Chunk> batch = chunks.subList(batchStart, batchEnd);
 
-            // 3.1 批量调用 EmbeddingService
+            // 3.1 批量调用 EmbeddingService（单条失败返回 null，已隔离）
             List<String> texts = batch.stream().map(Chunk::getContent).toList();
-            List<float[]> vectors;
+            List<double[]> rawVectors;
             try {
-                vectors = embedBatch(texts);
+                rawVectors = embedBatchRaw(texts);
             } catch (Exception e) {
                 log.error("[向量化] 批量Embedding失败, batchStart={}", batchStart, e);
-                // 批量失败时标记该批次所有chunk为失败（1 条 SQL）
+                // 批量异常时标记该批次所有chunk为失败（1 条 SQL）
                 batch.forEach(c -> c.setStatus(ChunkStatus.FAILED));
                 chunkService.updateBatchById(batch);
                 failed += batch.size();
                 continue;
             }
 
-            // 3.2 批量更新chunk状态为向量化中
-            List<Long> chunkIds = batch.stream().map(Chunk::getId).toList();
-            batch.forEach(c -> c.setStatus(ChunkStatus.VECTORIZING));
+            // 3.1.1 过滤嵌入失败的 chunk（null 向量）：成功项入库，失败项标记 FAILED 不写脏零向量
+            List<Long> okChunkIds = new java.util.ArrayList<>();
+            List<float[]> okVectors = new java.util.ArrayList<>();
+            java.util.Set<Long> failedIds = new java.util.HashSet<>();
+            for (int i = 0; i < batch.size(); i++) {
+                double[] v = rawVectors.get(i);
+                if (v == null) {
+                    failedIds.add(batch.get(i).getId());
+                    continue;
+                }
+                okChunkIds.add(batch.get(i).getId());
+                okVectors.add(ModelCalls.toFloatArray(v));
+            }
+            if (okVectors.isEmpty()) {
+                log.error("[向量化] 整批嵌入失败, 跳过入库, documentId={}, batchStart={}", documentId, batchStart);
+                batch.forEach(c -> c.setStatus(ChunkStatus.FAILED));
+                chunkService.updateBatchById(batch);
+                failed += batch.size();
+                continue;
+            }
+
+            // 3.2 批量更新chunk状态（成功=向量化中, 失败=FAILED）
+            for (Chunk c : batch) {
+                c.setStatus(failedIds.contains(c.getId()) ? ChunkStatus.FAILED : ChunkStatus.VECTORIZING);
+            }
             chunkService.updateBatchById(batch);
 
-            // 3.3 批量存储向量（传 knowledgeId 支持 Milvus 路由）
-            ((EmbeddingServiceImpl) embeddingService).batchSaveVectors(knowledgeId, chunkIds, modelName, vectors);
+            // 3.3 仅对成功 chunk 批量存储向量（传 knowledgeId 支持 Milvus 路由）
+            ((EmbeddingServiceImpl) embeddingService).batchSaveVectors(knowledgeId, okChunkIds, modelName, okVectors);
 
-            // 3.4 批量更新chunk状态为已向量化
-            batch.forEach(c -> c.setStatus(ChunkStatus.VECTORIZED));
+            // 3.4 批量更新chunk状态（成功=已向量化, 失败=FAILED）
+            for (Chunk c : batch) {
+                c.setStatus(failedIds.contains(c.getId()) ? ChunkStatus.FAILED : ChunkStatus.VECTORIZED);
+            }
             chunkService.updateBatchById(batch);
-            success += batch.size();
+            success += okChunkIds.size();
+            failed += failedIds.size();
 
             // 3.5 报告进度
             int progress = (int) ((batchEnd * 1.0 / total) * 100);
@@ -444,6 +645,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             // 同步触发示例问题生成
             try {
                 knowledgeServiceProvider.getObject().generateExampleQuestions(knowledgeId, documentId);
+                knowledgeServiceProvider.getObject().generateDocumentSummary(knowledgeId, documentId);
             } catch (Exception e) {
                 log.warn("[文档入库] 示例问题生成失败, documentId={}", documentId, e);
             }
@@ -477,8 +679,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
      * @param texts 文本列表
      * @return 向量列表（float[]），与输入文本一一对应
      */
-    private List<float[]> embedBatch(List<String> texts) {
-        return ModelCalls.toFloatArrays(textEmbeddingService.embedBatch(texts));
+    private List<double[]> embedBatchRaw(List<String> texts) {
+        return textEmbeddingService.embedBatch(texts);
     }
 
     @Override
@@ -593,6 +795,9 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
         // 权限校验：需要DEVELOPER及以上权限
         permissionHelper.checkPermission(doc.getKnowledgeId(), KnowledgeRole.DEVELOPER);
 
+        // 0. 取消该文档关联的活跃上传/入库任务，避免文档已删但后台 OCR/入库仍在执行
+        cancelActiveTasksForDocument(documentId);
+
         // 1. 删除 MinIO 中的原始文件
         safeDeleteMinio(doc.getFilePath(), "原始文件");
 
@@ -623,6 +828,24 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
         knowledgeServiceProvider.getObject().updateStats(doc.getKnowledgeId(), -1, -chunkCount, -tokenCount);
     }
 
+    /**
+     * 删除文档前取消其关联的活跃上传/入库任务（PENDING/RUNNING/PENDING_RETRY）。
+     * 避免文档已删但后台 OCR/入库任务仍继续执行（典型现象：删了文档还在打印 OCR 日志）。
+     */
+    private void cancelActiveTasksForDocument(Long documentId) {
+        try {
+            List<Task> active = taskService.list(new LambdaQueryWrapper<Task>()
+                    .eq(Task::getRefId, documentId)
+                    .in(Task::getStatus, TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.PENDING_RETRY));
+            for (Task t : active) {
+                boolean ok = taskService.requestCancel(t.getId());
+                log.info("[文档删除] 取消关联任务, taskId={}, type={}, cancelled={}", t.getId(), t.getType(), ok);
+            }
+        } catch (Exception e) {
+            log.warn("[文档删除] 取消关联任务失败(不影响删除流程), documentId={}", documentId, e);
+        }
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int deleteByKnowledgeIdCascade(Long knowledgeId) {
@@ -648,6 +871,11 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
         // 5. 一次 IN 删 chunk（按 docIds）
         chunkService.remove(new LambdaQueryWrapper<Chunk>().in(Chunk::getDocumentId, docIds));
+
+        // 5.5 取消该知识库下所有文档关联的活跃上传/入库任务
+        for (Long id : docIds) {
+            cancelActiveTasksForDocument(id);
+        }
 
         // 6. 一次 IN 删 document
         removeByIds(docIds);
@@ -883,6 +1111,19 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
             if (node.has("chunkDelimiter") && !node.get("chunkDelimiter").asText("").isBlank()) {
                 params.setDelimiter(node.get("chunkDelimiter").asText("\n"));
             }
+            if (node.has("collapseWhitespace")) {
+                params.setCollapseWhitespace(node.get("collapseWhitespace").asBoolean(false));
+            }
+            if (node.has("textCleanRules") && node.get("textCleanRules").isArray()) {
+                java.util.ArrayList<TextCleanRule> rules = new java.util.ArrayList<>();
+                for (com.fasterxml.jackson.databind.JsonNode r : node.get("textCleanRules")) {
+                    TextCleanRule rule = new TextCleanRule();
+                    if (r.has("regex")) rule.setRegex(r.get("regex").asText());
+                    if (r.has("replacement")) rule.setReplacement(r.get("replacement").asText(""));
+                    if (rule.getRegex() != null && !rule.getRegex().isBlank()) rules.add(rule);
+                }
+                params.setTextCleanRules(rules);
+            }
         } catch (Exception e) {
             log.warn("[DocumentService] 解析embeddingJson失败, 使用默认参数", e);
         }
@@ -984,6 +1225,10 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document>
 
     /**
      * 判断内容是否过短（可能是扫描件或图片文档）
+     *
+     * <p>注意：当前无调用方，实际的 OCR 触发判据在 {@code DocumentUploadExecutor#needsOcr}。
+     * 这里的「总字符数 < 50」判据已被证明对带书签目录的扫描件 PDF 失效（目录能凑出上千字，
+     * 被误判为内容足够而跳过 OCR）。若将来启用本方法，请先同步为「每页平均字符数」判据。</p>
      */
     private boolean isContentTooShort(String content, String fileType) {
         if (content == null || content.isBlank()) {

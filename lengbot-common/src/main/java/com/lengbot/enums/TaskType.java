@@ -23,7 +23,20 @@ public enum TaskType implements EnumDisplay {
     BENCHMARK_IMPORT("benchmark_import", "基准导入", "benchmarkImportExecutor", Group.DEFAULT),
     RAG_EVALUATION("rag_evaluation", "RAG评估", "ragEvaluationExecutor", Group.DEFAULT),
     GRAPH_EXTRACTION("graph_extraction", "图谱抽取", "graphExtractionExecutor", Group.HEAVY),
-    QA_PAIR_GENERATE("qa_pair_generate", "问答对生成", "qaPairGenerateExecutor", Group.HEAVY);
+    QA_PAIR_GENERATE("qa_pair_generate", "问答对生成", "qaPairGenerateExecutor", Group.HEAVY),
+
+    /**
+     * 社区检测：GraphRAG「社区总结」链路第 1 步。
+     * 对已抽取好的图谱做连通分量分群，产出实体的 community_id 与 Community 节点，
+     * 供后续的社区摘要生成与全局检索消费。
+     */
+    COMMUNITY_DETECT("community_detect", "社区检测", "communityDetectExecutor", Group.HEAVY),
+
+    /**
+     * 社区摘要生成：GraphRAG「社区总结」链路第 2 步。
+     * 依赖第 1 步的社区检测结果，调用 LLM 为每个社区生成高层语义摘要。
+     */
+    COMMUNITY_SUMMARY("community_summary", "社区摘要", "communitySummaryExecutor", Group.HEAVY);
 
     /**
      * 任务分组：决定投递到哪个 Stream 消费组，实现长任务与短任务的隔离

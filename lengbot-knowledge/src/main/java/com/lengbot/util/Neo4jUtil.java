@@ -30,9 +30,16 @@ public class Neo4jUtil {
     private final String uri;
     private final String username;
     private final String password;
+    /**
+     * 连接失败后的自动重试冷却时间（毫秒）。
+     * 失败不"钉死"：冷却期内直接判定不可用，避免每个请求都重连产生网络开销；
+     * 冷却期过后允许重新探测，使 Neo4j 晚启动 / 瞬时抖动后能自动恢复，无需重启后端。
+     */
+    private static final long RETRY_COOLDOWN_MS = 60_000L;
     private volatile Driver driver;
     private volatile boolean initialized = false;
     private volatile boolean available = false;
+    private volatile long lastFailureMillis = 0L;
 
     public Neo4jUtil(
             @Value("${neo4j.uri}") String uri,
@@ -45,29 +52,54 @@ public class Neo4jUtil {
     }
 
     /**
-     * 获取 Driver（懒初始化，首次使用时创建并检测连接）
+     * 获取 Driver（懒初始化 + 失败自动重试，不永久钉死不可用）
+     * <p>设计要点：
+     * 1. 首次成功后将 available=true 并长期缓存，后续请求零开销；
+     * 2. 连接失败时记录失败时间戳并进入"冷却期"，冷却期内直接返回 null（不重试），
+     *    避免每个图谱请求都触发一次失败的网络连接；
+     * 3. 冷却期过后允许重新探测，Neo4j 晚启动 / 瞬时抖动恢复后无需重启后端即可自愈；
+     * 4. 额外提供 {@link #reconnect()} 供运维主动立即重连。
      */
     private Driver getDriver() {
-        if (!initialized) {
-            synchronized (this) {
-                if (!initialized) {
-                    try {
-                        this.driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
-                        // 验证连接
-                        try (Session session = driver.session()) {
-                            session.run("RETURN 1").consume();
-                        }
-                        this.available = true;
-                        log.info("[Neo4j] 连接成功, uri={}", uri);
-                    } catch (Exception e) {
-                        this.available = false;
-                        log.warn("[Neo4j] 连接失败，图谱功能不可用: {}", e.getMessage());
+        // 快速路径：已成功初始化，直接返回，无锁开销
+        if (initialized && available) {
+            return driver;
+        }
+        synchronized (this) {
+            // 双重检查
+            if (initialized && available) {
+                return driver;
+            }
+            // 曾经失败过：冷却期内不重试，直接判定不可用
+            if (initialized && !available
+                    && System.currentTimeMillis() - lastFailureMillis < RETRY_COOLDOWN_MS) {
+                return null;
+            }
+            // 冷却期已过（或从未初始化）：重置状态重新尝试连接
+            if (initialized && !available) {
+                initialized = false;
+            }
+            if (!initialized) {
+                try {
+                    this.driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
+                    // 验证连接
+                    try (Session session = driver.session()) {
+                        session.run("RETURN 1").consume();
                     }
+                    this.available = true;
+                    log.info("[Neo4j] 连接成功, uri={}", uri);
+                } catch (Exception e) {
+                    this.available = false;
+                    this.lastFailureMillis = System.currentTimeMillis();
+                    log.warn("[Neo4j] 连接失败，图谱功能暂不可用（{}s 冷却后自动重试）: {}",
+                            RETRY_COOLDOWN_MS / 1000, e.getMessage());
+                } finally {
+                    // 无论成败都标记已探测过，失败态进入冷却逻辑
                     this.initialized = true;
                 }
             }
+            return driver;
         }
-        return driver;
     }
 
     /**
@@ -76,6 +108,27 @@ public class Neo4jUtil {
     public boolean isAvailable() {
         getDriver();
         return available;
+    }
+
+    /**
+     * 主动重连（供运维在 Neo4j 晚启动 / 恢复后调用，无需重启后端）。
+     * 关闭旧 Driver、清空探测状态，下次 {@link #getDriver()} 会重新建立连接并验证。
+     */
+    public void reconnect() {
+        synchronized (this) {
+            if (driver != null) {
+                try {
+                    driver.close();
+                } catch (Exception ignore) {
+                    // 关闭失败不影响后续重连
+                }
+            }
+            this.driver = null;
+            this.initialized = false;
+            this.available = false;
+            this.lastFailureMillis = 0L;
+            log.info("[Neo4j] 已触发主动重连，下次访问将重新探测连接");
+        }
     }
 
     /**

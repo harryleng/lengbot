@@ -14,9 +14,12 @@ import com.lengbot.util.MinioUtil;
 import com.lengbot.util.OcrUtil;
 import com.lengbot.util.RedisUtil;
 import com.lengbot.util.TikaUtil;
+import com.lengbot.util.DocIngestUtil;
 import com.lengbot.entity.Task;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
@@ -100,12 +103,12 @@ public class DocumentUploadExecutor implements TaskExecutor {
             checkCancelled(task.getId());
 
             // 3. OCR 增强
-            if (ocrEnabled && isContentTooShort(markdownContent, doc.getFileType())) {
+            if (ocrEnabled || needsOcr(markdownContent, doc.getFileType(), temp)) {
                 taskService.updateProgress(task.getId(), 50, "正在OCR识别...");
                 try (InputStream is = Files.newInputStream(temp)) {
                     String ocrContent = tryOcr(is, doc.getFileType());
                     if (ocrContent != null && !ocrContent.isBlank()) {
-                        markdownContent = mergeOcrContent(markdownContent, ocrContent);
+                        markdownContent = DocIngestUtil.mergeOcrContent(markdownContent, ocrContent);
                         log.info("[文档上传执行器] OCR识别完成, documentId={}, ocrLength={}", documentId, ocrContent.length());
                     }
                 }
@@ -122,7 +125,7 @@ public class DocumentUploadExecutor implements TaskExecutor {
             // 5. 上传 Markdown 到 MinIO
             taskService.updateProgress(task.getId(), 80, "正在保存解析结果...");
             if (markdownContent != null) {
-                String markdownPath = generateMarkdownPath(doc.getKnowledgeId(), doc.getFilePath());
+                String markdownPath = DocIngestUtil.generateMarkdownPath(doc.getKnowledgeId(), doc.getFilePath());
                 minioUtil.uploadString(markdownContent, markdownPath, "text/markdown");
                 doc.setMarkdownPath(markdownPath);
             }
@@ -157,42 +160,44 @@ public class DocumentUploadExecutor implements TaskExecutor {
         }
     }
 
-    private boolean isContentTooShort(String content, String fileType) {
+    /**
+     * 判断是否需要 OCR 增强。
+     *
+     * @param content  解析器已提取的文本
+     * @param fileType 文件类型
+     * @param file     原始文件（PDF 需要读页数来判断是否为扫描件）
+     */
+    private boolean needsOcr(String content, String fileType, Path file) {
         if (content == null || content.isBlank()) {
             return true;
         }
-        if ("pdf".equals(fileType) || "jpg".equals(fileType) || "jpeg".equals(fileType) || "png".equals(fileType)) {
-            return content.trim().length() < 50;
+        if ("pdf".equals(fileType)) {
+            return DocIngestUtil.isScannedPdf(content, file);
+        }
+        if (DocIngestUtil.isImageType(fileType)) {
+            return content.trim().length() < DocIngestUtil.MIN_TOTAL_CHARS;
         }
         return false;
     }
 
-    private String tryOcr(InputStream inputStream, String fileType) {
+    // 扫描件判定 / PDF 页数读取已移至 DocIngestUtil，与重新入库逻辑共用，避免重复魔法数字。
+
+    private String tryOcr(InputStream inputStream, String fileType) throws TaskCancelledException {
         try {
             if ("pdf".equals(fileType)) {
                 return ocrUtil.recognizePdf(inputStream);
-            } else if ("jpg".equals(fileType) || "jpeg".equals(fileType) || "png".equals(fileType)
-                    || "bmp".equals(fileType) || "tiff".equals(fileType) || "tif".equals(fileType)) {
+            } else if (DocIngestUtil.isImageType(fileType)) {
                 return ocrUtil.recognizeImage(inputStream);
             }
+        } catch (TaskCancelledException e) {
+            throw e;
         } catch (Exception e) {
             log.warn("[OCR] 识别失败, fileType={}", fileType, e);
         }
         return null;
     }
 
-    private String mergeOcrContent(String originalContent, String ocrContent) {
-        if (originalContent == null || originalContent.isBlank()) {
-            return ocrContent;
-        }
-        return originalContent + "\n\n---\n\n## OCR 识别内容\n\n" + ocrContent;
-    }
-
-    private String generateMarkdownPath(Long knowledgeId, String filePath) {
-        String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
-        String baseName = fileName.contains(".") ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
-        return String.format("knowledge/%d/parsed/%s.md", knowledgeId, baseName);
-    }
+    // mergeOcrContent / generateMarkdownPath 已移至 DocIngestUtil。
 
     private void checkCancelled(Long taskId) {
         if (redisUtil.hasCancelSignal(taskId)) {

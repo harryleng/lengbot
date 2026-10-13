@@ -23,6 +23,7 @@ import com.lengbot.service.UserPreferenceService;
 import com.lengbot.subagent.DelegateSubAgentTool;
 import com.lengbot.agent.tool.memory.UserMemoryToolCallbackFactory;
 import com.lengbot.agent.tool.memory.ExperienceMemoryToolCallbackFactory;
+import com.lengbot.agent.tool.knowledge.KnowledgeToolCallbackFactory;
 import com.lengbot.util.JsonIdParser;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
@@ -71,6 +72,7 @@ public class ToolPrepMiddleware implements ChatMiddleware {
     private final UserPreferenceService userPreferenceService;
     private final UserMemoryToolCallbackFactory userMemoryToolCallbackFactory;
     private final ExperienceMemoryToolCallbackFactory experienceMemoryToolCallbackFactory;
+    private final KnowledgeToolCallbackFactory knowledgeToolCallbackFactory;
 
     @Autowired
     @Qualifier("lengBotExecutor")
@@ -217,7 +219,10 @@ public class ToolPrepMiddleware implements ChatMiddleware {
                             .toList();
                     if (!autoInjectTools.isEmpty()) {
                         List<String> kbToolNames = autoInjectTools.stream().map(Tool::getName).toList();
-                        allCallbacks.addAll(toolService.resolveToolCallbacks(kbToolNames));
+                        List<ToolBase> kbCallbacks = knowledgeToolCallbackFactory.buildCallbacks().stream()
+                                .filter(cb -> kbToolNames.contains(cb.getName()))
+                                .toList();
+                        allCallbacks.addAll(kbCallbacks);
                         log.info("[Chat] 自动注入知识库工具: agentId={}, knowledgeBases={}, tools={}",
                                 agent.getId(), knowledgeIds.size(), kbToolNames);
                     }

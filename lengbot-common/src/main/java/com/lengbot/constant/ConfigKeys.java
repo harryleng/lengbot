@@ -1,8 +1,8 @@
 package com.lengbot.constant;
 
 /**
- * JSONB config ×Ö¶ÎµÄ key ³£Á¿
- * ±ÜÃâÔÚÒµÎñ´úÂëÖĞÊ¹ÓÃÄ§·¨Öµ
+ * JSONB config å­—æ®µçš„ key å¸¸é‡
+ * é¿å…åœ¨ä¸šåŠ¡ä»£ç ä¸­ä½¿ç”¨é­”æ³•å€¼
  *
  * @author lw
  * @since 2026-05-19
@@ -12,17 +12,17 @@ public final class ConfigKeys {
     private ConfigKeys() {}
 
     /**
-     * Agent.config JSONB ×Ö¶ÎµÄ key
+     * Agent.config JSONB å­—æ®µçš„ key
      */
     public static final class Agent {
         public static final String PROVIDER_ID = "providerId";
         public static final String MODEL_ID = "modelId";
 
-        /** »ìºÏÄ£ĞÍÂ·ÓÉ£ºÊÇ·ñÆôÓÃ£¨¼òµ¥ÇëÇó×ßÇáÁ¿Ä£ĞÍ£©¡£ */
+        /** æ··åˆæ¨¡å‹è·¯ç”±ï¼šæ˜¯å¦å¯ç”¨ï¼ˆç®€å•è¯·æ±‚èµ°è½»é‡æ¨¡å‹ï¼‰ã€‚ */
         public static final String MODEL_ROUTING_ENABLED = "modelRoutingEnabled";
-        /** »ìºÏÄ£ĞÍÂ·ÓÉ£º¼òµ¥ÇëÇóÊ¹ÓÃµÄÇáÁ¿Ä£ĞÍ providerId¡£ */
+        /** æ··åˆæ¨¡å‹è·¯ç”±ï¼šç®€å•è¯·æ±‚ä½¿ç”¨çš„è½»é‡æ¨¡å‹ providerIdã€‚ */
         public static final String LIGHT_PROVIDER_ID = "lightProviderId";
-        /** »ìºÏÄ£ĞÍÂ·ÓÉ£º¼òµ¥ÇëÇóÊ¹ÓÃµÄÇáÁ¿Ä£ĞÍ modelId¡£ */
+        /** æ··åˆæ¨¡å‹è·¯ç”±ï¼šç®€å•è¯·æ±‚ä½¿ç”¨çš„è½»é‡æ¨¡å‹ modelIdã€‚ */
         public static final String LIGHT_MODEL_ID = "lightModelId";
         public static final String TEMPERATURE = "temperature";
         public static final String TOP_P = "topP";
@@ -33,88 +33,88 @@ public final class ConfigKeys {
         public static final String PRESENCE_PENALTY = "presencePenalty";
         public static final String FREQUENCY_PENALTY = "frequencyPenalty";
         public static final String COMPLETIONS_PATH = "completionsPath";
-        // ÉÏÏÂÎÄÕªÒª
+        // ä¸Šä¸‹æ–‡æ‘˜è¦
         public static final String ENABLE_SUMMARY = "enableSummary";
         public static final String SUMMARY_THRESHOLD_KB = "summaryThresholdKb";
-        /** ÉÏÏÂÎÄÕªÒªÌáÊ¾´Ê£¨º¬ {messages} Õ¼Î»·û£© */
+        /** ä¸Šä¸‹æ–‡æ‘˜è¦æç¤ºè¯ï¼ˆå« {messages} å ä½ç¬¦ï¼‰ */
         public static final String SUMMARY_PROMPT = "summaryPrompt";
-        /** ÕªÒªºó±£Áô×î½ü N ÌõÏûÏ¢²»±»Ñ¹Ëõ */
+        /** æ‘˜è¦åä¿ç•™æœ€è¿‘ N æ¡æ¶ˆæ¯ä¸è¢«å‹ç¼© */
         public static final String SUMMARY_KEEP_MESSAGES = "summaryKeepMessages";
-        /** ÕªÒªÊ±¹¤¾ß½á¹ûÔ¤ÀÀ Token ÉÏÏŞ£¬³¬³ö½Ø¶Ï */
+        /** æ‘˜è¦æ—¶å·¥å…·ç»“æœé¢„è§ˆ Token ä¸Šé™ï¼Œè¶…å‡ºæˆªæ–­ */
         public static final String SUMMARY_TOOL_RESULT_TOKEN_LIMIT = "summaryToolResultTokenLimit";
-        /** ×î´óÖ´ĞĞ²½Êı£¨¹¤¾ßµ÷ÓÃµİ¹éÉî¶ÈÉÏÏŞ£© */
+        /** æœ€å¤§æ‰§è¡Œæ­¥æ•°ï¼ˆå·¥å…·è°ƒç”¨é€’å½’æ·±åº¦ä¸Šé™ï¼‰ */
         public static final String MAX_EXECUTION_STEPS = "maxExecutionSteps";
         /**
-         * µ¥ÂÖ¶Ô»°×ÜÖ´ĞĞÊ±¼äÔ¤Ëã£¨ºÁÃë£©£¬¸²¸ÇÈ«²¿ LLM µ÷ÓÃÓë¹¤¾ßÖ´ĞĞ
-         * <p>Óë maxExecutionSteps ²¢ÁĞ£¬Ë­ÏÈ´¥·¢ÌıË­µÄ¡ª¡ª²½ÊıÉÏÏŞ¹Ü²»×¡"Ã¿²½¶¼ºÜÂı"µÄ³¡¾°</p>
+         * å•è½®å¯¹è¯æ€»æ‰§è¡Œæ—¶é—´é¢„ç®—ï¼ˆæ¯«ç§’ï¼‰ï¼Œè¦†ç›–å…¨éƒ¨ LLM è°ƒç”¨ä¸å·¥å…·æ‰§è¡Œ
+         * <p>ä¸ maxExecutionSteps å¹¶åˆ—ï¼Œè°å…ˆè§¦å‘å¬è°çš„â€”â€”æ­¥æ•°ä¸Šé™ç®¡ä¸ä½"æ¯æ­¥éƒ½å¾ˆæ…¢"çš„åœºæ™¯</p>
          */
         public static final String MAX_EXECUTION_TIME_MS = "maxExecutionTimeMs";
         /**
-         * ÍêÈ«ÏàÍ¬²ÎÊı£¨¹¤¾ßÃû + Èë²Î£©Á¬Ğøµ÷ÓÃ´ïµ½¸Ã´ÎÊı¼´ÅĞ¶¨ËÀÑ­»·£¬À¹½Ø±¾´ÎÖ´ĞĞ
+         * å®Œå…¨ç›¸åŒå‚æ•°ï¼ˆå·¥å…·å + å…¥å‚ï¼‰è¿ç»­è°ƒç”¨è¾¾åˆ°è¯¥æ¬¡æ•°å³åˆ¤å®šæ­»å¾ªç¯ï¼Œæ‹¦æˆªæœ¬æ¬¡æ‰§è¡Œ
          */
         public static final String TOOL_LOOP_REPEAT_THRESHOLD = "toolLoopRepeatThreshold";
         /**
-         * »¬¶¯´°¿ÚÄÚÍ¬Ò»¹¤¾ß³öÏÖ´ÎÊı´ïµ½¸ÃãĞÖµ¼´¸ø³öÈí¸æ¾¯£¨¸²¸Ç A¡úB¡úC¡úA¡úB¡úC ĞÍÖÜÆÚÑ­»·£©
+         * æ»‘åŠ¨çª—å£å†…åŒä¸€å·¥å…·å‡ºç°æ¬¡æ•°è¾¾åˆ°è¯¥é˜ˆå€¼å³ç»™å‡ºè½¯å‘Šè­¦ï¼ˆè¦†ç›– Aâ†’Bâ†’Câ†’Aâ†’Bâ†’C å‹å‘¨æœŸå¾ªç¯ï¼‰
          */
         public static final String TOOL_LOOP_WINDOW_THRESHOLD = "toolLoopWindowThreshold";
-        /** Í¬Ò»¹¤¾ßÁ¬ĞøÊ§°Ü´ïµ½¸Ã´ÎÊı¼´ÈÛ¶Ï¸æ¾¯ */
+        /** åŒä¸€å·¥å…·è¿ç»­å¤±è´¥è¾¾åˆ°è¯¥æ¬¡æ•°å³ç†”æ–­å‘Šè­¦ */
         public static final String TOOL_FAILURE_THRESHOLD = "toolFailureThreshold";
-        /** Ä£ĞÍµ÷ÓÃÊ§°ÜÖØÊÔ´ÎÊı */
+        /** æ¨¡å‹è°ƒç”¨å¤±è´¥é‡è¯•æ¬¡æ•° */
         public static final String MODEL_RETRY_TIMES = "modelRetryTimes";
-        /** ÌáÊ¾´Ê×Ô¶¨Òå±äÁ¿ÁĞ±í [{key,label,defaultValue,description}] */
+        /** æç¤ºè¯è‡ªå®šä¹‰å˜é‡åˆ—è¡¨ [{key,label,defaultValue,description}] */
         public static final String PROMPT_VARIABLES = "promptVariables";
-        /** ÓÃ»§ÊäÈëÃô¸Ğ´Ê£¨ÃüÖĞ¼´À¹½Ø£¬²»µ÷ÓÃÄ£ĞÍ£© */
+        /** ç”¨æˆ·è¾“å…¥æ•æ„Ÿè¯ï¼ˆå‘½ä¸­å³æ‹¦æˆªï¼Œä¸è°ƒç”¨æ¨¡å‹ï¼‰ */
         public static final String USER_SENSITIVE_FILTER_ENABLED = "userSensitiveFilterEnabled";
         public static final String USER_SENSITIVE_WORDS = "userSensitiveWords";
-        /** AI Êä³öÃô¸Ğ´Ê£¨Ìæ»»»òÀ¹½Ø£© */
+        /** AI è¾“å‡ºæ•æ„Ÿè¯ï¼ˆæ›¿æ¢æˆ–æ‹¦æˆªï¼‰ */
         public static final String SENSITIVE_FILTER_ENABLED = "sensitiveFilterEnabled";
         public static final String SENSITIVE_FILTER_STRATEGY = "sensitiveFilterStrategy";
         public static final String SENSITIVE_FILTER_REPLACE_TEXT = "sensitiveFilterReplaceText";
         public static final String SENSITIVE_WORDS = "sensitiveWords";
-        /** ÊÇ·ñÁ÷Ê½Êä³öÄ£ĞÍ»Ø¸´£¬Ä¬ÈÏ true */
+        /** æ˜¯å¦æµå¼è¾“å‡ºæ¨¡å‹å›å¤ï¼Œé»˜è®¤ true */
         public static final String STREAM_OUTPUT = "streamOutput";
 
-        /** ¶àÄ£Ì¬×Ü¿ª¹Ø£¨¿ªÆôºó¶Ô»°Ò³¿ÉÉÏ´«Ã½Ìå/ÓïÒôÊäÈë£¬ĞèÄ£ĞÍÖ§³Ö£© */
+        /** å¤šæ¨¡æ€æ€»å¼€å…³ï¼ˆå¼€å¯åå¯¹è¯é¡µå¯ä¸Šä¼ åª’ä½“/è¯­éŸ³è¾“å…¥ï¼Œéœ€æ¨¡å‹æ”¯æŒï¼‰ */
         public static final String MULTIMODAL_ENABLED = "multimodalEnabled";
-        /** Í¼ÏñÊäÈë */
+        /** å›¾åƒè¾“å…¥ */
         public static final String ENABLE_IMAGE_INPUT = "enableImageInput";
-        /** ÊÓÆµÊäÈë */
+        /** è§†é¢‘è¾“å…¥ */
         public static final String ENABLE_VIDEO_INPUT = "enableVideoInput";
-        /** ÒôÆµÊäÈë£¨ä¯ÀÀÆ÷ÓïÒô×ªÎÄ×Ö£© */
+        /** éŸ³é¢‘è¾“å…¥ï¼ˆæµè§ˆå™¨è¯­éŸ³è½¬æ–‡å­—ï¼‰ */
         public static final String ENABLE_AUDIO_INPUT = "enableAudioInput";
-        /** ÎÄ¼ş¶ÁÈ¡£¨Tika ½âÎöÎÄµµÎªÎÄ±¾×¢Èë¶Ô»°£¬Óë¶àÄ£Ì¬Í¼Æ¬/ÊÓÆµ¶ÀÁ¢£© */
+        /** æ–‡ä»¶è¯»å–ï¼ˆTika è§£ææ–‡æ¡£ä¸ºæ–‡æœ¬æ³¨å…¥å¯¹è¯ï¼Œä¸å¤šæ¨¡æ€å›¾ç‰‡/è§†é¢‘ç‹¬ç«‹ï¼‰ */
         public static final String ENABLE_FILE_READ = "enableFileRead";
-        /** ÁªÍøËÑË÷£¨MiMo web_search£© */
+        /** è”ç½‘æœç´¢ï¼ˆMiMo web_searchï¼‰ */
         public static final String ENABLE_WEB_SEARCH = "enableWebSearch";
-        /** ÁªÍøËÑË÷£ºÇ¿ÖÆËÑË÷ */
+        /** è”ç½‘æœç´¢ï¼šå¼ºåˆ¶æœç´¢ */
         public static final String WEB_SEARCH_FORCE = "webSearchForceSearch";
-        /** ÁªÍøËÑË÷£º×î´ó¹Ø¼ü´ÊÊı */
+        /** è”ç½‘æœç´¢ï¼šæœ€å¤§å…³é”®è¯æ•° */
         public static final String WEB_SEARCH_MAX_KEYWORD = "webSearchMaxKeyword";
-        /** ÓïÒôºÏ³É£¨»Ø¸´ TTS£¬Ô¤Áô£© */
+        /** è¯­éŸ³åˆæˆï¼ˆå›å¤ TTSï¼Œé¢„ç•™ï¼‰ */
         public static final String ENABLE_TTS = "enableTts";
-        /** Éî¶ÈË¼¿¼ */
+        /** æ·±åº¦æ€è€ƒ */
         public static final String ENABLE_REASONING = "enableReasoning";
-        /** ¶Ô»°¸½¼şÄÚÈİ°²È«É¨Ãè£¨prompt ×¢Èë + Ãô¸Ğ´Ê£© */
+        /** å¯¹è¯é™„ä»¶å†…å®¹å®‰å…¨æ‰«æï¼ˆprompt æ³¨å…¥ + æ•æ„Ÿè¯ï¼‰ */
         public static final String ENABLE_CONTENT_SECURITY_SCAN = "enableContentSecurityScan";
-        /** ×î´óÉÏÏÂÎÄÏûÏ¢ÌõÊı */
+        /** æœ€å¤§ä¸Šä¸‹æ–‡æ¶ˆæ¯æ¡æ•° */
         public static final String MAX_CONTEXT_MESSAGES = "maxContextMessages";
-        /** ×î´óÉÏÏÂÎÄÏûÏ¢ÌõÊıÄ¬ÈÏÖµ */
+        /** æœ€å¤§ä¸Šä¸‹æ–‡æ¶ˆæ¯æ¡æ•°é»˜è®¤å€¼ */
         public static final int DEFAULT_MAX_CONTEXT_MESSAGES = 20;
 
-        /** ×ÜÖ´ĞĞÊ±¼äÔ¤ËãÄ¬ÈÏÖµ£º5 ·ÖÖÓ */
+        /** æ€»æ‰§è¡Œæ—¶é—´é¢„ç®—é»˜è®¤å€¼ï¼š5 åˆ†é’Ÿ */
         public static final int DEFAULT_MAX_EXECUTION_TIME_MS = 5 * 60 * 1000;
-        /** ×ÜÖ´ĞĞÊ±¼äÔ¤ËãÓ²ÉÏÏŞ£º30 ·ÖÖÓ£¨·ÀÖ¹ÅäÖÃÎóÌîµ¼ÖÂµ¥ÇëÇó³¤ÆÚÕ¼ÓÃ£© */
+        /** æ€»æ‰§è¡Œæ—¶é—´é¢„ç®—ç¡¬ä¸Šé™ï¼š30 åˆ†é’Ÿï¼ˆé˜²æ­¢é…ç½®è¯¯å¡«å¯¼è‡´å•è¯·æ±‚é•¿æœŸå ç”¨ï¼‰ */
         public static final int HARD_MAX_EXECUTION_TIME_MS = 30 * 60 * 1000;
-        /** ÍêÈ«ÏàÍ¬²ÎÊıÁ¬Ğøµ÷ÓÃÅĞ¶¨ãĞÖµÄ¬ÈÏÖµ */
+        /** å®Œå…¨ç›¸åŒå‚æ•°è¿ç»­è°ƒç”¨åˆ¤å®šé˜ˆå€¼é»˜è®¤å€¼ */
         public static final int DEFAULT_TOOL_LOOP_REPEAT_THRESHOLD = 3;
-        /** »¬¶¯´°¿ÚÄÚÍ¬Ò»¹¤¾ßÈí¸æ¾¯ãĞÖµÄ¬ÈÏÖµ£¨´°¿Ú´óĞ¡¼û ChatContext.TOOL_WINDOW_SIZE£© */
+        /** æ»‘åŠ¨çª—å£å†…åŒä¸€å·¥å…·è½¯å‘Šè­¦é˜ˆå€¼é»˜è®¤å€¼ï¼ˆçª—å£å¤§å°è§ ChatContext.TOOL_WINDOW_SIZEï¼‰ */
         public static final int DEFAULT_TOOL_LOOP_WINDOW_THRESHOLD = 5;
-        /** Í¬Ò»¹¤¾ßÁ¬ĞøÊ§°ÜÈÛ¶ÏãĞÖµÄ¬ÈÏÖµ */
+        /** åŒä¸€å·¥å…·è¿ç»­å¤±è´¥ç†”æ–­é˜ˆå€¼é»˜è®¤å€¼ */
         public static final int DEFAULT_TOOL_FAILURE_THRESHOLD = 4;
     }
 
     /**
-     * Knowledge.config JSONB ×Ö¶ÎµÄ key
+     * Knowledge.config JSONB å­—æ®µçš„ key
      */
     public static final class Knowledge {
         public static final String RAG_TOP_K = "ragTopK";
@@ -122,7 +122,7 @@ public final class ConfigKeys {
     }
 
     /**
-     * Users.config JSONB ×Ö¶ÎµÄ key
+     * Users.config JSONB å­—æ®µçš„ key
      */
     public static final class User {
         public static final String AVATAR_FRAME = "avatarFrame";
@@ -131,25 +131,25 @@ public final class ConfigKeys {
         public static final String LONG_MEMORY_AUTO_EXTRACT = "longMemoryAutoExtract";
         public static final String LONG_MEMORY_INJECT_LIMIT = "longMemoryInjectLimit";
         public static final String LONG_MEMORY_SCOPE = "longMemoryScope";
-        /** ³¤ÆÚ¼ÇÒäÊÇ·ñÆôÓÃ LLM ÓïÒå³éÈ¡£¨false=»ØÍË¹Ø¼ü´ÊÆô·¢Ê½£© */
+        /** é•¿æœŸè®°å¿†æ˜¯å¦å¯ç”¨ LLM è¯­ä¹‰æŠ½å–ï¼ˆfalse=å›é€€å…³é”®è¯å¯å‘å¼ï¼‰ */
         public static final String LONG_MEMORY_LLM_EXTRACT = "longMemoryLlmExtract";
-        /** ¼ÇÒä³éÈ¡×¨ÓÃÄ£ĞÍ providerId£¨¿Õ=ÏµÍ³Ä¬ÈÏ£© */
+        /** è®°å¿†æŠ½å–ä¸“ç”¨æ¨¡å‹ providerIdï¼ˆç©º=ç³»ç»Ÿé»˜è®¤ï¼‰ */
         public static final String MEMORY_EXTRACT_PROVIDER_ID = "memoryExtractProviderId";
     }
 
     /**
-     * SystemConfig ÏµÍ³ÅäÖÃµÄ key
+     * SystemConfig ç³»ç»Ÿé…ç½®çš„ key
      */
     public static final class System {
-        /** Ä¬ÈÏ¶Ô»°Ä£ĞÍÅäÖÃ */
+        /** é»˜è®¤å¯¹è¯æ¨¡å‹é…ç½® */
         public static final String DEFAULT_CHAT_MODEL = "default_chat_model";
-        /** Ä¬ÈÏÏòÁ¿Ä£ĞÍÅäÖÃ */
+        /** é»˜è®¤å‘é‡æ¨¡å‹é…ç½® */
         public static final String DEFAULT_EMBEDDING_MODEL = "default_embedding_model";
-        /** Ä¬ÈÏTTSÄ£ĞÍÅäÖÃ */
+        /** é»˜è®¤TTSæ¨¡å‹é…ç½® */
         public static final String DEFAULT_TTS_MODEL = "default_tts_model";
-        /** Ä¬ÈÏÖØÅÅÄ£ĞÍÅäÖÃ */
+        /** é»˜è®¤é‡æ’æ¨¡å‹é…ç½® */
         public static final String DEFAULT_RERANK_MODEL = "default_rerank_model";
-        /** Landing Ò³ÃæÅäÖÃ */
+        /** Landing é¡µé¢é…ç½® */
         public static final String LANDING_CONFIG = "landing_config";
     }
 }

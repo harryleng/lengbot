@@ -336,11 +336,74 @@ public class TraceMiddleware implements ChatMiddleware {
             if (!title.isBlank()) {
                 chatSessionService.updateTitle(sessionId, title);
                 log.info("[Chat] 会话标题已生成: sessionId={}, title={}", sessionId, title);
+            } else {
+                // 兜底：AI 未产出有效标题时，用首条用户消息前若干字作为标题
+                String fallback = buildFallbackTitle(messages, 20);
+                if (fallback != null && !fallback.isBlank()) {
+                    chatSessionService.updateTitle(sessionId, fallback);
+                    log.warn("[Chat] 会话标题AI生成返回空，已用首条用户消息兜底: sessionId={}, title={}", sessionId, fallback);
+                }
             }
         } catch (Exception e) {
             log.warn("[Chat] 标题生成失败: sessionId={}, error={}", sessionId, e.getMessage());
+            // 兜底：AI 标题生成异常时，仍尝试用首条用户消息生成标题，避免会话长期停留在"新对话"
+            try {
+                List<Message> msgs = messageMapper.selectList(
+                        new LambdaQueryWrapper<Message>()
+                                .eq(Message::getSessionId, sessionId)
+                                .orderByAsc(Message::getCreateTime)
+                                .last("LIMIT 2"));
+                String fallback = buildFallbackTitle(msgs, 20);
+                if (fallback != null && !fallback.isBlank()) {
+                    chatSessionService.updateTitle(sessionId, fallback);
+                    log.warn("[Chat] 标题生成异常，已用首条用户消息兜底: sessionId={}, title={}", sessionId, fallback);
+                }
+            } catch (Exception ignore) {
+                // 兜底失败则保持默认标题，不再重试
+            }
         }
     }
+
+    /**
+     * 非 AI 兜底标题：取会话首条用户消息的前 maxLen 字（压缩空白、去首尾空格），
+     * 用于 AI 标题生成失败或返回空时，保证会话必有可读标题，不会长期停留在"新对话"。
+     *
+     * @param messages 会话前若干条消息（按时间升序）
+     * @param maxLen   标题最大长度
+     * @return 兜底标题；无可用内容时返回 null
+     */
+    private String buildFallbackTitle(List<Message> messages, int maxLen) {
+        if (messages == null || messages.isEmpty()) {
+            return null;
+        }
+        // 优先取首条用户消息
+        for (Message msg : messages) {
+            if (msg.getRole() == MessageRole.USER) {
+                String c = normalizeForTitle(msg.getContent());
+                if (c != null && !c.isBlank()) {
+                    return c.length() > maxLen ? c.substring(0, maxLen) : c;
+                }
+            }
+        }
+        // 无用户消息则退而取第一条消息
+        String c = normalizeForTitle(messages.get(0).getContent());
+        return c == null || c.isBlank() ? null : (c.length() > maxLen ? c.substring(0, maxLen) : c);
+    }
+
+    /**
+     * 将消息正文整理为标题候选：去换行、压缩空白、去首尾空格。
+     *
+     * @param content 原始消息正文
+     * @return 整理后的文本；无有效内容时返回 null
+     */
+    private String normalizeForTitle(String content) {
+        if (content == null) {
+            return null;
+        }
+        String trimmed = content.replaceAll("\\s+", " ").trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
 
     /**
      * 从会话运行时配置中提取当前模型 ID（主对话正在使用的模型）。

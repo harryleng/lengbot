@@ -1,6 +1,8 @@
 package com.lengbot.model.chunking;
 
 import lombok.Data;
+import com.lengbot.util.TextCleanRule;
+import java.util.List;
 
 /**
  * 分块参数
@@ -19,4 +21,10 @@ public class ChunkParams {
 
     /** 分隔符 */
     private String delimiter = "\n";
+
+    /** 是否折叠连续空白（Dify remove_extra_spaces 等价）：连续空格/换行/制表符折叠为单个空格，默认关闭 */
+    private boolean collapseWhitespace = false;
+
+    /** 文本清洗规则（可配置正则替换/删除），分块前对整篇内容生效 */
+    private List<TextCleanRule> textCleanRules;
 }

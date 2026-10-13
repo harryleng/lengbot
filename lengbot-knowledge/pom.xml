@@ -39,6 +39,12 @@
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
         </dependency>
+        <!-- JPEG2000(JPX) 图片解码：PDFBox 渲染页内嵌 JP2 图所需，否则报 MissingImageReaderException -->
+        <dependency>
+            <groupId>com.github.jai-imageio</groupId>
+            <artifactId>jai-imageio-core</artifactId>
+            <version>1.4.0</version>
+        </dependency>
 
         <!-- Milvus 向量数据库（RAG 向量检索） -->
         <dependency>

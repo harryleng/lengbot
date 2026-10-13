@@ -418,6 +418,122 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeMapper, Knowledge
     }
 
     /**
+     * 生成文档摘要 + 结构化元数据（Phase 2）
+     * <p>复用与示例问题相同的 LLM 调用范式；结果合并写入 Document.metadata（JSON），不覆盖用户已有元数据。
+     * 受 knowledge.config 的 summaryEnabled 开关控制（默认开启）。</p>
+     */
+    public void generateDocumentSummary(Long knowledgeId, Long documentId) {
+        Knowledge knowledge = getById(knowledgeId);
+        if (knowledge == null) {
+            return;
+        }
+        if (!isSummaryEnabled(knowledge.getConfig())) {
+            return;
+        }
+        Document doc = documentService.getById(documentId);
+        if (doc == null || doc.getStatus() != DocumentStatus.COMPLETED) {
+            return;
+        }
+        String content = documentService.readDocumentContent(documentId);
+        if (content == null || content.isBlank()) {
+            log.warn("[文档摘要] 文档内容为空, documentId={}", documentId);
+            return;
+        }
+        String truncated = content.length() > 4000 ? content.substring(0, 4000) : content;
+        try {
+            Long providerId = resolveProviderId(null);
+            Model model = modelFactory.getModel(providerId);
+            String userPrompt = String.format("文档名称：%s\n\n文档内容（前4000字）：\n%s", doc.getName(), truncated);
+            List<Msg> messages = new ArrayList<>();
+            messages.add(Msgs.system(SUMMARY_GEN_SYSTEM_PROMPT));
+            messages.add(Msgs.user(userPrompt));
+            var response = LlmTraceContext.callWithoutTrace(() -> ModelCalls.call(model, messages));
+            String reply = Msgs.extractText(response);
+            java.util.Map<String, Object> extracted = parseSummaryJson(reply);
+            if (extracted == null || extracted.isEmpty()) {
+                log.warn("[文档摘要] AI返回格式异常, reply={}", reply);
+                return;
+            }
+            java.util.Map<String, Object> meta = new java.util.LinkedHashMap<>();
+            if (doc.getMetadata() != null && !doc.getMetadata().isBlank()) {
+                try {
+                    java.util.Map<String, Object> existing = objectMapper.readValue(doc.getMetadata(), java.util.Map.class);
+                    meta.putAll(existing);
+                } catch (Exception ignore) {
+                    // 已有 metadata 非法 JSON，忽略后覆盖
+                }
+            }
+            meta.put("summary", extracted.getOrDefault("summary", ""));
+            meta.put("tags", extracted.getOrDefault("tags", java.util.Collections.emptyList()));
+            meta.put("category", extracted.getOrDefault("category", ""));
+            meta.put("docDate", extracted.getOrDefault("date", ""));
+            meta.put("source", extracted.getOrDefault("source", ""));
+            meta.put("language", extracted.getOrDefault("language", ""));
+            doc.setMetadata(objectMapper.writeValueAsString(meta));
+            documentService.updateById(doc);
+            log.info("[文档摘要] 已生成: knowledgeId={}, documentId={}, summaryLen={}", knowledgeId, documentId,
+                    String.valueOf(meta.get("summary")).length());
+        } catch (Exception e) {
+            log.error("[文档摘要] 生成失败: knowledgeId={}, documentId={}", knowledgeId, documentId, e);
+        }
+    }
+
+    private static final String SUMMARY_GEN_SYSTEM_PROMPT = """
+            你是一个文档分析助手。请阅读文档内容，仅输出严格 JSON（不要任何解释或 markdown 代码块）：
+            {
+              "summary": "用1-3句话概括文档核心内容与用途",
+              "tags": ["标签1", "标签2"],
+              "category": "文档类别（如 制度/技术文档/合同/报告/FAQ）",
+              "date": "文档涉及的主要时间或发布日期（无法确定留空字符串）",
+              "source": "文档来源或发布方（无法确定留空字符串）",
+              "language": "文档主要语言（如 中文/英文）"
+            }""";
+
+    /**
+     * 解析知识库配置，检查是否开启文档摘要生成（默认开启）
+     */
+    private boolean isSummaryEnabled(String configJson) {
+        if (configJson == null || configJson.isBlank()) {
+            return true;
+        }
+        try {
+            var node = objectMapper.readTree(configJson);
+            return !node.has("summaryEnabled") || node.get("summaryEnabled").asBoolean(true);
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.Map<String, Object> parseSummaryJson(String reply) {
+        if (reply == null) {
+            return null;
+        }
+        String json = reply.trim();
+        if (json.startsWith("```")) {
+            int first = json.indexOf('\n');
+            int last = json.lastIndexOf("```");
+            if (first > 0 && last > first) {
+                json = json.substring(first + 1, last).trim();
+            }
+        }
+        try {
+            return objectMapper.readValue(json, java.util.Map.class);
+        } catch (Exception e) {
+            int st = json.indexOf('{');
+            int en = json.lastIndexOf('}');
+            if (st >= 0 && en > st) {
+                try {
+                    return objectMapper.readValue(json.substring(st, en + 1), java.util.Map.class);
+                } catch (Exception ignore) {
+                    return null;
+                }
+            }
+            return null;
+        }
+    }
+
+    /**
      * 解析知识库配置，检查是否开启自动生成问题
      */
     private boolean isAutoGenerateEnabled(String configJson) {
@@ -775,13 +891,20 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeMapper, Knowledge
         normalized.put("qa_priority", boolParam(source, "qa_priority", true));
 
         if (milvus) {
-            normalized.put("use_graph_retrieval", boolParam(source, "use_graph_retrieval", false));
+            boolean graphEnabled = boolParam(source, "use_graph_retrieval", false);
+            normalized.put("use_graph_retrieval", graphEnabled);
             normalized.put("graph_entity_top_k", intParam(source, "graph_entity_top_k", 10, 1, 100));
             normalized.put("graph_triple_top_k", intParam(source, "graph_triple_top_k", 10, 1, 100));
             normalized.put("graph_max_nodes", intParam(source, "graph_max_nodes", 100, 10, 500));
             normalized.put("graph_top_k", intParam(source, "graph_top_k", 5, 1, 50));
             normalized.put("graph_weight", doubleParam(source, "graph_weight", 0.3, 0.0, 1.0));
             normalized.put("ppr_damping", doubleParam(source, "ppr_damping", 0.85, 0.0, 1.0));
+            normalized.put("ppr_iterations", intParam(source, "ppr_iterations", 15, 1, 100));
+            normalized.put("rrf_k", intParam(source, "rrf_k", 60, 1, 200));
+            // 社区摘要（GraphRAG 全局检索）：UI 未显式配置时默认跟随图检索开关，用户可单独关闭
+            normalized.put("use_community_retrieval", boolParam(source, "use_community_retrieval", graphEnabled));
+            normalized.put("graph_community_top_k", intParam(source, "graph_community_top_k", 3, 1, 50));
+            normalized.put("community_weight", doubleParam(source, "community_weight", 0.3, 0.0, 1.0));
         }
 
         return normalized;

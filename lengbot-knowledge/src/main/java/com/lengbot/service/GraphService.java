@@ -163,4 +163,28 @@ public interface GraphService {
      * @param elementId   边 elementId
      */
     void deleteEdge(Long knowledgeId, String elementId);
+
+    /**
+     * 触发社区检测（GraphRAG 社区总结链路 · 第 1 步）
+     * <p>对已完成图谱抽取的知识库做弱连通分量分群，为实体写回 community_id 并生成 Community 节点，
+     * 供后续的社区摘要生成与全局检索消费。
+     * <p>纯图算法计算，不消耗 LLM token；异步执行，返回任务ID供轮询进度。
+     *
+     * @param knowledgeId 知识库ID
+     * @return 社区检测任务ID
+     */
+    Long detectCommunities(Long knowledgeId);
+
+    /**
+     * 触发社区摘要生成（GraphRAG 社区总结链路 · 第 2 步）
+     * <p>读取社区检测产出的 Community 节点，用 LLM 为每个社区提炼一段高层语义摘要，
+     * 回写到 Community.summary。
+     * <p>前置依赖：必须先执行 {@link #detectCommunities(Long)}，否则无社区可摘要。
+     * <p>会消耗 LLM token（每个社区一次调用）；异步执行，返回任务ID供轮询进度。
+     *
+     * @param knowledgeId 知识库ID
+     * @param request     摘要配置（模型提供商、并发度、单社区上下文上限等），可为 null 走默认
+     * @return 社区摘要任务ID
+     */
+    Long summarizeCommunities(Long knowledgeId, CommunitySummaryDTO request);
 }

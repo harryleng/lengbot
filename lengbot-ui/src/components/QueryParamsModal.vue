@@ -364,6 +364,38 @@
               </template>
               <a-input-number v-model:value="form.ppr_damping" :min="0" :max="1" :step="0.05" style="width: 100%" />
             </a-form-item>
+
+            <a-form-item>
+              <template #label>
+                <span>启用社区摘要（全局检索）</span>
+                <a-tooltip title="GraphRAG 全局检索：用社区高层摘要接住「整个库在讲什么」这类宏观问题；需先执行「社区检测 + 社区摘要」任务，摘要会自动向量化">
+                  <QuestionCircleOutlined class="field-tip-icon" />
+                </a-tooltip>
+              </template>
+              <a-switch v-model:checked="form.use_community_retrieval" />
+            </a-form-item>
+
+            <template v-if="form.use_community_retrieval">
+              <a-form-item>
+                <template #label>
+                  <span>社区召回数</span>
+                  <a-tooltip title="按语义相似度召回的社区摘要条数，越多覆盖越广、噪声也越大">
+                    <QuestionCircleOutlined class="field-tip-icon" />
+                  </a-tooltip>
+                </template>
+                <a-input-number v-model:value="form.graph_community_top_k" :min="1" :max="50" style="width: 100%" />
+              </a-form-item>
+
+              <a-form-item>
+                <template #label>
+                  <span>社区摘要权重</span>
+                  <a-tooltip title="RRF 融合中社区摘要这一路的权重，建议 0.2-0.5，过大会挤占原文分块">
+                    <QuestionCircleOutlined class="field-tip-icon" />
+                  </a-tooltip>
+                </template>
+                <a-input-number v-model:value="form.community_weight" :min="0" :max="1" :step="0.1" style="width: 100%" />
+              </a-form-item>
+            </template>
           </template>
         </template>
       </a-form>
@@ -454,6 +486,11 @@ const milvusDefaults = {
   graph_top_k: 5,
   graph_weight: 0.3,
   ppr_damping: 0.85,
+  ppr_iterations: 15,
+  rrf_k: 60,
+  use_community_retrieval: true,
+  graph_community_top_k: 3,
+  community_weight: 0.3,
 }
 
 const form = reactive({ ...pgDefaults })
