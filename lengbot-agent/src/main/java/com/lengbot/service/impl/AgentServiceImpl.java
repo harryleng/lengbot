@@ -467,12 +467,17 @@ public class AgentServiceImpl extends ServiceImpl<AgentMapper, Agent>
                 }
             }
             // 归属校验：防止通过已绑定的他人 knowledgeId 越权读取（IDOR 兜底）
+            // agent 执行线程(AgentScope 异步 worker)无 web 上下文，StpUtil 取不到登录态会抛异常；
+            // 此时跳过校验(绑定关系在 updateKnowledgeBindings 已鉴权)，避免检索整体失效。
+            boolean webContext = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes() != null;
             for (Long knowledgeId : ids) {
-                knowledgeService.checkMember(knowledgeId);
+                if (webContext) {
+                    knowledgeService.checkMember(knowledgeId);
+                }
             }
             return ids;
         } catch (Exception e) {
-            log.warn("[Agent] 解析config.knowledges失败: agentId={}, error={}", agentId, e.getMessage());
+            log.warn("[Agent] getKnowledgeIds 失败(可能非 web 上下文): agentId={}, cause={}", agentId, e.toString(), e);
             return new ArrayList<>();
         }
     }
