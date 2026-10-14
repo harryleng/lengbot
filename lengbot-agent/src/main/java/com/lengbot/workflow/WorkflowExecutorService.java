@@ -1,14 +1,17 @@
 package com.lengbot.workflow;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lengbot.vo.WorkflowTestResultVO;
 import com.lengbot.entity.Agent;
 import com.lengbot.entity.Message;
+import com.lengbot.entity.WorkflowCheckpoint;
 import com.lengbot.enums.AgentType;
 import com.lengbot.enums.NodeType;
 import com.lengbot.service.AgentService;
 import com.lengbot.service.AgentVersionService;
 import com.lengbot.service.MessageService;
+import com.lengbot.service.WorkflowCheckpointService;
 import com.lengbot.util.WorkflowRunStateUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +46,7 @@ public class WorkflowExecutorService {
     private final MessageService messageService;
     private final ObjectMapper objectMapper;
     private final WorkflowRunStateUtil workflowRunStateUtil;
+    private final WorkflowCheckpointService workflowCheckpointService;
     private static final int MAX_SUB_WORKFLOW_DEPTH = 5;
     private static final Pattern VAR_PATTERN = Pattern.compile("\\{\\{([^}]+)}}");
 
@@ -294,6 +298,65 @@ public class WorkflowExecutorService {
     }
 
     /**
+     * 从检查点续跑（Tier 1 崩溃恢复）
+     * <p>后端崩溃/重启后，按 run_id 取最新检查点，重建上下文并从 next_node_id 前向续跑。
+     * 仍是「前向续跑」，不重跑挂起节点、无 replay（详见架构分析）。</p>
+     *
+     * @param runId 运行 ID
+     * @return 续跑结果（最终输出）
+     */
+    public String resumeFromCheckpoint(String runId) {
+        WorkflowCheckpoint cp = workflowCheckpointService.getLatestByRunId(runId);
+        if (cp == null) {
+            throw new IllegalArgumentException("检查点不存在或已过期: " + runId);
+        }
+        Long agentId = cp.getAgentId();
+        Agent agent = agentService.getById(agentId);
+        if (agent == null) {
+            throw new IllegalArgumentException("Agent不存在: " + agentId);
+        }
+        WorkflowDefinition workflow = agentVersionService.loadWorkflowDefinition(agentId, false);
+        if (workflow == null || workflow.getNodes() == null || workflow.getNodes().isEmpty()) {
+            throw new IllegalStateException("无法加载工作流定义: " + agentId);
+        }
+
+        Map<String, Object> variables = readJsonMap(cp.getVariables());
+        Map<String, Object> nodeOutputs = readJsonMap(cp.getNodeOutputs());
+        Map<String, Map<String, Object>> scopedVariables = readJsonScoped(cp.getScopedVariables());
+        Map<String, Object> sysVariables = readJsonMap(cp.getSysVariables());
+
+        NodeExecutionContext context = NodeExecutionContext.builder()
+                .agentId(agentId)
+                .sessionId(cp.getSessionId())
+                .userInput(cp.getUserInput())
+                .agentConfig(agent.getConfig())
+                .workflow(workflow)
+                .variables(new LinkedHashMap<>(variables))
+                .scopedVariables(scopedVariables != null ? scopedVariables : new LinkedHashMap<>())
+                .sysVariables(sysVariables != null ? new LinkedHashMap<>(sysVariables) : new LinkedHashMap<>())
+                .nodeOutputs(new LinkedHashMap<>(nodeOutputs))
+                .build();
+        WorkflowVariableScope.initContext(context);
+        WorkflowVariableScope.syncSysBucket(context);
+
+        List<Map<String, Object>> events = new ArrayList<>();
+        LoopOutcome outcome = runExecutionLoop(
+                agent, workflow, context,
+                cp.getNextNodeId(),
+                cp.getStepIndex(),
+                new StringBuilder(),
+                events,
+                null,
+                serializeWorkflow(workflow),
+                ExecutionOptions.fromCheckpoint(runId));
+
+        if (context.getVariables().containsKey("result")) {
+            return WorkflowResultUtils.formatAsText(context.getVariables().get("result"));
+        }
+        return outcome.getStreamResult();
+    }
+
+    /**
      * 恢复执行前：将挂起中的 confirm 节点事件标记为已提交，写入用户选择
      */
     private void patchConfirmEventsOnResume(List<Map<String, Object>> events,
@@ -429,6 +492,10 @@ public class WorkflowExecutorService {
                                          String workflowGraphJson,
                                          ExecutionOptions options) {
         Long agentId = agent.getId();
+        // 起步即生成稳定 runId：挂起分支、每步检查点、自愈续跑均复用同一标识
+        final String runId = (options != null && options.assignedRunId != null)
+                ? options.assignedRunId
+                : UUID.randomUUID().toString().replace("-", "");
         int stepIndex = startStepIndex;
 
         while (currentNodeId != null) {
@@ -496,9 +563,6 @@ public class WorkflowExecutorService {
                         WorkflowVariableScope.mergeNodeOutputs(context, node, nodeResult.getOutputs());
                     }
 
-                    String runId = options != null && options.assignedRunId != null
-                            ? options.assignedRunId
-                            : UUID.randomUUID().toString().replace("-", "");
                     String suspendSource = options != null && options.suspendSource != null
                             ? options.suspendSource : "chat";
 
@@ -523,6 +587,10 @@ public class WorkflowExecutorService {
                     suspendedEvent.put("contentOffset", 0);
                     emitWorkflowEvent(workflowEvents, onEvent, suspendedEvent);
 
+                    if (options == null || options.isWriteCheckpoint()) {
+                        saveCheckpoint(runId, agent, context, stepIndex, executingNodeId,
+                                nodeResult.getNextNodeId(), "SUSPENDED");
+                    }
                     WorkflowSuspendedRun suspended = WorkflowSuspendedRun.builder()
                             .runId(runId)
                             .agentId(agentId)
@@ -570,6 +638,12 @@ public class WorkflowExecutorService {
                 nextNodeId = null;
             }
 
+            // 每节点成功完成后写检查点（崩溃/重启可从此续跑）；失败不写，由上游回退
+            if (nodeSuccess && (options == null || options.isWriteCheckpoint())) {
+                saveCheckpoint(runId, agent, context, stepIndex, executingNodeId,
+                        nextNodeId, "RUNNING");
+            }
+
             Map<String, Object> completeEvent = buildCompleteEvent(
                     eventNodeId, nodeTypeCode, nodeLabel, nodeSuccess,
                     completeMessage, stepIndex, nodeStartMs, nodeResult, eventNode, nextNodeId);
@@ -582,6 +656,10 @@ public class WorkflowExecutorService {
             currentNodeId = nextNodeId;
         }
 
+        // 正常结束：最新检查点标记 COMPLETED，孤儿扫描不再回收（仅本路径写检查点时才有意义）
+        if (options == null || options.isWriteCheckpoint()) {
+            workflowCheckpointService.markCompleted(runId);
+        }
         return LoopOutcome.completed(result.toString());
     }
 
@@ -591,6 +669,58 @@ public class WorkflowExecutorService {
             return "等待用户回答";
         }
         return "等待人工确认";
+    }
+
+    /**
+     * 写工作流检查点：快照当前运行态到 PG。写入失败仅告警，不阻断主流程。
+     */
+    private void saveCheckpoint(String runId, Agent agent, NodeExecutionContext context,
+                                int stepIndex, String currentNodeId, String nextNodeId, String status) {
+        try {
+            WorkflowCheckpoint cp = new WorkflowCheckpoint();
+            cp.setRunId(runId);
+            cp.setAgentId(agent.getId());
+            cp.setSessionId(context.getSessionId());
+            cp.setStepIndex(stepIndex);
+            cp.setCurrentNodeId(currentNodeId);
+            cp.setNextNodeId(nextNodeId);
+            cp.setStatus(status);
+            cp.setUserInput(context.getUserInput());
+            cp.setVariables(objectMapper.writeValueAsString(context.getVariables()));
+            cp.setNodeOutputs(objectMapper.writeValueAsString(context.getNodeOutputs()));
+            cp.setScopedVariables(objectMapper.writeValueAsString(
+                    context.getScopedVariables() != null ? context.getScopedVariables() : new LinkedHashMap<>()));
+            cp.setSysVariables(objectMapper.writeValueAsString(
+                    context.getSysVariables() != null ? context.getSysVariables() : new LinkedHashMap<>()));
+            workflowCheckpointService.save(cp);
+        } catch (Exception e) {
+            log.warn("[WorkflowExecutorService] 检查点写入失败 runId={}, step={}, status={}: {}",
+                    runId, stepIndex, status, e.getMessage());
+        }
+    }
+
+    private Map<String, Object> readJsonMap(String json) {
+        if (json == null || json.isBlank()) {
+            return new LinkedHashMap<>();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            log.warn("[WorkflowExecutorService] 检查点变量反序列化失败: {}", e.getMessage());
+            return new LinkedHashMap<>();
+        }
+    }
+
+    private Map<String, Map<String, Object>> readJsonScoped(String json) {
+        if (json == null || json.isBlank()) {
+            return new LinkedHashMap<>();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, Map<String, Object>>>() {});
+        } catch (Exception e) {
+            log.warn("[WorkflowExecutorService] 检查点 scopedVariables 反序列化失败: {}", e.getMessage());
+            return new LinkedHashMap<>();
+        }
     }
 
     private WorkflowNode resolveEventNode(WorkflowDefinition workflow, WorkflowNode node, NodeExecutionContext context) {
@@ -1278,7 +1408,7 @@ public class WorkflowExecutorService {
                 targetAgent, subWorkflow, subContext, startNodeId, 0,
                 new StringBuilder(), parentContext.getWorkflowEvents(),
                 parentContext.getOnEvent(), serializeWorkflow(subWorkflow),
-                ExecutionOptions.chat());
+                ExecutionOptions.nested());
 
         if (outcome.isSuspended()) {
             throw new IllegalStateException("嵌套子工作流不支持人工确认挂起，请在子流程中移除 confirm 节点");
@@ -1301,23 +1431,40 @@ public class WorkflowExecutorService {
     private static final class ExecutionOptions {
         private final String assignedRunId;
         private final String suspendSource;
+        private final boolean writeCheckpoint;
 
-        private ExecutionOptions(String assignedRunId, String suspendSource) {
+        private ExecutionOptions(String assignedRunId, String suspendSource, boolean writeCheckpoint) {
             this.assignedRunId = assignedRunId;
             this.suspendSource = suspendSource;
+            this.writeCheckpoint = writeCheckpoint;
+        }
+
+        boolean isWriteCheckpoint() {
+            return writeCheckpoint;
         }
 
         static ExecutionOptions test(String runId) {
-            return new ExecutionOptions(runId, "test");
+            // 调试执行用草稿版本，不应写检查点（避免被崩溃自愈误以「已发布版本」恢复，也避免污染表）
+            return new ExecutionOptions(runId, "test", false);
         }
 
         static ExecutionOptions chat() {
-            return new ExecutionOptions(null, "chat");
+            return new ExecutionOptions(null, "chat", true);
         }
 
         static ExecutionOptions fromSuspended(WorkflowSuspendedRun suspended) {
             String source = suspended.getSource() != null ? suspended.getSource() : "chat";
-            return new ExecutionOptions(suspended.getRunId(), source);
+            return new ExecutionOptions(suspended.getRunId(), source, true);
+        }
+
+        static ExecutionOptions fromCheckpoint(String runId) {
+            return new ExecutionOptions(runId, "checkpoint-recovery", true);
+        }
+
+        static ExecutionOptions nested() {
+            // 子工作流依附父流程运行，无法独立恢复（结果需回填父流程变量，父流程上下文已丢失）；
+            // 关闭检查点写入，避免被自愈孤立重跑而产生游离副作用
+            return new ExecutionOptions(null, "nested", false);
         }
     }
 }

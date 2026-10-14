@@ -160,7 +160,7 @@ public class ChatServiceImpl implements ChatService {
      * 对话内核选择开关：{@code legacy}（默认，走 processToolCallsRecursively）
      * 或 {@code harness}（走 AgentScope HarnessAgent + Toolkit 原生工具，Phase 1 起支持工具）。
      */
-    @org.springframework.beans.factory.annotation.Value("${lengbot.chat.engine:legacy}")
+    @org.springframework.beans.factory.annotation.Value("${lengbot.chat.engine:harness}")
     private String chatEngineMode;
 
     // 中间件
