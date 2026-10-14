@@ -2178,6 +2178,8 @@ async function openIngestModal(doc) {
       chunkSize: defaults.chunkSize || 512,
       chunkOverlap: defaults.chunkOverlap || 10,
       chunkDelimiter: defaults.chunkDelimiter || '',
+      collapseWhitespace: defaults.collapseWhitespace ?? false,
+      textCleanRules: defaults.textCleanRules ?? [],
     })
   } catch {
     Object.assign(ingestForm, {
@@ -2185,24 +2187,35 @@ async function openIngestModal(doc) {
       chunkSize: 512,
       chunkOverlap: 10,
       chunkDelimiter: '',
+      collapseWhitespace: false,
+      textCleanRules: [],
     })
   }
 
   ingestVisible.value = true
 }
 
+// 统一构造入库/预览请求体：预览与入库必须走同一份参数，否则预览结果与实际入库不一致
+// （历史 bug：预览漏传 textCleanRules，导致配了清洗规则后预览看不到效果、入库却生效）
+function buildIngestPayload() {
+  const data = {
+    chunkStrategy: ingestForm.chunkStrategy,
+    chunkSize: ingestForm.chunkSize,
+    chunkOverlap: ingestForm.chunkOverlap,
+    chunkDelimiter: ingestForm.chunkDelimiter || null,
+    collapseWhitespace: ingestForm.collapseWhitespace || false,
+  }
+  data.textCleanRules = (ingestForm.textCleanRules || [])
+    .filter(r => r && r.regex && String(r.regex).trim())
+    .map(r => ({ regex: String(r.regex).trim(), replacement: r.replacement || '' }))
+  return data
+}
+
 async function handlePreviewChunks() {
   if (!ingestDoc.value) return
   ingestPreviewing.value = true
   try {
-    const data = {
-      chunkStrategy: ingestForm.chunkStrategy,
-      chunkSize: ingestForm.chunkSize,
-      chunkOverlap: ingestForm.chunkOverlap,
-      chunkDelimiter: ingestForm.chunkDelimiter || null,
-      collapseWhitespace: ingestForm.collapseWhitespace || false,
-    }
-    const res = await previewChunks(ingestDoc.value.id, data)
+    const res = await previewChunks(ingestDoc.value.id, buildIngestPayload())
     previewChunksList.value = res.data || []
     if (previewChunksList.value.length === 0) {
       message.info('未产生分块，请检查文档内容')
@@ -2218,15 +2231,7 @@ async function handleIngest() {
   if (!ingestDoc.value) return
   ingestSubmitting.value = true
   try {
-    const data = {
-      chunkStrategy: ingestForm.chunkStrategy,
-      chunkSize: ingestForm.chunkSize,
-      chunkOverlap: ingestForm.chunkOverlap,
-      chunkDelimiter: ingestForm.chunkDelimiter || null,
-      collapseWhitespace: ingestForm.collapseWhitespace || false,
-    }
-    data.textCleanRules = (ingestForm.textCleanRules || []).filter(r => r && r.regex && String(r.regex).trim()).map(r => ({ regex: String(r.regex).trim(), replacement: r.replacement || '' }))
-    await ingestDocument(ingestDoc.value.id, data)
+    await ingestDocument(ingestDoc.value.id, buildIngestPayload())
     message.success('入库任务已提交，可在「任务中心」查看进度')
     ingestVisible.value = false
     await loadDocuments()
