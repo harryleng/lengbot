@@ -937,13 +937,13 @@ public class SubAgentRuntime implements SubAgentExecutor {
                 b.userId(String.valueOf(ctx.getUserId()));
             }
             b.put("sessionId", ctx.getSessionId() != null ? ctx.getSessionId().toString() : "default")
-             .put("requestId", reqId)
-             .put("userId", ctx.getUserId())
+             .put("requestId", reqId != null ? reqId : "default")
+             .put("userId", ctx.getUserId() != null ? ctx.getUserId().toString() : "default")
              .put("chatContext", ctx)
-             .put("currentTodos", ctx.getCurrentTodosSnapshot())
+             .put("currentTodos", ctx.getCurrentTodosSnapshot() != null ? ctx.getCurrentTodosSnapshot() : List.of())
              .put("toolInput", callArgsJson);
         } else {
-            b.put("requestId", reqId).put("toolInput", callArgsJson);
+            b.put("requestId", reqId != null ? reqId : "default").put("toolInput", callArgsJson != null ? callArgsJson : "");
         }
         return b.build();
     }
@@ -1146,9 +1146,10 @@ public class SubAgentRuntime implements SubAgentExecutor {
             try {
                 result = executeTool(delegate, callArgs, chatContext, requestId);
             } catch (Exception e) {
-                log.warn("[SubAgent][Harness] 工具执行异常: subAgent={}, tool={}, error={}",
-                        subAgent.getName(), delegate.getName(), e.getMessage());
-                result = ToolResultPrefixes.failureJson(ToolResultPrefixes.FAILURE + ": " + e.getMessage());
+                log.warn("[SubAgent][Harness] 工具执行异常: subAgent={}, tool={}",
+                        subAgent.getName(), delegate.getName(), e);
+                String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                result = ToolResultPrefixes.failureJson(ToolResultPrefixes.FAILURE + ": " + errMsg);
             }
             if (tc != null) {
                 emitSubAgentToolResult(chatContext, subAgent, tc, result, toolDisplayNameMap);
