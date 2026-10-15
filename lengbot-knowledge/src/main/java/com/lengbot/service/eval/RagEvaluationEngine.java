@@ -175,7 +175,7 @@ public class RagEvaluationEngine {
                 if (ModelErrorClassifier.isFatal(e)) {
                     throw ModelErrorClassifier.toRuntimeException(e);
                 }
-                log.debug("[RagEval] 生成基准题目失败 attempt={}: {}", attempt, e.getMessage());
+                log.warn("[RagEval] 生成基准题目失败 attempt={}: {}", attempt, e.getMessage());
             }
         }
 
@@ -458,7 +458,14 @@ public class RagEvaluationEngine {
      * 从 LLM 响应中提取 JSON（去除可能的 markdown 代码块）
      */
     private String extractJson(String text) {
-        String trimmed = text.trim();
+        if (text == null) {
+            return null;
+        }
+        String cleaned = text;
+        // 剥离推理模型思考块（MiniMax-M3 / DeepSeek-R1 等会在正文前输出 <think>...</think>）
+        cleaned = cleaned.replaceAll("(?is)<think>.*?</think>", "");
+        cleaned = cleaned.replaceAll("(?is)<thinking>.*?</thinking>", "");
+        String trimmed = cleaned.trim();
         if (trimmed.startsWith("```")) {
             int firstNewline = trimmed.indexOf('\n');
             int lastFence = trimmed.lastIndexOf("```");
