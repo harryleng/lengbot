@@ -961,16 +961,10 @@ public class ChatServiceImpl implements ChatService {
         // 不复用 buildToolRuntimeContext——它强制 put toolInput（streamEvents 级别无单一工具入参），且 ConcurrentHashMap 不允许 null value，
         // currentTodos/toolInput 为 null 时会 NPE。此处逐项 null 守卫，仅放共享值。
         RuntimeContext.Builder rcb = RuntimeContext.builder();
-        if (ctx.getSessionId() != null) {
-            rcb.sessionId(String.valueOf(ctx.getSessionId()));
-        }
-        if (ctx.getUserId() != null) {
-            rcb.userId(String.valueOf(ctx.getUserId()));
-        }
+        rcb.put("sessionId", ctx.getSessionId() != null ? ctx.getSessionId().toString() : "default");
         if (agentId != null) {
             rcb.put("agentId", agentId);
         }
-        rcb.put("sessionId", ctx.getSessionId() != null ? ctx.getSessionId().toString() : "default");
         if (ctx.getRequestId() != null) {
             rcb.put("requestId", ctx.getRequestId());
         }
@@ -1023,18 +1017,10 @@ public class ChatServiceImpl implements ChatService {
                         // 非流式：harnessAgent.call() 阻塞跑完整轮（含工具循环），结果一次性下发。
                         // 工具事件经装饰器实时推 eventSink（call 期间），与 legacy processBlockingRound 一致。
                         Msg msg = a.call(conversationMsgs, runtimeContext).block();
-                        if (msg != null && msg.getUsage() != null) {
-                            inputTokenHolder[0] += msg.getUsage().getInputTokens();
-                            outputTokenHolder[0] += msg.getUsage().getOutputTokens();
-                                if (msg.getUsage().getCachedTokens() > 0) {
-                                    ctx.getCachedTokenHolder()[0] += msg.getUsage().getCachedTokens();
-                                }
-                            outputTokenHolder[0] += msg.getUsage().getOutputTokens();
+                        if (msg != null) {
+                            accumulateUsage(msg.getUsage(), inputTokenHolder, outputTokenHolder, ctx.getCachedTokenHolder());
                         }
-                        String text = msg != null ? msg.getTextContent() : "";
-                        if (text == null) {
-                            text = "";
-                        }
+                        String text = msg != null && msg.getTextContent() != null ? msg.getTextContent() : "";
                         SensitiveWordFilter.FilterResult fr = SensitiveWordFilter.filterAiOutput(
                                 text, ctx.getConfigMap(), agentId, ctx.getSessionId());
                         if (fr.blocked()) {
@@ -1048,18 +1034,14 @@ public class ChatServiceImpl implements ChatService {
                         return Flux.just(fr.text());
                     }
                     // 流式：streamEvents + 桥接器
-                    Flux<AgentEvent> events = a.streamEvents(conversationMsgs, runtimeContext);
+                    Flux<AgentEvent> events = a.streamEvents(conversationMsgs, runtimeContext)
+                            .takeUntil(event -> ctx.isAborted());
                     // token 累计：v2 无独立 usage 事件，从 AgentResultEvent 的 Msg.usage 取
                     Flux<AgentEvent> tapped = events.doOnNext(event -> {
-                        if (event instanceof AgentResultEvent r) {
+                        if (event instanceof AgentResultEvent r && (r.getSource() == null || r.getSource().isEmpty())) {
                             Msg m = r.getResult();
-                            if (m != null && m.getUsage() != null) {
-                                inputTokenHolder[0] += m.getUsage().getInputTokens();
-                                outputTokenHolder[0] += m.getUsage().getOutputTokens();
-                                if (m.getUsage().getCachedTokens() > 0) {
-                                    ctx.getCachedTokenHolder()[0] += m.getUsage().getCachedTokens();
-                                }
-                                outputTokenHolder[0] += m.getUsage().getOutputTokens();
+                            if (m != null) {
+                                accumulateUsage(m.getUsage(), inputTokenHolder, outputTokenHolder, ctx.getCachedTokenHolder());
                             }
                         }
                         // 调试：把每个 AgentEvent 类型打到 SSE（[STATUS]agent_event_debug 帧）
@@ -1271,6 +1253,19 @@ public class ChatServiceImpl implements ChatService {
                     .input(parseToolArgsToMap(argsForCall))
                     .runtimeContext(rcBuilder.build()).build();
 
+            // 回合级幂等缓存：整轮重试（streamViaHarnessWithRetry）共享同一 ctx，
+            // 命中则跳过真实副作用、直接复用上次结果，避免非幂等工具（发邮件/下单/写文件）重复执行。
+            String idemKey = toolName + "\u0000" + (argsForCall != null ? argsForCall.trim() : "{}");
+            String cachedResult = ctx.getToolResultCache().get(idemKey);
+            if (cachedResult != null) {
+                boolean cachedErr = ToolResultPrefixes.isError(cachedResult);
+                log.info("[Chat][Harness][Tool] 命中回合幂等缓存，跳过重复执行: name={}", toolName);
+                emitToolResultHarness(ctx, toolEventsList, eventSink, toolName, argsForCall,
+                        cachedResult, contentOffset, toolCallId);
+                return Mono.just(textToolResultBlock(cachedResult,
+                        cachedErr ? ToolResultState.ERROR : ToolResultState.SUCCESS));
+            }
+
             // 死循环防护（与 legacy executeToolCallback 对齐）：
             // ① 完全相同参数连续调用达阈值 → 直接拦截，跳过真实执行
             String loopBlocked = guardToolLoopBeforeExecute(ctx, toolName, effectiveArgs);
@@ -1280,6 +1275,15 @@ public class ChatServiceImpl implements ChatService {
                 return Mono.just(textToolResultBlock(loopBlocked, ToolResultState.ERROR));
             }
             // ② 总执行时间预算耗尽 → 标记中断，后续工具调用一律短路，促使 HarnessAgent 尽快收尾
+            // ②-a 任一中断信号（客户端断开 / 用户主动停止 / 预算已达）已置位 → 立即短路，杜绝僵尸循环
+            if (ctx.isAborted()) {
+                log.warn("[Chat][Harness][Tool] 请求已中断(name={}, reason={})，短路工具执行", toolName, ctx.getAbortReason());
+                String aborted = ToolResultPrefixes.failureJson(
+                        "请求已中断（客户端断开或主动停止），后续工具调用已跳过。");
+                emitToolResultHarness(ctx, toolEventsList, eventSink, toolName, argsForCall,
+                        aborted, contentOffset, toolCallId);
+                return Mono.just(textToolResultBlock(aborted, ToolResultState.ERROR));
+            }
             ctx.ensureExecutionDeadline(resolveTotalExecutionBudgetMs(ctx.getConfigMap()));
             if (ctx.isExecutionBudgetExhausted()) {
                 log.warn("[Chat][Harness][Tool] 执行时间已达预算上限，中断工具执行: name={}", toolName);
@@ -1323,6 +1327,7 @@ public class ChatServiceImpl implements ChatService {
                     ctx.getPendingToolCalls().add(tc);
                 }
                 if (!isError) {
+                    ctx.getToolResultCache().putIfAbsent(idemKey, result);
                     sessionAttachmentRegistrar.registerFromToolResult(sessionId, toolName, result);
                     if ("write_todos".equals(toolName)) {
                         updateCurrentTodosSnapshot(ctx, result);
@@ -1735,6 +1740,11 @@ public class ChatServiceImpl implements ChatService {
      */
     private Flux<String> processBlockingRound(ChatContext ctx, int depth, long llmCallStart,
                                                Sinks.Many<String> eventSink) {
+        // 中断信号（客户端断开 / 用户停止 / 预算已耗尽）已置位 → 立即终止本轮回合，杜绝僵尸循环
+        if (ctx.isAborted()) {
+            log.warn("[Chat][Trace] 请求已中断，停止工具循环: depth={}", depth);
+            return Flux.just("\n[请求已中断，已返回当前进展]");
+        }
         int maxSteps = resolveMaxExecutionSteps(ctx.getConfigMap());
         if (depth >= maxSteps) {
             log.warn("[Chat][Trace] 工具调用递归深度达到上限({})，停止循环", depth);
@@ -2376,9 +2386,9 @@ public class ChatServiceImpl implements ChatService {
     private int resolveMaxExecutionSteps(Map<String, Object> configMap) {
         if (configMap == null) return 20;
         Object val = configMap.get(ConfigKeys.Agent.MAX_EXECUTION_STEPS);
-        if (val instanceof Number n) return Math.max(1, Math.min(200, n.intValue()));
+        if (val instanceof Number n) return Math.clamp(n.intValue(), 1, 200);
         if (val != null) {
-            try { return Math.max(1, Math.min(200, Integer.parseInt(val.toString()))); } catch (Exception ignored) {}
+            try { return Math.clamp(Integer.parseInt(val.toString()), 1, 200); } catch (Exception ignored) {}
         }
         return 20;
     }
@@ -3278,11 +3288,8 @@ public class ChatServiceImpl implements ChatService {
                 + "\n[工具结果已截断，原文共 " + result.length() + " 字符]";
     }
 
-    private void accumulateStreamUsage(ChatResponse response, int[] inputTokenHolder, int[] outputTokenHolder, int[] cachedTokenHolder) {
-        if (response == null) {
-            return;
-        }
-        ChatUsage usage = response.getUsage();
+    /** 累加一次模型用量（ChatUsage）到 token holder；usage 为 null 时安全跳过。供流式/非流式/Harness 多链路复用。 */
+    private void accumulateUsage(ChatUsage usage, int[] inputTokenHolder, int[] outputTokenHolder, int[] cachedTokenHolder) {
         if (usage == null) {
             return;
         }
@@ -3291,6 +3298,13 @@ public class ChatServiceImpl implements ChatService {
         if (cachedTokenHolder != null) {
             cachedTokenHolder[0] += usage.getCachedTokens();
         }
+    }
+
+    private void accumulateStreamUsage(ChatResponse response, int[] inputTokenHolder, int[] outputTokenHolder, int[] cachedTokenHolder) {
+        if (response == null) {
+            return;
+        }
+        accumulateUsage(response.getUsage(), inputTokenHolder, outputTokenHolder, cachedTokenHolder);
     }
 
     /** 安全地将 Object 转为 Long（兼容 Number 和 String 类型） */

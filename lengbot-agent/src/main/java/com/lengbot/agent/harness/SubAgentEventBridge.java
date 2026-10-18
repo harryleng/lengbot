@@ -14,6 +14,7 @@ import com.lengbot.util.ToolEventCompactUtil;
 import io.agentscope.core.event.AgentEndEvent;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.AgentResultEvent;
+import io.agentscope.core.model.ChatUsage;
 import io.agentscope.core.event.AgentStartEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.event.TextBlockEndEvent;
@@ -182,6 +183,18 @@ public class SubAgentEventBridge {
             } else if (event instanceof ToolResultEndEvent t) {
                 sub.emitToolResult(t.getState());
             } else if (event instanceof AgentResultEvent r) {
+                // 子 agent token 回滚：子 AgentResultEvent 的 Msg.usage 含子 agent 全部 LLM 用量，
+                // 累加回父 ctx 的 token holder（与 doOnNext 仅计父 agent 互补，避免漏计/重复）。
+                ChatUsage subUsage = r.getResult() != null ? r.getResult().getUsage() : null;
+                if (subUsage != null) {
+                    ctx.getInputTokenHolder()[0] += subUsage.getInputTokens();
+                    ctx.getOutputTokenHolder()[0] += subUsage.getOutputTokens();
+                    if (ctx.getCachedTokenHolder() != null) {
+                        ctx.getCachedTokenHolder()[0] += subUsage.getCachedTokens();
+                    }
+                    log.debug("[SubAgentBridge] 回滚子 agent token: agentId={}, in={}, out={}, cached={}",
+                            sub.getAgentId(), subUsage.getInputTokens(), subUsage.getOutputTokens(), subUsage.getCachedTokens());
+                }
                 sub.finish(r.getResult());
             }
         }
@@ -355,6 +368,11 @@ public class SubAgentEventBridge {
             this.taskId = spawn.taskId;
             this.requestId = requestId;
             this.parentSessionId = parentSessionId;
+        }
+
+        /** 暴露子 agent 标识，供外部 handle 回滚日志引用（spawn 为内部 final 字段，外部不可见）。 */
+        String getAgentId() {
+            return spawn != null ? spawn.agentId : null;
         }
 
         /** 首个子事件：解析展示名 → 建 DB batch+task → 发 batch_start + task_start。 */

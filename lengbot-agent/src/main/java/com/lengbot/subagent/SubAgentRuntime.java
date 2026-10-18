@@ -976,13 +976,13 @@ public class SubAgentRuntime implements SubAgentExecutor {
                 b.userId(String.valueOf(ctx.getUserId()));
             }
             b.put("sessionId", ctx.getSessionId() != null ? ctx.getSessionId().toString() : "default")
-             .put("requestId", reqId)
-             .put("userId", ctx.getUserId())
+             .put("requestId", reqId != null ? reqId : "default")
+             .put("userId", ctx.getUserId() != null ? ctx.getUserId().toString() : "default")
              .put("chatContext", ctx)
-             .put("currentTodos", ctx.getCurrentTodosSnapshot())
+             .put("currentTodos", ctx.getCurrentTodosSnapshot() != null ? ctx.getCurrentTodosSnapshot() : List.of())
              .put("toolInput", callArgsJson);
         } else {
-            b.put("requestId", reqId).put("toolInput", callArgsJson);
+            b.put("requestId", reqId != null ? reqId : "default").put("toolInput", callArgsJson != null ? callArgsJson : "");
         }
         b.put("agentId", agentId);
         return b.build();
@@ -1187,6 +1187,7 @@ public class SubAgentRuntime implements SubAgentExecutor {
             if (tc != null) {
                 emitSubAgentToolCall(chatContext, subAgent, tc, toolDisplayNameMap);
             }
+<<<<<<< HEAD
 
             // 关键修复（对齐主线 HarnessToolCallback，修复子 Agent 工具静默失败 error=null）：
             // ① 复用 harness 传入的 param（保留 RuntimeContext / 会话上下文），并显式补 agentId
@@ -1229,6 +1230,22 @@ public class SubAgentRuntime implements SubAgentExecutor {
                         return Mono.just(ToolResultBlock.of(null, toolName,
                                 TextBlock.builder().text(fail).build()));
                     });
+=======
+            String result;
+            try {
+                result = executeTool(delegate, callArgs, chatContext, requestId);
+            } catch (Exception e) {
+                log.warn("[SubAgent][Harness] 工具执行异常: subAgent={}, tool={}",
+                        subAgent.getName(), delegate.getName(), e);
+                String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                result = ToolResultPrefixes.failureJson(ToolResultPrefixes.FAILURE + ": " + errMsg);
+            }
+            if (tc != null) {
+                emitSubAgentToolResult(chatContext, subAgent, tc, result, toolDisplayNameMap);
+            }
+            return Mono.just(ToolResultBlock.of(null, delegate.getName(),
+                    TextBlock.builder().text(result).build()));
+>>>>>>> 2af09665a2d0ed03422a468083b46d25617d8179
         }
 
         /** 把 harness 传入的工具入参（可能为 Map 或 JSON 字符串）规整为 JSON 字符串 */

@@ -139,16 +139,30 @@ public class QaPairGenerateExecutor implements TaskExecutor {
      * 从AI回复中解析问答对JSON
      */
     private List<QaPairCreateDTO> parseQaPairs(String reply) {
-        if (reply == null) return List.of();
+        if (reply == null || reply.isBlank()) {
+            log.warn("[问答对生成执行器] AI回复为空，无法解析问答对");
+            return List.of();
+        }
+        String json = reply.strip();
         try {
-            // 处理可能的markdown代码块包裹
-            String json = reply.strip();
+            // 1. 去除推理模型思考块（MiniMax-M3 等会在 JSON 前输出 <think>...</think>）
+            json = json.replaceAll("(?is)<think>.*?</think>", "")
+                       .replaceAll("(?is)<thinking>.*?</thinking>", "");
+            json = json.strip();
+            // 2. 去除 markdown 代码块包裹
             if (json.startsWith("```")) {
                 json = json.replaceAll("^```(?:json)?\\s*", "").replaceAll("\\s*```$", "");
+                json = json.strip();
+            }
+            // 3. 防御：剥完思考块/代码块后仍 "<" 开头，才是真正的 HTML/XML 错误页（网关/鉴权/模型名错误）
+            if (json.startsWith("<")) {
+                String preview = json.length() > 500 ? json.substring(0, 500) : json;
+                log.error("[问答对生成执行器] AI返回非JSON内容(疑似网关错误页)，前500字符:\n{}", preview);
+                throw new RuntimeException("AI返回非JSON内容（疑似网关/鉴权错误页），请检查模型提供商配置。详情见服务日志。");
             }
 
             // 解析JSON数组
-            List<JsonNode> nodes = objectMapper.readValue(json.strip(), new TypeReference<>() {});
+            List<JsonNode> nodes = objectMapper.readValue(json, new TypeReference<>() {});
             List<QaPairCreateDTO> result = new ArrayList<>();
             for (JsonNode node : nodes) {
                 if (node.has("question") && node.has("answer")) {
@@ -162,7 +176,8 @@ public class QaPairGenerateExecutor implements TaskExecutor {
             }
             return result;
         } catch (Exception e) {
-            log.warn("[问答对生成执行器] 解析AI回复失败: {}", e.getMessage());
+            String preview = reply.length() > 500 ? reply.substring(0, 500) : reply;
+            log.warn("[问答对生成执行器] 解析AI回复失败: {}\n原始回复前500字符:\n{}", e.getMessage(), preview);
             return List.of();
         }
     }

@@ -327,6 +327,14 @@ public class ChatContext {
     private final Map<String, ToolCallAccumulator> toolArgsAccumulators = new ConcurrentHashMap<>();
 
     /**
+     * 回合级工具结果幂等缓存：key=工具名+\u0000+归一化参数，value=工具结果文本。
+     * 跨 streamViaHarnessWithRetry 的整轮重试共享同一 ChatContext，命中即跳过真实副作用，
+     * 防止非幂等工具（发邮件/下单/写文件）在重试时重复执行；只读/幂等工具命中亦无害且省时。
+     * 仅缓存成功结果，错误结果不缓存以便重试恢复。final 字段不被重试回滚清理，天然回合级作用域。
+     */
+    private final Map<String, String> toolResultCache = new ConcurrentHashMap<>();
+
+    /**
      * 实时推送结构化状态事件 JSON（不含 [STATUS] 前缀）
      *
      * @param statusJson 状态事件 JSON
