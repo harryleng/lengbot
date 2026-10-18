@@ -61,15 +61,29 @@ public class ChatSession {
     @Schema(description = "会话附件索引 JSON 数组")
     private String attachments;
 
-    @TableField("message_count")
+    /**
+     * 消息数量。
+     * <p>updateStrategy = NEVER：禁止被 updateById 全字段回写覆盖。本字段的唯一写入口是
+     * {@code ChatSessionMapper.incrementStats/decrementStats} 原子 SQL；若允许 updateById 写入，
+     * 任何持有陈旧实体的路径（改标题/置顶/附件变更）都会把计数覆盖回旧值（lost update）。
+     * 注意：本字段只在 insert 时由 createSession 赋值 0，insertStrategy 不受影响。
+     */
+    @TableField(value = "message_count", updateStrategy = FieldStrategy.NEVER)
     @Schema(description = "消息数量")
     private Integer messageCount;
 
-    @TableField("total_tokens")
+    /**
+     * 总Token消耗。同 {@link #messageCount}，仅由原子累加 SQL 维护，禁止 updateById 覆盖。
+     */
+    @TableField(value = "total_tokens", updateStrategy = FieldStrategy.NEVER)
     @Schema(description = "总Token消耗")
     private Long totalTokens;
 
-    @TableField("last_message_at")
+    /**
+     * 最后消息时间。同 {@link #messageCount}，由 incrementStats 里的 NOW() 维护，
+     * 禁止 updateById 覆盖（否则会把 last_message_at 拨回旧时间，破坏会话列表排序）。
+     */
+    @TableField(value = "last_message_at", updateStrategy = FieldStrategy.NEVER)
     @Schema(description = "最后消息时间")
     private LocalDateTime lastMessageAt;
 

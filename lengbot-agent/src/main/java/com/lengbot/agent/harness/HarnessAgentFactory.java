@@ -110,7 +110,19 @@ public class HarnessAgentFactory {
      */
     public HarnessAgent build(Model model, String sysPrompt, Collection<ToolBase> tools,
                               int maxIters, List<MiddlewareBase> middlewares) {
-        return build(model, sysPrompt, tools, maxIters, middlewares, null, null, null);
+        return build(model, sysPrompt, tools, maxIters, middlewares, null, null, null, false);
+    }
+
+    /**
+     * 构建子 Agent（由 {@code SubAgentRuntime} 经 harness 内核驱动）。
+     *
+     * <p>子 Agent 不应再经 harness 原生 {@code agent_spawn}/{@code task_*} 递归派生子 Agent，
+     * 否则会与 LengBot 的 {@code DelegateSubAgentTool} 委派体系冲突并脱离 {@code SubAgentRun} 跟踪。
+     * 故关闭 harness 原生 agent_spawn/task_*（不影响主 Agent 的 {@code agent_spawn} 委派能力）。</p>
+     */
+    public HarnessAgent buildForSubAgent(Model model, String sysPrompt, Collection<ToolBase> tools,
+                                        int maxIters) {
+        return build(model, sysPrompt, tools, maxIters, List.of(), null, null, null, true);
     }
 
     /**
@@ -130,7 +142,7 @@ public class HarnessAgentFactory {
                               int maxIters, List<MiddlewareBase> middlewares,
                               GenerateOptions options,
                               Map<String, SubAgentDefinition> subAgentDefinitions,
-                              ChatContext chatContext) {
+                              ChatContext chatContext, boolean subAgent) {
         if (model == null) {
             throw new IllegalStateException("HarnessAgentFactory: model 为空，无法构建 agent");
         }
@@ -167,6 +179,14 @@ public class HarnessAgentFactory {
                 .disableDynamicSubagents()
                 .enableMetaTool(false)
                 .stopOnReject(false);
+
+        // 子 Agent（由 SubAgentRuntime 经 harness 内核驱动）：关闭 harness 原生 agent_spawn/task_*，
+        // 避免与 LengBot DelegateSubAgentTool 委派体系冲突、并脱离 SubAgentRun 跟踪。
+        // 主 Agent（subAgent=false）保留 agent_spawn（C3 Phase 1 子 agent 原生调度）。
+        if (subAgent) {
+            builder.disableSubagents();
+            builder.enableTaskList(false);
+        }
 
         if (options != null) {
             builder.generateOptions(options);
@@ -275,7 +295,7 @@ public class HarnessAgentFactory {
         List<ToolBase> tools = resolveSubAgentTools(sa);
         String sysPrompt = sa.getSystemPrompt();
         HarnessAgent child = build(mc.model(), sysPrompt, tools, MAX_SUBAGENT_LOOP_DEPTH, List.of(),
-                mc.options(), null, null);
+                mc.options(), null, null, false);
         log.debug("[HarnessAgentFactory] 构建子 agent: name={}, providerId={}, modelId={}, tools={}",
                 sa.getName(), providerId, modelId, tools.size());
         return child;

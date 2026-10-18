@@ -1064,15 +1064,9 @@ public class MessageMiddleware implements ChatMiddleware {
             return;
         }
         messageMapper.deleteById(messageId);
-        var session = chatSessionService.getById(sessionId);
-        if (session != null && session.getMessageCount() != null && session.getMessageCount() > 0) {
-            session.setMessageCount(session.getMessageCount() - 1);
-            int tokens = target.getTokenCount() != null ? target.getTokenCount() : 0;
-            if (tokens > 0 && session.getTotalTokens() != null) {
-                session.setTotalTokens(Math.max(0L, session.getTotalTokens() - tokens));
-            }
-            chatSessionService.updateById(session);
-        }
+        // 统计递减走单条原子 SQL，不做「读缓存实体 → 内存减法 → updateById 回写」：
+        // 后者会被陈旧缓存覆盖，且并发下丢更新。
+        chatSessionService.decrementStats(sessionId, target.getTokenCount() != null ? target.getTokenCount() : 0);
     }
 
     /**
@@ -1089,15 +1083,7 @@ public class MessageMiddleware implements ChatMiddleware {
             return;
         }
         messageMapper.deleteById(last.getId());
-        var session = chatSessionService.getById(sessionId);
-        if (session != null && session.getMessageCount() != null && session.getMessageCount() > 0) {
-            session.setMessageCount(session.getMessageCount() - 1);
-            int tokens = last.getTokenCount() != null ? last.getTokenCount() : 0;
-            if (tokens > 0 && session.getTotalTokens() != null) {
-                session.setTotalTokens(Math.max(0L, session.getTotalTokens() - tokens));
-            }
-            chatSessionService.updateById(session);
-        }
+        chatSessionService.decrementStats(sessionId, last.getTokenCount() != null ? last.getTokenCount() : 0);
     }
 
     /**

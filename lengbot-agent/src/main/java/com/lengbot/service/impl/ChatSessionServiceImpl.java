@@ -232,10 +232,29 @@ public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatS
     public void updateStats(Long sessionId, int tokenCount) {
         // 原子累加消息数、token数，避免并发竞态导致数据丢失
         baseMapper.incrementStats(sessionId, 1, tokenCount);
-        // 失效列表缓存（列表排序依赖 lastMessageAt）
-        ChatSession session = getById(sessionId);
-        if (session != null) {
-            evictListCache(session.getUserId());
+        // 失效缓存。注意必须在事务提交后才做：
+        // 调用方 saveMessage 带 @Transactional，若在提交前清缓存，并发的 getById 会
+        // 读到「未提交的旧值」并把它回填进缓存（30min 内持续污染），等于把原 bug 换个姿势复活。
+        runAfterCommit(() -> evictStatsCache(sessionId));
+    }
+
+    @Override
+    public void decrementStats(Long sessionId, int tokenCount) {
+        baseMapper.decrementStats(sessionId, -1, -(long) tokenCount);
+        runAfterCommit(() -> evictStatsCache(sessionId));
+    }
+
+    /**
+     * 统计变更后失效两类缓存。
+     * <p>取 user_id 走 mapper 主键点查：绝不读 {@link #getById} 的缓存——此刻缓存里正是
+     * 我们要作废的陈旧数据，读它既拿不到权威值，还会把脏值再写回缓存。
+     */
+    private void evictStatsCache(Long sessionId) {
+        evictSessionCache(sessionId);
+        // 列表排序依赖 lastMessageAt，同样失效
+        Long userId = baseMapper.selectUserIdById(sessionId);
+        if (userId != null) {
+            evictListCache(userId);
         }
     }
 

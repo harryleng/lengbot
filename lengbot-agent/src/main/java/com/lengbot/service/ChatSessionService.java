@@ -98,6 +98,16 @@ public interface ChatSessionService extends IService<ChatSession> {
     void updateStats(Long sessionId, int tokenCount);
 
     /**
+     * 原子递减会话统计（重新生成删除助手消息时使用）。
+     * <p>禁止改为「读实体 → 内存做减法 → updateById 回写」：那既会被缓存陈旧值污染，
+     * 也存在并发 lost update。当前实现为单条 SQL 原子运算。
+     *
+     * @param sessionId  会话ID
+     * @param tokenCount 本次需扣减的token数（负值会被 GREATEST 兜底为 0）
+     */
+    void decrementStats(Long sessionId, int tokenCount);
+
+    /**
      * 对话中切换智能体或版本后，将会话绑定到新的 Agent 和版本快照
      *
      * @param sessionId      会话ID

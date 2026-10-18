@@ -1005,7 +1005,7 @@ public class ChatServiceImpl implements ChatService {
                 ctx.getChatModel(), sysPrompt, wrappedTools,
                 resolveMaxExecutionSteps(ctx.getConfigMap()), List.of(),
                 null,
-                resolveSubAgentDefinitions(ctx), ctx);
+                resolveSubAgentDefinitions(ctx), ctx, false);
 
         // 子 agent 事件归组桥接（C3 Phase 2）：agent_spawn 子事件 + 父流工具事件统一在此映射 subagent_*
         SubAgentEventBridge.Session subAgentSession = subAgentEventBridge.create(ctx);
@@ -1257,8 +1257,19 @@ public class ChatServiceImpl implements ChatService {
             }
             final String argsForCall = effectiveArgs != null ? effectiveArgs : "{}";
             final long timeoutSeconds = resolveToolExecutionTimeoutSeconds(toolName, argsForCall);
+            // P1-b：复用 harness 传入的 RuntimeContext（保留 agentId 等 harness 原生上下文，绝对不能覆盖
+            // —— 主 Agent 的 write_todos / 知识库 / 记忆工具依赖 harness 已注入的 agentId），仅增量补 sessionId。
+            // sandbox_write_file 等工具从 runtimeContext.get("sessionId") 取会话隔离路径，缺失则写入失败（state=ERROR）。
+            RuntimeContext baseRc = param.getRuntimeContext();
+            RuntimeContext.Builder rcBuilder = baseRc != null
+                    ? RuntimeContext.builder(baseRc)
+                    : RuntimeContext.builder();
+            if (sessionId != null) {
+                rcBuilder.sessionId(String.valueOf(sessionId)).put("sessionId", sessionId.toString());
+            }
             final ToolCallParam effectiveParam = ToolCallParam.builder(param)
-                    .input(parseToolArgsToMap(argsForCall)).build();
+                    .input(parseToolArgsToMap(argsForCall))
+                    .runtimeContext(rcBuilder.build()).build();
 
             // 死循环防护（与 legacy executeToolCallback 对齐）：
             // ① 完全相同参数连续调用达阈值 → 直接拦截，跳过真实执行
@@ -1319,7 +1330,12 @@ public class ChatServiceImpl implements ChatService {
                 }
                 // 工具结果：emit tool_result（对齐 appendToolCallResult，含 todos_updated/subagent 路由）
                 emitToolResultHarness(ctx, toolEventsList, eventSink, toolName, argsForCall, result, contentOffset, toolCallId);
-                return textToolResultBlock(truncateToolResultForModel(resultForModel), isError ? ToolResultState.ERROR : ToolResultState.SUCCESS);
+                // P1-a：delegate_to_subagent 返回的是子 Agent 完整报告（可达数万字），截断到 2000 会丢 70%+ 内容，
+                // 主 Agent 被迫"盲写"。方案①：对委派结果不截断，直接回灌模型（38k 字≈13k token，final synthesis 可接受）。
+                String resultForModelFinal = "delegate_to_subagent".equals(toolName)
+                        ? resultForModel
+                        : truncateToolResultForModel(resultForModel);
+                return textToolResultBlock(resultForModelFinal, isError ? ToolResultState.ERROR : ToolResultState.SUCCESS);
             }).onErrorResume(TimeoutException.class, e -> {
                 log.error("[Chat][Harness][Tool] 执行超时: name={}, timeout={}s", toolName, timeoutSeconds);
                 String fail = ToolResultPrefixes.failureJson("工具执行超时（" + timeoutSeconds + "秒），请稍后重试");

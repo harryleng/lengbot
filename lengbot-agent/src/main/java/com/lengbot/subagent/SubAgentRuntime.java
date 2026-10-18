@@ -42,6 +42,7 @@ import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.AgentResultEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.harness.agent.HarnessAgent;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -52,6 +53,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -87,6 +90,9 @@ public class SubAgentRuntime implements SubAgentExecutor {
     private final SubAgentPermissionPolicy permissionPolicy;
     private final ToolArgsSanitizer toolArgsSanitizer;
     private final HarnessAgentFactory harnessAgentFactory;
+    /** 独立于 harness 响应式链的线程池：与主线 HarnessToolCallback 对齐，用于执行阻塞型工具（如 web_search 的同步 HTTP） */
+    @Qualifier("lengBotExecutor")
+    private final org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor toolExecutor;
 
     /** 子 agent 是否走 HarnessAgent 内核（Phase 2）；默认 legacy 保留手搓 model.stream 循环。 */
     @org.springframework.beans.factory.annotation.Value("${lengbot.chat.engine:legacy}")
@@ -317,7 +323,7 @@ public class SubAgentRuntime implements SubAgentExecutor {
                             } else {
                                 callArgs = toolArgsSanitizer.forChatCall(rawArgs);
                             }
-                            result = executeTool(cb, callArgs, chatContext, requestId);
+                            result = executeTool(cb, callArgs, chatContext, requestId, subAgent.getId());
                         } catch (Exception e) {
                             log.warn("[SubAgent] 工具执行异常: subAgent={}, tool={}, error={}",
                                     subAgent.getName(), tc.getName(), e.getMessage());
@@ -926,8 +932,41 @@ public class SubAgentRuntime implements SubAgentExecutor {
         }
     }
 
-    /** 构造子代理工具调用的 RuntimeContext（AgentScope 2.0.1 下需显式注入，否则上下文为空） */
-    private RuntimeContext buildSubAgentRuntimeContext(ChatContext ctx, String reqId, String callArgsJson) {
+    /** 工具参数 JSON 解析为 Map（与主线 ChatServiceImpl.parseToolArgsToMap 对齐，供 legacy 与 harness 共用） */
+    private Map<String, Object> parseArgsToMap(String argsJson) {
+        if (argsJson == null || argsJson.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(argsJson,
+                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    /** 从 ToolResultBlock 提取首个文本块内容（与主线 ChatServiceImpl.toolResultToText 对齐，供 legacy 与 harness 共用） */
+    private String toolResultToText(ToolResultBlock block) {
+        if (block == null || block.getOutput() == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (ContentBlock b : block.getOutput()) {
+            if (b instanceof TextBlock tb) {
+                sb.append(tb.getText());
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 构造子代理工具调用的 RuntimeContext（AgentScope 2.0.1 下需显式注入，否则上下文为空）。
+     * <p>对齐主 Agent {@code ChatServiceImpl.buildToolRuntimeContext}：必须注入 agentId，
+     * 否则 WriteTodosTool / QueryKnowledgeTool / UserMemoryToolCallbackFactory 等从 RuntimeContext
+     * 读取 agentId 的工具会读到 null，在反射派发或上下文取值阶段抛 NPE（message=null），
+     * 表现为子 Agent 工具静默失败（error=null）。</p>
+     */
+    private RuntimeContext buildSubAgentRuntimeContext(ChatContext ctx, String reqId, String callArgsJson, Long agentId) {
         RuntimeContext.Builder b = RuntimeContext.builder();
         if (ctx != null) {
             if (ctx.getSessionId() != null) {
@@ -945,33 +984,37 @@ public class SubAgentRuntime implements SubAgentExecutor {
         } else {
             b.put("requestId", reqId).put("toolInput", callArgsJson);
         }
+        b.put("agentId", agentId);
         return b.build();
     }
 
-    /** 通过 AgentScope ToolBase 执行工具并提取纯文本结果 */
-    private String executeTool(ToolBase cb, String callArgsJson, ChatContext chatContext, String requestId) {
-        Map<String, Object> args = new HashMap<>();
-        try {
-            args.putAll(objectMapper.readValue(callArgsJson,
-                    objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class)));
-        } catch (Exception e) {
-            log.warn("[SubAgent] 工具参数非标准 JSON，按原文传递: {}", callArgsJson);
-        }
+    /**
+     * 通过 AgentScope ToolBase 执行工具并提取纯文本结果（legacy 引擎路径）。
+     * <p>修复（对齐 harness 路径 SubAgentHarnessToolCallback）：
+     * ① 补全 agentId 到 RuntimeContext（见 {@link #buildSubAgentRuntimeContext}）；
+     * ② 阻塞型工具（如 web_search 的同步 HTTP）放到独立线程池 toolExecutor 执行并加超时护栏，
+     *    避免占用子 Agent 循环线程、与主 Agent 行为保持一致。</p>
+     */
+    private String executeTool(ToolBase cb, String callArgsJson, ChatContext chatContext, String requestId, Long agentId) {
+        Map<String, Object> args = parseArgsToMap(callArgsJson);
         ToolCallParam param = ToolCallParam.builder()
                 .input(args)
-                .runtimeContext(buildSubAgentRuntimeContext(chatContext, requestId, callArgsJson))
+                .runtimeContext(buildSubAgentRuntimeContext(chatContext, requestId, callArgsJson, agentId))
                 .build();
-        ToolResultBlock block = cb.callAsync(param).block();
-        if (block == null) {
-            return "";
+        final int timeoutSeconds = 120;
+        try {
+            ToolResultBlock block = CompletableFuture.supplyAsync(
+                    () -> cb.callAsync(param).block(), toolExecutor)
+                    .orTimeout(timeoutSeconds, TimeUnit.SECONDS)
+                    .join();
+            return block != null ? toolResultToText(block) : "";
+        } catch (Exception e) {
+            Throwable cause = e instanceof java.util.concurrent.CompletionException ? e.getCause() : e;
+            log.warn("[SubAgent] 工具执行异常(legacy): tool={}, error={}",
+                    cb.getName(), cause != null ? cause.getMessage() : null);
+            String msg = cause != null && cause.getMessage() != null ? cause.getMessage() : "timeout";
+            return ToolResultPrefixes.failureJson(ToolResultPrefixes.FAILURE + ": " + msg);
         }
-        StringBuilder sb = new StringBuilder();
-        for (ContentBlock b : block.getOutput()) {
-            if (b instanceof TextBlock tb) {
-                sb.append(tb.getText());
-            }
-        }
-        return sb.toString();
     }
 
     /**
@@ -1022,8 +1065,8 @@ public class SubAgentRuntime implements SubAgentExecutor {
         }
         RuntimeContext runtimeContext = rcb.build();
 
-        HarnessAgent ha = harnessAgentFactory.build(
-                model, sysPrompt, wrappedTools, MAX_LOOP_DEPTH, List.of());
+        HarnessAgent ha = harnessAgentFactory.buildForSubAgent(
+                model, sysPrompt, wrappedTools, MAX_LOOP_DEPTH);
         try {
             for (int attempt = 0; attempt <= modelRetryTimes; attempt++) {
                 if ((chatContext != null && chatContext.isAborted()) || isCancelRequested(run)) {
@@ -1127,34 +1170,81 @@ public class SubAgentRuntime implements SubAgentExecutor {
 
         @Override
         public Mono<ToolResultBlock> callAsync(ToolCallParam param) {
-            ToolUseBlock tc = param.getToolUseBlock();
-            Map<String, Object> input = tc != null ? tc.getInput() : param.getInput();
-            String rawArgs = serializeToolInput(input);
-            // args 修复（对齐 legacy 循环 294-302）
+            String toolName = delegate.getName();
+            String rawArgs = toolInputToString(param.getInput());
+            // args 修复（对齐 legacy 循环 294-302 / 主线 HarnessToolCallback）
             String callArgs = rawArgs;
-            String repaired = toolArgsSanitizer.tryRepairTruncatedWriteArgs(delegate.getName(), rawArgs);
+            String repaired = toolArgsSanitizer.tryRepairTruncatedWriteArgs(toolName, rawArgs);
             if (repaired != null) {
                 callArgs = repaired.replaceAll(",\\s*\"_repairedFromTruncation\"\\s*:\\s*true", "")
                         .replaceAll("\"_repairedFromTruncation\"\\s*:\\s*true\\s*,?", "");
             } else {
                 callArgs = toolArgsSanitizer.forChatCall(rawArgs);
             }
+            final String argsForCall = callArgs != null ? callArgs : "{}";
+
+            ToolUseBlock tc = param.getToolUseBlock();
             if (tc != null) {
                 emitSubAgentToolCall(chatContext, subAgent, tc, toolDisplayNameMap);
             }
-            String result;
-            try {
-                result = executeTool(delegate, callArgs, chatContext, requestId);
-            } catch (Exception e) {
-                log.warn("[SubAgent][Harness] 工具执行异常: subAgent={}, tool={}, error={}",
-                        subAgent.getName(), delegate.getName(), e.getMessage());
-                result = ToolResultPrefixes.failureJson(ToolResultPrefixes.FAILURE + ": " + e.getMessage());
-            }
-            if (tc != null) {
-                emitSubAgentToolResult(chatContext, subAgent, tc, result, toolDisplayNameMap);
-            }
-            return Mono.just(ToolResultBlock.of(null, delegate.getName(),
-                    TextBlock.builder().text(result).build()));
+
+            // 关键修复（对齐主线 HarnessToolCallback，修复子 Agent 工具静默失败 error=null）：
+            // ① 复用 harness 传入的 param（保留 RuntimeContext / 会话上下文），并显式补 agentId
+            //    （harness 为子 Agent 构建时未注入 agentId，否则 WriteTodosTool / QueryKnowledgeTool /
+            //     UserMemoryToolCallbackFactory 等读 agentId 的工具会读到 null 而在反射派发前抛 NPE）；
+            // ② 仅覆盖 input 为解析后的 Map；
+            // ③ 在独立线程池执行阻塞型工具，避免 harness 响应式链内嵌套 .block() 引发异常/死锁。
+            RuntimeContext mergedCtx = RuntimeContext.builder(param.getRuntimeContext())
+                    .put("agentId", subAgent != null ? subAgent.getId() : null).build();
+            final ToolCallParam effectiveParam = ToolCallParam.builder(param)
+                    .input(parseArgsToMap(argsForCall))
+                    .runtimeContext(mergedCtx).build();
+
+            final int timeoutSeconds = 120;
+            return Mono.fromFuture(CompletableFuture.supplyAsync(() -> {
+                try {
+                    ToolResultBlock block = delegate.callAsync(effectiveParam).block();
+                    return block != null ? toolResultToText(block) : "";
+                } catch (Exception e) {
+                    log.warn("[SubAgent][Harness] 工具执行异常: subAgent={}, tool={}, error={}",
+                            subAgent.getName(), toolName, e.getMessage(), e);
+                    return ToolResultPrefixes.failureJson(ToolResultPrefixes.FAILURE + ": " + e.getMessage());
+                }
+            }, toolExecutor).orTimeout(timeoutSeconds, TimeUnit.SECONDS))
+                    .map(result -> {
+                        if (tc != null) {
+                            emitSubAgentToolResult(chatContext, subAgent, tc, result, toolDisplayNameMap);
+                        }
+                        return ToolResultBlock.of(null, toolName,
+                                TextBlock.builder().text(result != null ? result : "").build());
+                    })
+                    .onErrorResume(e -> {
+                        log.warn("[SubAgent][Harness] 工具执行超时/异常: subAgent={}, tool={}, error={}",
+                                subAgent.getName(), toolName, e.getMessage(), e);
+                        String fail = ToolResultPrefixes.failureJson(
+                                ToolResultPrefixes.FAILURE + ": " + e.getMessage());
+                        if (tc != null) {
+                            emitSubAgentToolResult(chatContext, subAgent, tc, fail, toolDisplayNameMap);
+                        }
+                        return Mono.just(ToolResultBlock.of(null, toolName,
+                                TextBlock.builder().text(fail).build()));
+                    });
         }
+
+        /** 把 harness 传入的工具入参（可能为 Map 或 JSON 字符串）规整为 JSON 字符串 */
+        private String toolInputToString(Object input) {
+            if (input == null) {
+                return "{}";
+            }
+            if (input instanceof String s) {
+                return s;
+            }
+            try {
+                return objectMapper.writeValueAsString(input);
+            } catch (Exception e) {
+                return "{}";
+            }
+        }
+
     }
 }
