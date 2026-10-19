@@ -67,4 +67,12 @@ public class ChatRequestDTO {
      * API Key ID（由拦截器注入，不从前端传入）
      */
     private transient Long apiKeyId;
+
+    /**
+     * 客户端可选的 run 标识，用于崩溃续跑：传则与本次请求共用同一 runId（即 requestId），
+     * 服务端在 run 启动时按该 runId 恢复未完成的检查点消息快照并继续；不传则自动生成新 runId。
+     * 流式场景可在首条 SSE 事件（REQUEST_ID_PREFIX + runId）中拿到该值，重连时回传即可续跑。
+     */
+    private String runId;
 }
+

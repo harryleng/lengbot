@@ -23,6 +23,9 @@ import com.lengbot.enums.ModelProviderType;
 import com.lengbot.model.MimoChatClient;
 import com.lengbot.service.*;
 import com.lengbot.service.chat.*;
+import com.lengbot.entity.RoundCheckpoint;
+import com.lengbot.service.Checkpointer;
+import com.lengbot.util.MsgCheckpointUtil;
 import com.lengbot.subagent.DelegateSubAgentTool;
 import com.lengbot.subagent.spi.SubAgentDefinition;
 import com.lengbot.subagent.spi.SubAgentDefinitionResolver;
@@ -186,6 +189,7 @@ public class ChatServiceImpl implements ChatService {
     private final WorkspaceMemoryService workspaceMemoryService;
     private final ChatAbortRegistry chatAbortRegistry;
     private final com.lengbot.subagent.service.SubAgentTaskService subAgentTaskService;
+    private final Checkpointer checkpointer;
 
     /** SSE 心跳注释行（SSE 协议：以冒号开头的行是注释，客户端应忽略） */
     private static final String HEARTBEAT_PREFIX = ":heartbeat";
@@ -206,7 +210,7 @@ public class ChatServiceImpl implements ChatService {
     public String chat(ChatRequestDTO request) {
         // 1. 初始化上下文
         ChatContext ctx = ChatContext.of(request);
-        ctx.setRequestId(String.valueOf(System.nanoTime()));
+        ctx.setRequestId(request.getRunId() != null && !request.getRunId().isBlank() ? request.getRunId() : String.valueOf(System.nanoTime()));
         initMiddleware.init(ctx);
         mentionMiddleware.prepare(ctx);
         Long agentId = ctx.getAgent() != null ? ctx.getAgent().getId() : null;
@@ -271,6 +275,7 @@ public class ChatServiceImpl implements ChatService {
      * 非流式对话：处理带工具调用的多轮对话
      */
     private String processChatWithToolCalls(ChatContext ctx) {
+        resumeIfNeeded(ctx);
         int maxSteps = resolveMaxExecutionSteps(ctx.getConfigMap());
         int retryTimes = resolveModelRetryTimes(ctx.getConfigMap());
         StringBuilder fullReply = ctx.getFullReply();
@@ -476,7 +481,7 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public Flux<String> chatStream(ChatRequestDTO request) {
         ChatContext ctx = ChatContext.of(request);
-        ctx.setRequestId(String.valueOf(System.nanoTime()));
+        ctx.setRequestId(request.getRunId() != null && !request.getRunId().isBlank() ? request.getRunId() : String.valueOf(System.nanoTime()));
         chatAbortRegistry.register(ctx.getRequestId(), ctx);
 
         // Init → Mention → 用户敏感词 → Workflow → SkillPrep → Message → ToolPrep → Trace → [core]
@@ -829,6 +834,7 @@ public class ChatServiceImpl implements ChatService {
      * <p>合并心跳 Flux 防止代理/网关断连；doOnError 发送结构化错误事件。</p>
      */
     private Flux<String> streamCore(ChatContext ctx) {
+        resumeIfNeeded(ctx);
         ctx.setStartTime(System.currentTimeMillis());
         Long agentId = ctx.getAgent() != null ? ctx.getAgent().getId() : null;
         ctx.setSensitiveStreamState(new SensitiveWordFilter.StreamState(
@@ -1066,6 +1072,9 @@ public class ChatServiceImpl implements ChatService {
             log.info("[Chat][Harness] 完成: sessionId={}, replyLen={}, tokens={}/{}",
                     ctx.getSessionId(), ctx.getFullReply().length(),
                     inputTokenHolder[0], outputTokenHolder[0]);
+            // 轮次检查点：流式 harness 轮完成，记录终态（完成 / 中断）
+            saveCheckpoint(ctx, 0, RoundCheckpoint.PHASE_STREAMING_HARNESS,
+                    ctx.isAborted() ? RoundCheckpoint.STATUS_ABORTED : RoundCheckpoint.STATUS_COMPLETED);
         });
     }
 
@@ -1381,6 +1390,8 @@ public class ChatServiceImpl implements ChatService {
         if (ctx.isSensitiveAiBlocked()) {
             return Flux.empty();
         }
+        // 轮次检查点：进入工具递归轮，记录 RUNNING 快照（崩溃续跑 / 时间旅行）
+        saveCheckpoint(ctx, depth, RoundCheckpoint.PHASE_TOOL_RECURSIVE, RoundCheckpoint.STATUS_RUNNING);
         int maxSteps = resolveMaxExecutionSteps(ctx.getConfigMap());
         if (depth >= maxSteps) {
             log.warn("[Chat][Trace] 工具调用递归深度达到上限({})，停止循环", depth);
@@ -1745,6 +1756,8 @@ public class ChatServiceImpl implements ChatService {
             log.warn("[Chat][Trace] 请求已中断，停止工具循环: depth={}", depth);
             return Flux.just("\n[请求已中断，已返回当前进展]");
         }
+        // 轮次检查点：进入阻塞 LLM 轮，记录 RUNNING 快照
+        saveCheckpoint(ctx, depth, RoundCheckpoint.PHASE_BLOCKING_ROUND, RoundCheckpoint.STATUS_RUNNING);
         int maxSteps = resolveMaxExecutionSteps(ctx.getConfigMap());
         if (depth >= maxSteps) {
             log.warn("[Chat][Trace] 工具调用递归深度达到上限({})，停止循环", depth);
@@ -3331,4 +3344,90 @@ public class ChatServiceImpl implements ChatService {
         }
         return false;
     }
+
+    /**
+     * 轮次检查点：在轮次边界落盘当前 ChatContext 快照，支持崩溃续跑与时间旅行回放。
+     * 任何异常仅 warn 日志并降级，绝不阻断主流程。
+     *
+     * @param ctx    当前会话上下文
+     * @param depth  递归深度（STREAMING_HARNESS 记为 0）
+     * @param phase  轮次阶段（RoundCheckpoint.PHASE_*）
+     * @param status 轮次状态（RoundCheckpoint.STATUS_*）
+     */
+    private void saveCheckpoint(ChatContext ctx, int depth, String phase, String status) {
+        try {
+            RoundCheckpoint cp = new RoundCheckpoint();
+            cp.setRunId(ctx.getRequestId());
+            cp.setSessionId(ctx.getSessionId());
+            cp.setUserId(ctx.getUserId());
+            cp.setAgentId(ctx.getAgent() != null ? ctx.getAgent().getId() : null);
+            cp.setDepth(depth);
+            cp.setPhase(phase);
+            cp.setStatus(status);
+            cp.setInputTokens(ctx.getInputTokenHolder() != null ? ctx.getInputTokenHolder()[0] : 0);
+            cp.setOutputTokens(ctx.getOutputTokenHolder() != null ? ctx.getOutputTokenHolder()[0] : 0);
+            cp.setCachedTokens(ctx.getCachedTokenHolder() != null ? ctx.getCachedTokenHolder()[0] : 0);
+            cp.setAborted(ctx.isAborted());
+            cp.setAbortReason(ctx.getAbortReason());
+            cp.setStateJson(MsgCheckpointUtil.toJson(ctx.getMessages()));
+            cp.setCreatedAt(java.time.LocalDateTime.now());
+            checkpointer.save(cp);
+        } catch (Exception e) {
+            log.warn("[Chat][Checkpoint] saveCheckpoint 降级(已跳过): phase={}, err={}", phase, e.getMessage());
+        }
+    }
+
+    /**
+     * 从检查点恢复 ChatContext 的会话消息（供崩溃续跑调用方在 run 启动时回填）。
+     * 注：当前续跑恢复以"数据库历史消息重建"为主路径，本方法仅做 in-flight 消息快照回填的兜底。
+     *
+     * @param ctx 当前会话上下文
+     * @param cp  最新检查点
+     */
+    private void restoreFromCheckpoint(ChatContext ctx, RoundCheckpoint cp) {
+        if (cp == null || cp.getStateJson() == null) {
+            return;
+        }
+        try {
+            List<Msg> restored = MsgCheckpointUtil.fromJson(cp.getStateJson());
+            if (restored != null && !restored.isEmpty()) {
+                ctx.setMessages(restored);
+            }
+            log.info("[Chat][Checkpoint] 已从检查点恢复: runId={}, phase={}, depth={}, msgCount={}",
+                    cp.getRunId(), cp.getPhase(), cp.getDepth(),
+                    restored != null ? restored.size() : 0);
+        } catch (Exception e) {
+            log.warn("[Chat][Checkpoint] restoreFromCheckpoint 降级(已跳过): err={}", e.getMessage());
+        }
+    }
+
+    /**
+     * 崩溃续跑：在 run 启动时（历史消息已由 messageMiddleware.prepare 加载后）按 runId 恢复最新检查点。
+     * 仅当存在"未完成"的最新检查点时回填消息快照；已完成或不存在则不动作，正常走新请求逻辑。
+     * 任意异常仅 warn 日志并降级，绝不阻断主流程。
+     *
+     * @param ctx 当前会话上下文
+     */
+    private void resumeIfNeeded(ChatContext ctx) {
+        try {
+            String runId = ctx.getRequestId();
+            if (runId == null) {
+                return;
+            }
+            RoundCheckpoint cp = checkpointer.loadLatest(runId).orElse(null);
+            if (cp == null) {
+                return;
+            }
+            if (RoundCheckpoint.STATUS_COMPLETED.equals(cp.getStatus())) {
+                log.info("[Chat][Checkpoint] 续跑跳过：runId={} 已 COMPLETED", runId);
+                return;
+            }
+            log.info("[Chat][Checkpoint] 检测到可续跑检查点: runId={}, phase={}, depth={}, status={}",
+                    runId, cp.getPhase(), cp.getDepth(), cp.getStatus());
+            restoreFromCheckpoint(ctx, cp);
+        } catch (Exception e) {
+            log.warn("[Chat][Checkpoint] resumeIfNeeded 降级(已跳过): runId={}, err={}", ctx.getRequestId(), e.getMessage());
+        }
+    }
 }
+
