@@ -975,8 +975,13 @@ watch(
     liveSubagentEvents.value = []
     currentRequestStartIndex.value = null
     messageRowComponentRefs.clear()
-    // 离开会话（切到无 sessionId 的其它菜单）：run 在后端继续跑并缓冲，不在此启动前端续流，避免双恢复竞态
-    if (!newVal) return
+    // 离开会话到「无 sessionId 的聊天页」（如新建会话）：清空残留消息与状态，
+    // 但不触发续流恢复（无 session 可恢复，且避免双恢复竞态）；流式进行中时 loadHistory
+    // 会标记 pendingHistoryReload，待流结束后由 onStreamingEnded 再清空，无需此处特殊处理
+    if (!newVal) {
+      await loadHistory()
+      return
+    }
     await loadHistory()
     // P1：切回有在途流式请求的会话时同样恢复
     await recoverStreamOnReload()

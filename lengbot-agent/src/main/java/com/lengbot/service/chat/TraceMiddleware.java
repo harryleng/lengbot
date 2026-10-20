@@ -282,67 +282,14 @@ public class TraceMiddleware implements ChatMiddleware {
                 return;
             }
 
-            // 3. 拼接对话文本（每条消息最多100字，避免过长）
-            StringBuilder conversationText = new StringBuilder();
-            for (Message msg : messages) {
-                String role = msg.getRole() == MessageRole.USER ? "用户" : "助手";
-                String content = msg.getContent();
-                if (content != null && content.length() > 100) {
-                    content = content.substring(0, 100) + "...";
-                }
-                conversationText.append(role).append("：").append(content).append("\n");
-            }
-
-            // 4. 模型选择：provider 优先跟随会话（与主对话同源，模型名才匹配供应商），缺失时回退系统默认
-            Long providerId = runtimeConfig != null
-                    ? providerResolver.resolveFromConfig(runtimeConfig)
-                    : providerResolver.resolve();
-            Map<String, Object> titleConfig = new HashMap<>();
-            String sessionModelId = extractSessionModelId(runtimeConfig);
-            // 优先复用会话当前模型（与主对话一致，已验证可用），缺失时逐级降级兜底
-            modelFactory.ensureModelIdInConfig(providerId, titleConfig, sessionModelId);
-            // 限制输出 token，加快生成速度
-            titleConfig.put("maxTokens", 50);
-            // 降低 temperature，提高确定性
-            titleConfig.put("temperature", 0.3);
-
-            List<Msg> promptMessages = new ArrayList<>();
-            promptMessages.add(Msgs.system("生成标题，只输出标题，不超过20字。"));
-            promptMessages.add(Msgs.user("对话：\n" + conversationText));
-
-            // 5. 调用 AI 生成标题：候选模型逐个重试，失败自动换下一个
-            String title;
-            try {
-                title = generateTitleWithRetry(providerId, titleConfig, promptMessages, sessionModelId);
-            } catch (Exception e) {
-                // 会话 provider 全部候选失败 → 兜底换系统默认 provider 再试一轮
-                Long defaultProviderId = providerResolver.resolve();
-                if (!defaultProviderId.equals(providerId)) {
-                    log.warn("[Chat] 标题生成 会话provider={} 候选全败，兜底默认provider={}: {}",
-                            providerId, defaultProviderId, e.getMessage());
-                    title = generateTitleWithRetry(defaultProviderId, titleConfig, promptMessages, null);
-                } else {
-                    throw e;
-                }
-            }
-
-            // 6. 清理标题
-            title = title.replaceAll("^[\"'「」『』]+|[\"'「」『』]+$", "");
-            if (title.length() > 30) {
-                title = title.substring(0, 30);
-            }
-
-            // 7. 更新会话标题
-            if (!title.isBlank()) {
+            // 3. 标题直接取首条用户提问并截断（确定性，彻底避免 AI 偏向"回答内容"）
+            //    用户期望：标题 = 我的提问的截取，而非模型回复的截取
+            String title = buildFallbackTitle(messages, 30);
+            if (title != null && !title.isBlank()) {
                 chatSessionService.updateTitle(sessionId, title);
-                log.info("[Chat] 会话标题已生成: sessionId={}, title={}", sessionId, title);
+                log.info("[Chat] 会话标题已生成(提问截断): sessionId={}, title={}", sessionId, title);
             } else {
-                // 兜底：AI 未产出有效标题时，用首条用户消息前若干字作为标题
-                String fallback = buildFallbackTitle(messages, 20);
-                if (fallback != null && !fallback.isBlank()) {
-                    chatSessionService.updateTitle(sessionId, fallback);
-                    log.warn("[Chat] 会话标题AI生成返回空，已用首条用户消息兜底: sessionId={}, title={}", sessionId, fallback);
-                }
+                log.warn("[Chat] 会话无可用用户提问，标题保持默认: sessionId={}", sessionId);
             }
         } catch (Exception e) {
             log.warn("[Chat] 标题生成失败: sessionId={}, error={}", sessionId, e.getMessage());
