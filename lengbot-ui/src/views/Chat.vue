@@ -795,7 +795,7 @@ const {
   resolveEditInputRefFn,
 })
 
-const { submitAskUserResponse, runChatStream, sendMessage, regenerateReply, stopGenerating } = useChatStream({
+const { submitAskUserResponse, runChatStream, recoverStreamOnReload, sendMessage, regenerateReply, stopGenerating } = useChatStream({
   sessionId,
   messages,
   messagesRef,
@@ -924,7 +924,9 @@ const scrollHandler = createScrollHandler({ loadOlderMessages, hasMoreMessages, 
 
 onMounted(async () => {
   const queryAgentId = route.query.agentId
-  loadHistory()
+  await loadHistory()
+  // P1：刷新/重进后恢复未完成的流式轮次（重放 SSE 缓冲，拿回已生成内容）
+  await recoverStreamOnReload()
   await loadAgents(queryAgentId || undefined)
   if (queryAgentId) {
     await loadCurrentAgent(queryAgentId)
@@ -957,7 +959,7 @@ onUnmounted(() => {
 
 watch(
   () => route.params.sessionId,
-  () => {
+  async () => {
     if (skipNextWatch.value) {
       skipNextWatch.value = false
       return
@@ -973,7 +975,9 @@ watch(
     liveSubagentEvents.value = []
     currentRequestStartIndex.value = null
     messageRowComponentRefs.clear()
-    loadHistory()
+    await loadHistory()
+    // P1：切回有在途流式请求的会话时同样恢复
+    await recoverStreamOnReload()
   }
 )
 

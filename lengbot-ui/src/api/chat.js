@@ -14,7 +14,7 @@ export function chat(data) {
  */
 export async function chatStream(
   data,
-  { onChunk, onStatus, onMetadata, onToolEvent, onRequestId, onDone },
+  { onChunk, onStatus, onMetadata, onToolEvent, onRequestId, onDone, onEventId },
   signal,
   options = {}
 ) {
@@ -43,6 +43,7 @@ export async function chatStream(
     },
     onEventId: (id) => {
       lastEventId = id
+      onEventId?.(id)
     },
   }
 
@@ -146,6 +147,50 @@ async function tryReconnect(requestId, lastEventId, callbacks, token) {
   }
 
   return false
+}
+
+/**
+ * 页面刷新/重进后的断点恢复：重放服务端缓冲的 SSE 事件，重建本轮助手消息。
+ * <p>与 {@link tryReconnect}（服务于同页面内网络掉线）不同：本函数对 <b>cancelled</b>
+ * （服务端在客户端断开时已取消本轮）也重放已缓冲片段——此时没有"实时续流"可接，
+ * 重放是拿回已生成内容的唯一途径。调用方需根据返回的 completed 标志决定如何收尾
+ * （cancelled 无 [DONE]，需自行标记中断）。</p>
+ *
+ * @returns {Promise<{replayed: boolean, completed: boolean}>} replayed=是否拿到缓冲事件；completed=缓冲是否以 [DONE] 结束
+ */
+export async function replayStreamOnReload(requestId, lastEventId, callbacks, token) {
+  let response
+  try {
+    response = await fetch('/api/chat/reconnect', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token || '',
+      },
+      body: JSON.stringify({ requestId, lastEventId: lastEventId ? Number(lastEventId) : null }),
+    })
+  } catch {
+    return { replayed: false, completed: false }
+  }
+  if (!response.ok) return { replayed: false, completed: false }
+  const result = await response.json()
+  if (result.code !== 200) return { replayed: false, completed: false }
+
+  const { status, events } = result.data || {}
+  // 缓冲已失效（服务端重启 / 超过 5min TTL / requestId 不存在）：无内容可恢复
+  if (status === 'not_found') return { replayed: false, completed: false }
+  // 前端已收到全部事件：仅需触发 onDone 收尾
+  if (status === 'already_delivered') {
+    callbacks.onDone?.()
+    return { replayed: true, completed: true }
+  }
+  // completed / cancelled：重放缓冲事件（cancelled 不含 [DONE]，completed 含）
+  if (events && events.length > 0) {
+    for (const event of events) {
+      processSseLines(`data:${event.data}\n`, callbacks)
+    }
+  }
+  return { replayed: true, completed: status === 'completed' }
 }
 
 function decodeSseTextContent(raw) {

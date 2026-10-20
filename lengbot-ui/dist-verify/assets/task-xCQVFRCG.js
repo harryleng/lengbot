@@ -1,0 +1,1 @@
+import{w as s,a4 as n}from"./vue-vendor-BEz6SNuH.js";const p=s("task",()=>{const t=n(0),a=n(0),r=n(0),i=n(0);function o(e){t.value=e.active||0,a.value=e.pending||0,r.value=e.running||0,i.value=e.pendingRetry||0}return{active:t,pending:a,running:r,pendingRetry:i,updateCounts:o}});export{p as u};

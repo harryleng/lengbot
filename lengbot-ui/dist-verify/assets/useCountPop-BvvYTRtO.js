@@ -1,0 +1,1 @@
+import{as as s,a4 as l}from"./vue-vendor-BEz6SNuH.js";function m(r,n={}){const a=n.duration??400,t=l("");let e=null;function i(){e&&(clearTimeout(e),t.value=""),requestAnimationFrame(()=>{t.value="lb-count-pop",e=setTimeout(()=>{t.value="",e=null},a)})}return s(r,(u,o)=>{typeof u!="number"||typeof o!="number"||u!==o&&i()},{flush:"post"}),t}export{m as u};

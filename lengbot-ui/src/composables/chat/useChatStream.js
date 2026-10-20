@@ -1,7 +1,7 @@
 import { ref, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
-import { chatStream, stopChatStream } from '../../api/chat'
+import { chatStream, stopChatStream, replayStreamOnReload } from '../../api/chat'
 import { createSession, getSessionMessages } from '../../api/chatSession'
 import { validatePendingAttachmentMix } from '../../utils/chatAttachment'
 import { enrichVideoThumbnails } from '../../utils/videoThumbnail'
@@ -134,6 +134,8 @@ export function useChatStream(deps) {
   }
 
   function finalizeAbortedStream(assistantMsg, pushed) {
+    // 中断/停止后清刷新恢复标记：该轮次已落地（或明确终止），重载无需再恢复
+    clearStreamRecovery(sessionId.value)
     if (assistantMsg?._terminated) {
       streamSmoother.stop()
       setCurrentStreamingMsg(null)
@@ -211,6 +213,134 @@ export function useChatStream(deps) {
   }
 
   const router = useRouter()
+
+  // ── 刷新/重进断点恢复（P1）──
+  // 在途请求持久化到 sessionStorage，重载后据此向 /reconnect 重放服务端 SSE 缓冲，拿回已生成内容。
+  const STREAM_RECOVERY_PREFIX = 'lengbot:stream:'
+
+  function persistStreamRecovery(sid, requestId) {
+    try {
+      sessionStorage.setItem(
+        STREAM_RECOVERY_PREFIX + sid,
+        JSON.stringify({ requestId, lastEventId: 0, sessionId: sid, agentId: selectedAgentId.value })
+      )
+    } catch { /* sessionStorage 不可用时忽略 */ }
+  }
+
+  function clearStreamRecovery(sid) {
+    try {
+      sessionStorage.removeItem(STREAM_RECOVERY_PREFIX + sid)
+    } catch { /* 忽略 */ }
+  }
+
+  /**
+   * 页面重载后恢复未完成的流式轮次：读取 sessionStorage 中的在途请求，向 /reconnect 重放缓冲事件，
+   * 重建本轮助手消息。若 DB 已落库（doFinally(CANCEL) 取消补存）则按 requestId 去重，避免重复渲染。
+   */
+  async function recoverStreamOnReload() {
+    const sid = sessionId.value
+    if (!sid) return
+    let stored = null
+    try {
+      stored = JSON.parse(sessionStorage.getItem(STREAM_RECOVERY_PREFIX + sid) || 'null')
+    } catch { stored = null }
+    if (!stored || !stored.requestId) return
+
+    // DB 已落库（doFinally(CANCEL) 取消补存）的片段带 _requestId，直接复用，无需重放
+    const alreadyShown = messages.value.some(
+      (m) => m.role === 'assistant' && m._requestId === stored.requestId
+    )
+    if (alreadyShown) {
+      clearStreamRecovery(sid)
+      return
+    }
+
+    let pushed = false
+    let recoveryMsg = null
+    const ensureMsg = () => {
+      if (pushed) return recoveryMsg
+      messages.value.push({
+        role: 'assistant',
+        content: '',
+        _streaming: true,
+        _toolsDone: false,
+        _toolEvents: [],
+        _workflowEvents: [],
+        _toolBlockOffsets: [],
+        _toolBlocksDone: [],
+        _toolExpanded: false,
+        _reasoningContent: '',
+        _reasoningExpanded: true,
+        _reasoningDone: false,
+        _persisted: false,
+        _requestId: stored.requestId,
+      })
+      recoveryMsg = messages.value[messages.value.length - 1]
+      setCurrentStreamingMsg(recoveryMsg)
+      pushed = true
+      hasStreamContent.value = true
+      return recoveryMsg
+    }
+
+    const recoveryCallbacks = {
+      onRequestId: () => {},
+      onChunk: (chunk) => {
+        ensureMsg()
+        recoveryMsg.content = (recoveryMsg.content || '') + chunk
+        scrollToBottom()
+      },
+      onStatus: (status) => { currentStatus.value = status },
+      onToolEvent: (event) => {
+        ensureMsg()
+        recoveryMsg._toolEvents = recoveryMsg._toolEvents || []
+        recoveryMsg._toolEvents.push(event)
+        if (event.type === 'tool_call' || event.type === 'tool_result') {
+          recoveryMsg._toolExpanded = true
+        }
+      },
+      onMetadata: (metaStr) => {
+        ensureMsg()
+        try {
+          const m = safeJsonParse(metaStr)
+          if (m && typeof m === 'object') {
+            if (m.messageId) recoveryMsg._id = m.messageId
+            if (m.aborted) recoveryMsg._aborted = true
+          }
+        } catch { /* 忽略 */ }
+      },
+      onDone: () => {
+        if (recoveryMsg) {
+          recoveryMsg._streaming = false
+          recoveryMsg._toolsDone = true
+        }
+        loading.value = false
+        streaming.value = false
+        hasStreamContent.value = false
+        currentStatus.value = ''
+        setCurrentStreamingMsg(null)
+        abortController.value = null
+      },
+      onEventId: () => {},
+    }
+
+    const token = localStorage.getItem('token')
+    const result = await replayStreamOnReload(stored.requestId, stored.lastEventId, recoveryCallbacks, token)
+    if (result.replayed && !result.completed) {
+      // cancelled / 部分缓冲：标记中断（与取消补存一致），无 [DONE] 需自行收尾
+      if (recoveryMsg) {
+        recoveryMsg._streaming = false
+        recoveryMsg._toolsDone = true
+        recoveryMsg._aborted = recoveryMsg._aborted || true
+      }
+      loading.value = false
+      streaming.value = false
+      hasStreamContent.value = false
+      currentStatus.value = ''
+      setCurrentStreamingMsg(null)
+      abortController.value = null
+    }
+    clearStreamRecovery(sid)
+  }
 
   async function runChatStream({
     message: msgText,
@@ -341,6 +471,8 @@ export function useChatStream(deps) {
             if (requestId) {
               pendingRequestId = requestId
               attachRequestId(assistantMsg)
+              // P1：刷新恢复——持久化在途请求，重载后据此向 /reconnect 重放全部缓冲事件
+              persistStreamRecovery(sid, requestId)
             }
           },
           // onChunk: 正文 chunk（深度思考由后端 reasoning_content 事件推送）
@@ -563,6 +695,8 @@ export function useChatStream(deps) {
           },
           // onDone: 完成
           onDone: (meta) => {
+            // 流正常结束（含用户停止）：清除刷新恢复标记，避免重载后误恢复已完结的轮次
+            clearStreamRecovery(sid)
             // 流结束前冲刷 RAF 缓冲区，确保最后一批 toolEvents 落入响应式数组
             if (toolEventRafHandle !== 0) {
               cancelAnimationFrame(toolEventRafHandle)
@@ -786,6 +920,8 @@ export function useChatStream(deps) {
 
   function stopGenerating() {
     if (!abortController.value) return
+    // 用户主动停止：清刷新恢复标记，重载不再误恢复已停止的轮次
+    clearStreamRecovery(sessionId.value)
 
     // 通知后端停止：置中断标记使 in-flight LLM 立即停，并连带取消子任务（fire-and-forget）
     const requestId = getCurrentStreamingMsg()?._requestId
@@ -835,6 +971,7 @@ export function useChatStream(deps) {
     syncAbortedAssistantMessageId,
     finalizeAbortedStream,
     runChatStream,
+    recoverStreamOnReload,
     sendMessage,
     regenerateReply,
     stopGenerating,
