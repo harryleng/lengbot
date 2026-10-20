@@ -72,6 +72,7 @@
                   @click="switchSession(s)"
                 >
                   <span class="session-title">{{ s.title || '新对话' }}</span>
+                  <LoadingOutlined v-if="isSessionStreaming(s.id)" spin :style="{ fontSize: '12px', color: '#1677ff', marginLeft: '2px' }" />
                   <span v-if="s.lastMessageAt" class="session-time">{{ formatRelativeTime(s.lastMessageAt) }}</span>
                   <PushpinFilled v-if="s.pinned" class="session-pin-icon" aria-label="已置顶" />
                   <a-dropdown :trigger="['click']" placement="bottomRight">
@@ -307,6 +308,7 @@ import {
 } from '@ant-design/icons-vue'
 import { useUserStore } from '../stores/user'
 import { useTaskStore } from '../stores/task'
+import { isSessionStreaming } from '../composables/chat/sessionStreamState'
 import { useTheme } from '../composables/useTheme'
 import { useCountPop } from '../composables/useCountPop'
 import { Modal, message } from 'ant-design-vue'

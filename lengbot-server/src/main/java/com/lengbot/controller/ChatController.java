@@ -14,6 +14,7 @@ import com.lengbot.service.ChatService;
 import com.lengbot.service.MessageFeedbackService;
 import com.lengbot.service.chat.ChatStreamSseHelper;
 import com.lengbot.service.chat.SseEventBuffer;
+import com.lengbot.service.chat.ChatRunBus;
 import jakarta.validation.Valid;
 import com.lengbot.dto.ChatAttachmentDTO;
 import com.lengbot.service.ChatAttachmentService;
@@ -26,10 +27,12 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Sinks;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.io.IOException;
 
 @Slf4j
 @Tag(name = "AI对话", description = "基于通义千问的AI对话接口")
@@ -43,6 +46,7 @@ public class ChatController {
     private final MessageFeedbackService messageFeedbackService;
     private final SseEventBuffer eventBuffer;
     private final ChatStreamSseHelper chatStreamSseHelper;
+    private final ChatRunBus chatRunBus;
 
     @Operation(summary = "同步对话")
     @PostMapping
@@ -86,6 +90,12 @@ public class ChatController {
         Long userId;
         try { userId = StpUtil.getLoginIdAsLong(); } catch (Exception e) { return Result.fail(401, "未登录"); }
 
+        // run 仍在进行：告知前端走 SSE 续流端点，而非返回已缓冲的残缺事件
+        ChatRunBus.RunStatus runStatus = chatRunBus.statusOf(req.getRequestId());
+        if (runStatus == ChatRunBus.RunStatus.RUNNING) {
+            return Result.ok(Map.of("status", "running", "requestId", req.getRequestId()));
+        }
+
         SseEventBuffer.ReconnectResult result = eventBuffer.getReconnectData(
                 req.getRequestId(), req.getLastEventId(), userId);
 
@@ -107,6 +117,27 @@ public class ChatController {
                 yield Result.ok(body);
             }
         };
+    }
+
+    /**
+     * SSE 断线重连（续流）：客户端切走再回到会话时，用同一 requestId 重新订阅仍在进行中的 run，
+     * 从断点（含 replay 回放缓冲）继续接收事件，run 不会被中断。
+     */
+    @Operation(summary = "SSE断线重连(续流)")
+    @PostMapping(value = "/stream/reconnect", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamReconnect(@Valid @RequestBody ReconnectDTO req) {
+        Long userId;
+        try { userId = StpUtil.getLoginIdAsLong(); } catch (Exception ignored) { userId = null; }
+        Sinks.Many<String> sink = chatRunBus.sinkOf(req.getRequestId(), userId);
+        if (sink == null) {
+            SseEmitter emitter = new SseEmitter(ChatStreamSseHelper.SSE_TIMEOUT);
+            try {
+                emitter.send(SseEmitter.event().data("[STATUS]{\"type\":\"not_found\"}"));
+            } catch (IOException ignored) { }
+            emitter.complete();
+            return emitter;
+        }
+        return chatStreamSseHelper.subscribe(sink.asFlux(), userId);
     }
 
     @Operation(summary = "停止流式对话")

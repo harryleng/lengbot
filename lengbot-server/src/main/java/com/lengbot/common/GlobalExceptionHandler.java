@@ -159,7 +159,18 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Result<Void>> handleException(Exception e) {
+    public Object handleException(Exception e, HttpServletRequest request) {
+        // SSE 端点异常（多为客户端断开 IOException）：响应已按 text/event-stream 提交，
+        // 再写 JSON Result 会触发 HttpMessageNotWritableException 二次异常噪声。
+        if (isSseRequest(request)) {
+            if (e instanceof java.io.IOException) {
+                log.debug("[SSE] 客户端断开导致连接中止，忽略: {}", e.getMessage());
+                return null;
+            }
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .contentType(org.springframework.http.MediaType.TEXT_EVENT_STREAM)
+                    .body("data:[STATUS]{\"type\":\"error\",\"message\":\"服务异常\"}");
+        }
         log.error("系统异常", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Result.fail(500, "系统内部错误"));

@@ -52,6 +52,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
+import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 import java.util.*;
@@ -188,6 +189,7 @@ public class ChatServiceImpl implements ChatService {
     private final UserMemoryService userMemoryService;
     private final WorkspaceMemoryService workspaceMemoryService;
     private final ChatAbortRegistry chatAbortRegistry;
+    private final ChatRunBus chatRunBus;
     private final com.lengbot.subagent.service.SubAgentTaskService subAgentTaskService;
     private final Checkpointer checkpointer;
 
@@ -490,18 +492,21 @@ public class ChatServiceImpl implements ChatService {
                 skillPrepMiddleware, messageMiddleware, toolPrepMiddleware, traceMiddleware);
         ChatServiceCore core = this::streamCore;
 
-        return Flux.just(REQUEST_ID_PREFIX + ctx.getRequestId())
+        // 将 agent run 与 SSE 连接解耦：run 作为独立热源写入 replay sink，SSE 仅是 tap。
+        // 客户端断连只取消 tap，run 继续跑完并落库；重连可重新订阅同一 sink 续流。
+        Sinks.Many<String> runSink = chatRunBus.create(ctx.getRequestId(), ctx);
+        Flux<String> runFlux = Flux.just(REQUEST_ID_PREFIX + ctx.getRequestId())
                 .concatWith(ChatMiddlewareChain.of(middlewares, core).proceed(ctx))
                 .concatWith(Mono.fromCallable(() -> buildDoneEvent(ctx)))
-                .doOnCancel(() -> ctx.requestAbort("CLIENT_DISCONNECT"))
                 .doFinally(signal -> {
                     chatAbortRegistry.remove(ctx.getRequestId());
-                    if (signal == reactor.core.publisher.SignalType.CANCEL) {
-                        ctx.requestAbort("CLIENT_DISCONNECT");
-                        log.info("[Chat] stream cancelled: requestId={}, sessionId={}",
-                                ctx.getRequestId(), ctx.getSessionId());
-                        // 客户端断开/用户停止：补存已生成的 AI 回复片段（标 aborted），
-                        // 避免留下无 ASSISTANT 配对的孤立 USER 消息
+                    boolean cancelled = ctx.isAborted()
+                            || signal == reactor.core.publisher.SignalType.ON_ERROR;
+                    if (cancelled) {
+                        chatRunBus.markCancelled(ctx.getRequestId());
+                        log.info("[Chat] run 结束(取消/异常): requestId={}, sessionId={}, signal={}",
+                                ctx.getRequestId(), ctx.getSessionId(), signal);
+                        // 用户停止/异常：补存已生成的 AI 回复片段（标 aborted），避免孤立 USER 消息
                         try {
                             Long savedId = persistAssistantReply(ctx);
                             if (savedId != null) {
@@ -512,8 +517,24 @@ public class ChatServiceImpl implements ChatService {
                             log.warn("[Chat] 取消时补存 AI 回复失败: requestId={}, {}",
                                     ctx.getRequestId(), e.getMessage());
                         }
+                    } else {
+                        chatRunBus.markDone(ctx.getRequestId());
                     }
                 });
+        // 独立启动 run（boundedElastic 承载阻塞型 LLM/工具调用），结果经 sink 广播
+        Sinks.EmitFailureHandler emitFh = Sinks.EmitFailureHandler.busyLooping(java.time.Duration.ofMillis(20));
+        runFlux.subscribeOn(Schedulers.boundedElastic())
+                .subscribe(
+                        v -> runSink.emitNext(v, emitFh),
+                        e -> {
+                            log.error("[Chat] run 执行异常: requestId={}, {}",
+                                    ctx.getRequestId(), e.getMessage(), e);
+                            runSink.emitError(e, emitFh);
+                        },
+                        () -> runSink.emitComplete(emitFh));
+        // 返回 sink 的冷视图：SSE 订阅即 tap，断连不影响 run
+        return runSink.asFlux();
+
     }
 
     @Override

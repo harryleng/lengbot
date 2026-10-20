@@ -959,7 +959,7 @@ onUnmounted(() => {
 
 watch(
   () => route.params.sessionId,
-  async () => {
+  async (newVal) => {
     if (skipNextWatch.value) {
       skipNextWatch.value = false
       return
@@ -975,6 +975,8 @@ watch(
     liveSubagentEvents.value = []
     currentRequestStartIndex.value = null
     messageRowComponentRefs.clear()
+    // 离开会话（切到无 sessionId 的其它菜单）：run 在后端继续跑并缓冲，不在此启动前端续流，避免双恢复竞态
+    if (!newVal) return
     await loadHistory()
     // P1：切回有在途流式请求的会话时同样恢复
     await recoverStreamOnReload()

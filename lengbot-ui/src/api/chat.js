@@ -193,6 +193,75 @@ export async function replayStreamOnReload(requestId, lastEventId, callbacks, to
   return { replayed: true, completed: status === 'completed' }
 }
 
+/**
+ * 切回会话时恢复仍在运行的流式轮次（续流）：
+ * 1) 先 POST /api/chat/reconnect 询问后端状态；
+ * 2) 若 status=running：订阅 /api/chat/stream/reconnect 实时续流（sink 重放缓冲 + 继续推送），
+ *    调用方需在再次切走时通过 signal 中止该续流，后端 run 不会因此中断；
+ * 3) 其它状态（completed/cancelled/already_delivered/not_found）退化为 replayStreamOnReload 行为。
+ *
+ * @returns {Promise<{replayed:boolean, completed:boolean, live:boolean, aborted:boolean}>}
+ *   aborted=true 表示续流被 signal 中止（用户再次切走），后端 run 仍在跑，交给下次 recover 续接。
+ */
+export async function resumeStreamOnReturn(requestId, lastEventId, callbacks, token, signal) {
+  let pre = null
+  try {
+    const response = await fetch('/api/chat/reconnect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: token || '' },
+      body: JSON.stringify({ requestId, lastEventId: lastEventId ? Number(lastEventId) : null }),
+    })
+    if (!response.ok) return { replayed: false, completed: false, live: false, aborted: false }
+    const result = await response.json()
+    if (result.code !== 200) return { replayed: false, completed: false, live: false, aborted: false }
+    pre = result.data || {}
+  } catch {
+    return { replayed: false, completed: false, live: false, aborted: false }
+  }
+
+  const { status, events } = pre || {}
+
+  if (status === 'not_found') return { replayed: false, completed: false, live: false, aborted: false }
+  if (status === 'already_delivered') {
+    callbacks.onDone?.()
+    return { replayed: true, completed: true, live: false, aborted: false }
+  }
+
+  // 重放断连前已缓冲的事件（completed/cancelled 场景；running 场景后端不返回 events）
+  if (events && events.length > 0) {
+    for (const event of events) {
+      processSseLines(`data:${event.data}\n`, callbacks)
+    }
+  }
+
+  if (status === 'completed') return { replayed: true, completed: true, live: false, aborted: false }
+  if (status === 'cancelled') return { replayed: true, completed: false, live: false, aborted: false }
+
+  if (status === 'running') {
+    try {
+      await streamFetch('/api/chat/stream/reconnect', {
+        method: 'POST',
+        token,
+        body: { requestId },
+        signal,
+        onLines: (text) => processSseLines(text, callbacks),
+      })
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        // 用户在续流期间再次切走：后端 run 仍在跑，续流被 signal 中止，交给下次 recover 续接
+        return { replayed: true, completed: false, live: true, aborted: true }
+      }
+      // 续流异常：退化为已缓冲部分，交由上层标记中断
+      return { replayed: true, completed: false, live: true, aborted: false }
+    }
+    // 续流正常结束（含 [DONE]）：callbacks.onDone 已在 processSseLines 内触发
+    return { replayed: true, completed: true, live: true, aborted: false }
+  }
+
+  return { replayed: true, completed: false, live: false, aborted: false }
+}
+
+
 function decodeSseTextContent(raw) {
   if (!raw) return ''
   let content = raw

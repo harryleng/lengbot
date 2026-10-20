@@ -1,7 +1,7 @@
 import { ref, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
-import { chatStream, stopChatStream, replayStreamOnReload } from '../../api/chat'
+import { chatStream, stopChatStream, replayStreamOnReload, resumeStreamOnReturn } from '../../api/chat'
 import { createSession, getSessionMessages } from '../../api/chatSession'
 import { validatePendingAttachmentMix } from '../../utils/chatAttachment'
 import { enrichVideoThumbnails } from '../../utils/videoThumbnail'
@@ -9,6 +9,7 @@ import { safeJsonParse } from '../../utils/request'
 import { getToolBlockOffsets, markToolBlockDone, splitContentByOffsets } from './useChatEventPartition.js'
 import { registerToolBlockOffset } from './useChatCapabilityStream.js'
 import { normalizeAssistantMessageErrors, resolveDeleteAssistantMessageId } from '../../utils/chat/messageErrorState.js'
+import { markSessionStreaming, markSessionReconnecting, clearSessionStreaming, isSessionStreaming, sessionStreamStatus } from './sessionStreamState.js'
 
 export function clearErrorRetry(msg) {
   if (msg?._errorRetry) {
@@ -136,6 +137,8 @@ export function useChatStream(deps) {
   function finalizeAbortedStream(assistantMsg, pushed) {
     // 中断/停止后清刷新恢复标记：该轮次已落地（或明确终止），重载无需再恢复
     clearStreamRecovery(sessionId.value)
+    // 用户主动停止 / 终止：清除列表转圈标记
+    clearSessionStreaming(sessionId.value)
     if (assistantMsg?._terminated) {
       streamSmoother.stop()
       setCurrentStreamingMsg(null)
@@ -212,6 +215,43 @@ export function useChatStream(deps) {
     }
   }
 
+
+  /** 判断是否为连接层中断（非模型/服务端业务错误）：导航切走、断网、超时、请求未发出等 */
+  function isConnectionDrop(e) {
+    if (!e) return false
+    if (e.name === 'AbortError') return true
+    // status 0：请求未真正发出 / CORS / 网络不可用；fetch 网络错误通常是 TypeError
+    if (e.status === 0) return true
+    const msg = String(e.message || '')
+    if (/failed to fetch|networkerror|the operation was aborted|connection|timeout|net::|load failed/i.test(msg)) return true
+    return false
+  }
+
+  /**
+   * 导航切走 / 断网导致的流中断：标记为可恢复暂停（_aborted=true），保留 sessionStorage 中的恢复标记，
+   * 待用户切回会话时由 recoverStreamOnReload 续接实时流。
+   * 与 finalizeAbortedStream（用户主动停止、清恢复标记）区分——导航暂停需要可续接，故不调用 clearStreamRecovery。
+   */
+  function pauseForNavigation(assistantMsg) {
+    streamSmoother.stop()
+    setCurrentStreamingMsg(null)
+    reconnecting.value = false
+    loading.value = false
+    streaming.value = false
+    hasStreamContent.value = false
+    currentStatus.value = ''
+    abortController.value = null
+    userStoppedStream.value = false
+    if (assistantMsg) {
+      assistantMsg._streaming = false
+      assistantMsg._toolsDone = true
+      assistantMsg._aborted = true
+      assistantMsg._persisted = false
+      assistantMsg._id = null
+    }
+    // 注意：不调用 clearStreamRecovery，保留 requestId 供切回续接
+  }
+
   const router = useRouter()
 
   // ── 刷新/重进断点恢复（P1）──
@@ -234,8 +274,9 @@ export function useChatStream(deps) {
   }
 
   /**
-   * 页面重载后恢复未完成的流式轮次：读取 sessionStorage 中的在途请求，向 /reconnect 重放缓冲事件，
-   * 重建本轮助手消息。若 DB 已落库（doFinally(CANCEL) 取消补存）则按 requestId 去重，避免重复渲染。
+   * 切回会话/刷新后恢复未完成的流式轮次：读取 sessionStorage 中的在途请求，
+   * 向 /reconnect 询问后端状态——仍 running 则订阅 /stream/reconnect 实时续流（sink 重放 + 继续推送），
+   * 否则重放缓冲事件或加载历史。run 不会因切走而中断。
    */
   async function recoverStreamOnReload() {
     const sid = sessionId.value
@@ -246,19 +287,43 @@ export function useChatStream(deps) {
     } catch { stored = null }
     if (!stored || !stored.requestId) return
 
-    // DB 已落库（doFinally(CANCEL) 取消补存）的片段带 _requestId，直接复用，无需重放
-    const alreadyShown = messages.value.some(
-      (m) => m.role === 'assistant' && m._requestId === stored.requestId
-    )
-    if (alreadyShown) {
+    const rid = stored.requestId
+
+    // 复用本轮已存在（loadHistory 拉回的片段 / 上次切回已 push 未完成）的助手消息；否则新建
+    let recoveryMsg = messages.value.find((m) => m.role === 'assistant' && m._requestId === rid) || null
+    if (!recoveryMsg) {
+      const last = messages.value[messages.value.length - 1]
+      if (last && last.role === 'assistant' && (last._streaming || last._aborted)) recoveryMsg = last
+    }
+
+    // 已完整落库（非 streaming、非 aborted）：直接复用，无需续接
+    if (recoveryMsg && !recoveryMsg._streaming && !recoveryMsg._aborted) {
       clearStreamRecovery(sid)
+      // 已落库：清除列表转圈标记（若存在）
+      clearSessionStreaming(sid)
       return
     }
 
-    let pushed = false
-    let recoveryMsg = null
-    const ensureMsg = () => {
-      if (pushed) return recoveryMsg
+    // 一次性重置消息：清空断连前的残 content，准备从服务端缓冲（sink 重放）重建；
+    // 注意：重置只做一次，后续 chunk/工具/元数据事件仅追加，避免每事件清空导致正文丢失
+    const resetRecoveryMsg = () => {
+      if (recoveryMsg) {
+        recoveryMsg.content = ''
+        recoveryMsg._reasoningContent = ''
+        recoveryMsg._reasoningDone = false
+        recoveryMsg._toolEvents = []
+        recoveryMsg._workflowEvents = []
+        recoveryMsg._toolBlockOffsets = []
+        recoveryMsg._toolBlocksDone = []
+        recoveryMsg._toolExpanded = false
+        recoveryMsg._toolsDone = false
+        recoveryMsg._streaming = true
+        recoveryMsg._aborted = false
+        recoveryMsg._requestId = rid
+        recoveryMsg._persisted = false
+        setCurrentStreamingMsg(recoveryMsg)
+        return recoveryMsg
+      }
       messages.value.push({
         role: 'assistant',
         content: '',
@@ -273,25 +338,27 @@ export function useChatStream(deps) {
         _reasoningExpanded: true,
         _reasoningDone: false,
         _persisted: false,
-        _requestId: stored.requestId,
+        _requestId: rid,
       })
       recoveryMsg = messages.value[messages.value.length - 1]
       setCurrentStreamingMsg(recoveryMsg)
-      pushed = true
       hasStreamContent.value = true
       return recoveryMsg
     }
 
+    // 订阅前先重置一次（新建或清空旧残片）
+    recoveryMsg = resetRecoveryMsg()
+
     const recoveryCallbacks = {
       onRequestId: () => {},
       onChunk: (chunk) => {
-        ensureMsg()
+        if (!recoveryMsg) recoveryMsg = resetRecoveryMsg()
         recoveryMsg.content = (recoveryMsg.content || '') + chunk
         scrollToBottom()
       },
       onStatus: (status) => { currentStatus.value = status },
       onToolEvent: (event) => {
-        ensureMsg()
+        if (!recoveryMsg) recoveryMsg = resetRecoveryMsg()
         recoveryMsg._toolEvents = recoveryMsg._toolEvents || []
         recoveryMsg._toolEvents.push(event)
         if (event.type === 'tool_call' || event.type === 'tool_result') {
@@ -299,7 +366,7 @@ export function useChatStream(deps) {
         }
       },
       onMetadata: (metaStr) => {
-        ensureMsg()
+        if (!recoveryMsg) recoveryMsg = resetRecoveryMsg()
         try {
           const m = safeJsonParse(metaStr)
           if (m && typeof m === 'object') {
@@ -317,16 +384,36 @@ export function useChatStream(deps) {
         streaming.value = false
         hasStreamContent.value = false
         currentStatus.value = ''
+        userStoppedStream.value = false
         setCurrentStreamingMsg(null)
         abortController.value = null
+        // 续流正常完成：清除列表转圈标记
+        clearSessionStreaming(sid)
       },
       onEventId: () => {},
     }
 
+    // 建立可被再次切走中止的续流控制器，并进入 streaming 态
+    const liveController = new AbortController()
+    abortController.value = liveController
+    loading.value = true
+    streaming.value = true
+    userStoppedStream.value = false
+    reconnecting.value = true
+
     const token = localStorage.getItem('token')
-    const result = await replayStreamOnReload(stored.requestId, stored.lastEventId, recoveryCallbacks, token)
+    // 标记该会话为「续接中」，列表转圈（run 在后端仍跑）
+    markSessionReconnecting(sid, rid)
+    const result = await resumeStreamOnReturn(rid, stored.lastEventId, recoveryCallbacks, token, liveController.signal)
+
+    reconnecting.value = false
+
+    if (result.live && result.aborted) {
+      // 续流被再次切走中止：后端 run 仍在跑，保留 recovery 与 streaming 态，交给下次 recover 续接
+      return
+    }
     if (result.replayed && !result.completed) {
-      // cancelled / 部分缓冲：标记中断（与取消补存一致），无 [DONE] 需自行收尾
+      // cancelled / 部分缓冲 / 续流异常：标记中断（与取消补存一致），无 [DONE] 需自行收尾
       if (recoveryMsg) {
         recoveryMsg._streaming = false
         recoveryMsg._toolsDone = true
@@ -338,6 +425,8 @@ export function useChatStream(deps) {
       currentStatus.value = ''
       setCurrentStreamingMsg(null)
       abortController.value = null
+      // cancelled / 部分缓冲 / 续流异常：任务已结束，清除列表转圈标记
+      clearSessionStreaming(sid)
     }
     clearStreamRecovery(sid)
   }
@@ -473,6 +562,8 @@ export function useChatStream(deps) {
               attachRequestId(assistantMsg)
               // P1：刷新恢复——持久化在途请求，重载后据此向 /reconnect 重放全部缓冲事件
               persistStreamRecovery(sid, requestId)
+              // 标记该会话正在流式输出（最近对话列表转圈图标）
+              markSessionStreaming(sid, requestId)
             }
           },
           // onChunk: 正文 chunk（深度思考由后端 reasoning_content 事件推送）
@@ -556,6 +647,8 @@ export function useChatStream(deps) {
               assistantMsg._sensitiveBlock = event.scope || 'ai_output'
               assistantMsg.content = event.message || assistantMsg.content
               assistantMsg._streaming = false
+              // 敏感词拦截：流终止，清除列表转圈标记
+              clearSessionStreaming(sid)
               assistantMsg._toolsDone = true
               loading.value = false
               streaming.value = false
@@ -614,6 +707,8 @@ export function useChatStream(deps) {
               assistantMsg._id = null
               normalizeAssistantMessageErrors(assistantMsg)
               assistantMsg._streaming = false
+              // 结构化错误事件：流终止，清除列表转圈标记
+              clearSessionStreaming(sid)
               assistantMsg._toolsDone = true
               loading.value = false
               streaming.value = false
@@ -739,6 +834,8 @@ export function useChatStream(deps) {
             loading.value = false
             streaming.value = false
             hasStreamContent.value = false
+            // 流正常完成：清除列表转圈标记
+            clearSessionStreaming(sid)
             if (!assistantMsg?._workflowConfirmPending) {
               currentStatus.value = ''
             }
@@ -778,8 +875,9 @@ export function useChatStream(deps) {
       }
     } catch (e) {
       reconnecting.value = false
-      if (e.name === 'AbortError') {
-        finalizeAbortedStream(assistantMsg, pushed)
+      // 导航切走 / 断网等连接断开：可恢复中断，不弹"模型调用失败"气泡，保留恢复标记待切回续接
+      if (e?.name === 'AbortError' || isConnectionDrop(e)) {
+        pauseForNavigation(assistantMsg)
         return
       }
       streamSmoother.stop()
@@ -824,6 +922,8 @@ export function useChatStream(deps) {
       hasStreamContent.value = false
       currentStatus.value = ''
       abortController.value = null
+      // 真实错误：任务结束，清除列表转圈标记
+      clearSessionStreaming(sessionId.value)
       pollSessionTitle(sessionId.value)
     }
   }

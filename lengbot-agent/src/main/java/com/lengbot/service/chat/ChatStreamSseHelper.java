@@ -98,13 +98,13 @@ public class ChatStreamSseHelper {
                                 }
                             } catch (IOException e) {
                                 disposeSubscription.run();
-                                emitter.complete();
+                                try { emitter.complete(); } catch (IllegalStateException ignored) {}
                                 log.debug("[Chat] 客户端断开连接: {}", e.getMessage());
                             }
                         },
                         error -> {
                             disposeSubscription.run();
-                            emitter.completeWithError(error);
+                            try { emitter.completeWithError(error); } catch (IllegalStateException ignored) {}
                         },
                         () -> {
                             // [DONE] 已发送，标记缓冲完成便于断线重连快速判定
@@ -112,7 +112,7 @@ public class ChatStreamSseHelper {
                                 eventBuffer.markCompleted(activeRequestId[0]);
                             }
                             disposeSubscription.run();
-                            emitter.complete();
+                            try { emitter.complete(); } catch (IllegalStateException ignored) {}
                         }
                 );
         subscriptionRef.set(subscription);
@@ -126,7 +126,7 @@ public class ChatStreamSseHelper {
         emitter.onTimeout(() -> {
             log.debug("[Chat] SSE timeout: requestId={}", activeRequestId[0]);
             disposeSubscription.run();
-            emitter.complete();
+            try { emitter.complete(); } catch (IllegalStateException ignored) {}
         });
         emitter.onError(e -> disposeSubscription.run());
         emitter.onError(e -> log.warn("[Chat] SSE连接异常: {}", e.getMessage()));
