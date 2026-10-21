@@ -9,6 +9,7 @@ import lombok.Data;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.ToolBase;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -27,6 +28,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * @author lw
  * @since 2026-05-23
  */
+@Slf4j
 @Data
 public class ChatContext {
 
@@ -255,6 +257,7 @@ public class ChatContext {
      * @return 已耗尽返回 true
      */
     public boolean isExecutionBudgetExhausted() {
+        log.info("总执行时间预算-------{}",executionDeadlineMillis);
         return executionDeadlineMillis > 0 && System.currentTimeMillis() > executionDeadlineMillis;
     }
 

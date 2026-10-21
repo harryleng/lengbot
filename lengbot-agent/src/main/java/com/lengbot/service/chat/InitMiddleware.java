@@ -199,6 +199,7 @@ public class InitMiddleware implements ChatMiddleware {
                 ConfigKeys.Agent.SUMMARY_KEEP_MESSAGES,
                 ConfigKeys.Agent.SUMMARY_TOOL_RESULT_TOKEN_LIMIT,
                 ConfigKeys.Agent.MAX_EXECUTION_STEPS,
+                ConfigKeys.Agent.MAX_EXECUTION_TIME_MS,
                 ConfigKeys.Agent.MODEL_RETRY_TIMES,
                 ConfigKeys.Agent.STREAM_OUTPUT,
                 ConfigKeys.Agent.MULTIMODAL_ENABLED,

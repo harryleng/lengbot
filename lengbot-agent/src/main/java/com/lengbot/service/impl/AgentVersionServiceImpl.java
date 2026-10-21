@@ -309,6 +309,7 @@ public class AgentVersionServiceImpl implements AgentVersionService {
         chatConfig.put("sensitiveWords", config.get(ConfigKeys.Agent.SENSITIVE_WORDS));
         chatConfig.put("asyncToolCalls", config.get("asyncToolCalls"));
         chatConfig.put("maxExecutionSteps", config.get(ConfigKeys.Agent.MAX_EXECUTION_STEPS));
+        chatConfig.put("maxExecutionTimeMs", config.get(ConfigKeys.Agent.MAX_EXECUTION_TIME_MS));
         chatConfig.put("modelRetryTimes", config.get(ConfigKeys.Agent.MODEL_RETRY_TIMES));
         chatConfig.put("enableFileRead", config.get(ConfigKeys.Agent.ENABLE_FILE_READ));
         chatConfig.put("promptVariables", config.get("promptVariables"));

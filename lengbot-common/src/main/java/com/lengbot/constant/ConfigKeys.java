@@ -102,7 +102,7 @@ public final class ConfigKeys {
         public static final int DEFAULT_MAX_CONTEXT_MESSAGES = 20;
 
         /** 总执行时间预算默认值：5 分钟 */
-        public static final int DEFAULT_MAX_EXECUTION_TIME_MS = 10 * 60 * 1000;
+        public static final int DEFAULT_MAX_EXECUTION_TIME_MS = 100 * 60 * 1000;
         /** 总执行时间预算硬上限：30 分钟（防止配置误填导致单请求长期占用） */
         public static final int HARD_MAX_EXECUTION_TIME_MS = 30 * 60 * 1000;
         /** 完全相同参数连续调用判定阈值默认值 */

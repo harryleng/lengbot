@@ -1236,6 +1236,28 @@
                     <QuestionCircleOutlined class="tool-option-help" />
                   </a-tooltip>
                 </div>
+                <div class="tool-option-item">
+                  <span class="tool-option-label">单轮执行时间上限（分钟）</span>
+                  <a-input-number
+                    v-model:value="maxExecutionTimeMinutes"
+                    :min="1"
+                    :max="30"
+                    :step="1"
+                    :precision="0"
+                    placeholder="默认 10"
+                    size="small"
+                    style="width: 96px"
+                    :disabled="isVersionPreview"
+                  />
+                  <a-tooltip
+                    title="单次对话从请求发起起算的总执行时间上限（分钟）。达到上限后平台会中断后续工具调用，并让模型基于已有信息直接作答。留空使用平台默认 10 分钟，硬上限 30 分钟。深度研究、大文档解析等耗时场景可适当调高"
+                    overlay-class-name="no-flip-tooltip"
+                    :overlay-style="{ maxWidth: '320px' }"
+                    placement="topLeft"
+                  >
+                    <QuestionCircleOutlined class="tool-option-help" />
+                  </a-tooltip>
+                </div>
               </div>
               <div class="knowledge-bind">
                 <div class="selected-knowledge">
@@ -2377,6 +2399,25 @@ const agentConfig = reactive({
   modelRoutingEnabled: false,
 })
 
+/**
+ * 单轮执行时间上限：界面用「分钟」，配置里存「毫秒」（后端 key: maxExecutionTimeMs）。
+ * 留空 = 未配置（删除该键），运行时回退平台默认 10 分钟。
+ */
+const maxExecutionTimeMinutes = computed({
+  get: () => {
+    const ms = agentConfig.maxExecutionTimeMs
+    return typeof ms === 'number' && ms > 0 ? Math.round(ms / 60000) : null
+  },
+  set: (val) => {
+    if (val === null || val === undefined || val === '') {
+      delete agentConfig.maxExecutionTimeMs
+      return
+    }
+    const minutes = Math.min(30, Math.max(1, Math.round(Number(val))))
+    agentConfig.maxExecutionTimeMs = minutes * 60000
+  },
+})
+
 // 数字人配置（仅数字人型 agent 使用），持久化到 agent.config.digitalHuman
 const digitalHuman = reactive({
   portraitUrl: '',
@@ -2592,6 +2633,7 @@ const CHAT_CONFIG_PREVIEW_DEFAULTS = {
   summaryToolResultTokenLimit: 500,
   maxExecutionSteps: 20,
   modelRetryTimes: 2,
+  maxExecutionTimeMs: 600000,
   userSensitiveFilterEnabled: false,
   sensitiveFilterEnabled: false,
   sensitiveFilterStrategy: 'replace',
@@ -2649,9 +2691,15 @@ const chatConfigPreviewRows = computed(() => {
   }
   const maxSteps = chatConfigPreviewValue('maxExecutionSteps')
   const retryTimes = chatConfigPreviewValue('modelRetryTimes')
+  const execTime = chatConfigPreviewValue('maxExecutionTimeMs')
   rows.push(
     { label: '最大执行步数', text: String(maxSteps.value ?? 10), fromDefault: maxSteps.fromDefault },
-    { label: '模型重试次数', text: String(retryTimes.value ?? 2), fromDefault: retryTimes.fromDefault }
+    { label: '模型重试次数', text: String(retryTimes.value ?? 2), fromDefault: retryTimes.fromDefault },
+    {
+      label: '单轮执行时间上限',
+      text: `${execTime.value ? Math.round(execTime.value / 60000) : 10} 分钟`,
+      fromDefault: execTime.fromDefault,
+    }
   )
   rows.push(
     { label: '用户敏感词', text: userSens.value ? '开启' : '关闭', fromDefault: userSens.fromDefault },
@@ -4125,6 +4173,7 @@ function normalizeVersionDetailData(data) {
       summaryToolResultTokenLimit: cfg.summaryToolResultTokenLimit,
       maxExecutionSteps: cfg.maxExecutionSteps,
       modelRetryTimes: cfg.modelRetryTimes,
+      maxExecutionTimeMs: cfg.maxExecutionTimeMs,
       userSensitiveFilterEnabled: cfg.userSensitiveFilterEnabled,
       userSensitiveWords: cfg.userSensitiveWords,
       sensitiveFilterEnabled: cfg.sensitiveFilterEnabled,
