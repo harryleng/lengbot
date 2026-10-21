@@ -257,6 +257,23 @@ public final class ChatMessageContextUtil {
      * @param roundsToKeep  保留最近完整工具轮次数
      */
     public static void trimToolCallContext(List<Msg> messages, int maxChars, int roundsToKeep) {
+        trimToolCallContext(messages, maxChars, roundsToKeep, MsgRole.SYSTEM);
+    }
+
+    /**
+     * 工具调用上下文裁剪（可指定摘要消息角色）。
+     *
+     * <p>harness 引擎的 {@code inputMessages} <b>不允许包含 SYSTEM 消息</b>（系统提示词须走
+     * {@code sysPrompt}，见 {@code ChatServiceImpl#streamViaHarness} 的 SYSTEM 拆分逻辑）。
+     * 该路径下裁剪时若沿用默认的 SYSTEM 摘要，有触发引擎校验的风险，故开放角色参数，
+     * 由 harness 侧降级为 USER 角色插入历史摘要。</p>
+     *
+     * @param messages     消息列表（原地修改）
+     * @param maxChars     字符上限
+     * @param roundsToKeep 保留最近完整工具轮次数
+     * @param summaryRole  摘要消息使用的角色
+     */
+    public static void trimToolCallContext(List<Msg> messages, int maxChars, int roundsToKeep, MsgRole summaryRole) {
         int totalChars = estimateTotalChars(messages);
         if (totalChars <= maxChars) {
             return;
@@ -296,7 +313,8 @@ public final class ChatMessageContextUtil {
         for (int i = removeEnd; i >= removeStart; i--) {
             trimmed.remove(i);
         }
-        trimmed.add(removeStart, Msgs.system(summary));
+        trimmed.add(removeStart, Msg.builderForRole(summaryRole)
+                .content(TextBlock.builder().text(summary).build()).build());
         messages.clear();
         messages.addAll(trimmed);
 

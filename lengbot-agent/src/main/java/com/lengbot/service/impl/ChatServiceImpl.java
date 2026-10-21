@@ -27,6 +27,7 @@ import com.lengbot.entity.RoundCheckpoint;
 import com.lengbot.service.Checkpointer;
 import com.lengbot.util.MsgCheckpointUtil;
 import com.lengbot.subagent.DelegateSubAgentTool;
+import com.lengbot.agent.harness.HarnessContextTrimMiddleware;
 import com.lengbot.subagent.spi.SubAgentDefinition;
 import com.lengbot.subagent.spi.SubAgentDefinitionResolver;
 import com.lengbot.tool.ToolEventEmitter;
@@ -39,6 +40,7 @@ import io.agentscope.core.message.*;
 import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.ChatUsage;
 import io.agentscope.core.model.GenerateOptions;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.ToolBase;
 import io.agentscope.core.tool.ToolCallParam;
@@ -1022,9 +1024,14 @@ public class ChatServiceImpl implements ChatService {
             }
         }
 
+        // harness 引擎自带 compaction / toolResultEviction 已在 HarnessAgentFactory 中禁用，
+        // 上下文压缩由本中间件接管：时机 = 每次模型推理前（对齐 legacy 每轮工具调用后裁剪）。
+        // 不原地修改引擎 memory，只压缩本轮真正发给模型的 prompt，故落库与前端回显不受影响。
+        List<MiddlewareBase> harnessMiddlewares = List.of(
+                new     HarnessContextTrimMiddleware(MAX_TOOL_CONTEXT_CHARS, TOOL_ROUNDS_TO_KEEP));
         HarnessAgent ha = harnessAgentFactory.build(
                 ctx.getChatModel(), sysPrompt, wrappedTools,
-                resolveMaxExecutionSteps(ctx.getConfigMap()), List.of(),
+                resolveMaxExecutionSteps(ctx.getConfigMap()), harnessMiddlewares,
                 null,
                 resolveSubAgentDefinitions(ctx), ctx, false);
 
