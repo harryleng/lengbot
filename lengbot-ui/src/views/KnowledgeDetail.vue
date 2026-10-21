@@ -250,7 +250,12 @@
                       <span class="chunk-rank">#{{ item.rank }}</span>
                       <a-tag v-if="item.resultType === 'qa_pair'" color="blue" size="small">问答对</a-tag>
                       <span v-else class="chunk-source">{{ item.documentName }}</span>
-                      <span class="chunk-score">相似度 {{ (item.score * 100).toFixed(1) }}%</span>
+                      <span class="chunk-score">相似度 {{ ((item.originalScore != null ? item.originalScore : item.score) * 100).toFixed(1) }}%</span>
+                      <span
+                        v-if="item.originalScore != null && item.score != null && Math.abs(item.originalScore - item.score) > 0.001"
+                        class="chunk-score"
+                        title="混合检索下的 RRF 融合排名分，只反映排名、不代表相关度"
+                      >融合分 {{ item.score.toFixed(4) }}</span>
                     </div>
                     <div class="chunk-result-content">{{ item.content }}</div>
                   </div>

@@ -57,6 +57,8 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
     private static final String SEARCH_MODE_VECTOR = "vector";
     private static final String SEARCH_MODE_KEYWORD = "keyword";
     private static final String SEARCH_MODE_HYBRID = "hybrid";
+    /** 检索结果中"原始相似度"字段名：混合检索下与 RRF 排名分 score 区分开 */
+    private static final String ORIGINAL_SCORE_KEY = "original_score";
 
     /** pgvector HNSW 默认 ef_search，与 sql/ 建索引时的 ef_construction 对齐 */
     private static final int DEFAULT_HNSW_EF_SEARCH = 100;
@@ -226,8 +228,28 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
         // 4. 父子分块回填：命中子块若携带 parent_content（父块全文缓存），用父块全文替换 content，
         //    保证返回给大模型的上下文完整（父块不单独入库，仅缓存全文到子块）
         List<Map<String, Object>> limited = limitResults(results, topK);
+        fillOriginalScore(limited);
         enrichWithParentContent(limited);
         return limited;
+    }
+
+    /**
+     * 兜底填充原始相似度：非 RRF 路径（纯向量 / 纯全文 / Milvus）的 score 本身就是原始分，
+     * 直接补到 original_score，保证上层拿到的字段始终有值、语义统一。
+     */
+    private void fillOriginalScore(List<Map<String, Object>> results) {
+        if (results == null || results.isEmpty()) {
+            return;
+        }
+        for (Map<String, Object> row : results) {
+            if (row == null || row.containsKey(ORIGINAL_SCORE_KEY)) {
+                continue;
+            }
+            Object score = row.get("score");
+            if (score instanceof Number n) {
+                row.put(ORIGINAL_SCORE_KEY, n.doubleValue());
+            }
+        }
     }
 
     /**
@@ -395,6 +417,8 @@ public class EmbeddingServiceImpl extends ServiceImpl<EmbeddingMapper, Embedding
                 .map(e -> {
                     Map<String, Object> row = new LinkedHashMap<>(sourceMap.get(e.getKey()));
                     row.put("score", e.getValue()[0]);
+                    // RRF 分只反映排名、不反映相关度，额外透出向量路/全文路的原始相似度供上层展示与调参
+                    row.put(ORIGINAL_SCORE_KEY, e.getValue()[1]);
                     return row;
                 })
                 .toList();

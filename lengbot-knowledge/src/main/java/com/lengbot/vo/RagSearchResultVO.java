@@ -35,4 +35,7 @@ public class RagSearchResultVO {
 
     @Schema(description = "来源类型：chunk-文档分块，qa_pair-问答对")
     private String resultType;
+
+    @Schema(description = "原始相似度（0~1）。混合检索(hybrid)下 score 为 RRF 排名分、不代表相关度，本字段给出向量路真实余弦相似度；向量检索下与 score 一致；问答对为该问答对的向量相似度")
+    private Double originalScore;
 }

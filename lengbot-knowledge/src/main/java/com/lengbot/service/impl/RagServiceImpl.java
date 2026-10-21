@@ -223,6 +223,7 @@ public class RagServiceImpl implements RagService {
             vo.setContent("【问答对】Q: " + qa.getQuestion() + "\nA: " + qa.getAnswer());
             vo.setRank(++rank);
             vo.setScore(qa.getScore());
+            vo.setOriginalScore(qa.getScore());
             vo.setDocumentName("问答对");
             vo.setResultType(RagResultType.QA_PAIR);
             voList.add(vo);
@@ -234,6 +235,9 @@ public class RagServiceImpl implements RagService {
             vo.setRank(++rank);
             Object score = row.get("score");
             vo.setScore(score != null ? Math.round(((Number) score).doubleValue() * 10000.0) / 10000.0 : null);
+            Object originalScore = row.get("original_score");
+            vo.setOriginalScore(originalScore != null
+                    ? Math.round(((Number) originalScore).doubleValue() * 10000.0) / 10000.0 : null);
             vo.setDocumentName((String) row.get("document_name"));
             Object documentId = row.get("document_id");
             vo.setDocumentId(documentId != null ? ((Number) documentId).longValue() : null);
