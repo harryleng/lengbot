@@ -45,7 +45,7 @@ import java.util.Set;
  *       真正的开关是 {@code stateStore(...)}。</li>
  *   <li><b>副作用能力全禁</b>：fs/shell/skill/memory/workspace/compaction/toolResultEviction
  *       全关，对应职责由 LengBot 中间件体系（{@code SkillPrepMiddleware}/
- *       {@code UserMemoryService}/{@code MessageMiddleware.summarizeIfNeeded} 等）接管，
+ *       {@code UserMemoryService}/{@code ContextSummaryService} 等）接管，
  *       避免两套机制行为漂移。</li>
  *   <li><b>子 agent（C3 Phase 1）</b>：{@code disableDynamicSubagents()} 保留——它只禁
  *       workspace {@code subagents/*.md} 的动态扫描；显式 {@code subagentFactory(name, fn)}

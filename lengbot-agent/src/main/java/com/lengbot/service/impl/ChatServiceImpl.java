@@ -882,7 +882,11 @@ public class ChatServiceImpl implements ChatService {
                 ? streamViaHarnessWithRetry(ctx, eventSink, 0, resolveModelRetryTimes(ctx.getConfigMap()))
                 : processToolCallsRecursively(ctx, 0, System.currentTimeMillis(), eventSink);
 
+        // TTFT 探针：挂在内核出口，无论 harness / legacy / 非流式都必经此处。
+        // 不能挂在更外层的 eventSink 或 coreContent —— 那里混入工具状态帧、心跳、
+        // 以及 MessageMiddleware 预置的「正在思考」占位事件，会把 TTFT 测成 0ms。
         Flux<String> modelFlux = kernelFlux
+                .doOnNext(item -> markFirstToken(ctx, item))
                 .onErrorResume(e -> {
                     log.error("[Chat] 流式处理异常: {}", e.getMessage(), e);
                     markStreamFailure(ctx, e);
@@ -901,6 +905,36 @@ public class ChatServiceImpl implements ChatService {
 
         // 心跳在主内容流完成时停止；mergeWith 取两者都完成的时间点
         return coreContent.mergeWith(heartbeatFlux.takeUntilOther(coreContent));
+    }
+
+    /**
+     * 记录首字延迟（TTFT）：首个<b>可见正文增量</b>抵达内核的耗时。
+     *
+     * <p><b>口径</b>：{@code now - ctx.startTime}。startTime 在 streamCore 首行设置，
+     * 故本指标覆盖模型侧 TTFT 加上其之前的所有准备工作（消息组装、记忆检索、上下文摘要、
+     * 工具装配），等同于用户从点发送到屏幕上出现第一个字之间的体感延迟。</p>
+     *
+     * <p><b>为什么只认正文</b>：控制帧先于正文抵达是常态 —— 正在思考占位事件、
+     * 工具状态帧（STATUS_PREFIX）、心跳（HEARTBEAT_PREFIX）、requestId 帧都不算"字"。
+     * 思考内容在 lengbot 里也是走 STATUS_PREFIX 的 reasoningEvent 下发，因此带深度思考的
+     * 模型其 TTFT 统计的是<b>答案正文首字</b>，而不是思考首字 —— 这符合"用户看到答案"的口径。</p>
+     *
+     * <p><b>为什么用 CAS</b>：工具循环会产生多轮 LLM 调用，第二轮的第一个 chunk 也会经过
+     * 这里。compareAndSet 保证只认第一轮，避免被后续轮次覆盖成一个偏大的值。</p>
+     *
+     * @param ctx  会话上下文
+     * @param item 内核下发的帧
+     */
+    private void markFirstToken(ChatContext ctx, String item) {
+        if (ctx == null || ctx.getStartTime() <= 0 || item == null || item.isEmpty()) {
+            return;
+        }
+        if (item.startsWith(STATUS_PREFIX) || item.startsWith(HEARTBEAT_PREFIX)
+                || item.startsWith(REQUEST_ID_PREFIX)) {
+            return;
+        }
+        long elapsed = System.currentTimeMillis() - ctx.getStartTime();
+        ctx.getFirstTokenMs().compareAndSet(0, elapsed);
     }
 
     /**

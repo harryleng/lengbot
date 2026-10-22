@@ -24,8 +24,6 @@ import com.lengbot.util.*;
 import com.lengbot.vo.TodoItemVO;
 import com.lengbot.vo.UserPreferenceVO;
 import io.agentscope.core.message.Msg;
-import io.agentscope.core.model.ChatResponse;
-import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.ToolBase;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -63,6 +61,8 @@ public class MessageMiddleware implements ChatMiddleware {
     private final SessionTodoService sessionTodoService;
     /** 用于生成 SSE 状态事件 JSON（context_compression 等） */
     private final ToolEventGenerator toolEventGenerator;
+    /** 上下文摘要：结果落库复用 + 后台异步刷新，避免长会话每轮同步压在首字延迟上 */
+    private final ContextSummaryService contextSummaryService;
 
     /** 平台统一回复约束（不含工具相关，工具能力由 Provider 决定后按需追加） */
     private static final String PLATFORM_REPLY_CONSTRAINTS = """
@@ -442,7 +442,34 @@ public class MessageMiddleware implements ChatMiddleware {
     /**
      * 构建消息列表：系统提示词 + 工具使用引导 + 历史消息 + 当前用户消息
      */
+    /**
+     * 消息组装入口：包一层计时，把真实耗时回填到 ChatContext。
+     *
+     * <p><b>为什么要单独包一层</b>：这一段是首字之前最重、却长期不可见的一环 ——
+     * 历史消息加载、记忆向量检索、todos 快照、上下文摘要、系统提示词拼装全在里面。
+     * 原先 TraceMiddleware 用 {@code durationMs = 0} 硬编码构造 messages_to_llm span，
+     * 导致这里上线后一直是 0ms，无法定位首字前的耗时分布。</p>
+     *
+     * <p>用包装器而非在方法内打点：原方法有 9 处 return（其中多处是内部辅助分支），
+     * 逐处埋点易漏；包装器只需改一处，且对所有调用点统一生效。</p>
+     *
+     * @return 组装完成的消息列表
+     */
     private List<Msg> buildMessages(
+            Long sessionId, String userMessage, Agent agent, ChatRequestDTO request,
+            Map<String, Object> agentConfigMap, ChatContext ctx) {
+        long t0 = System.currentTimeMillis();
+        try {
+            return buildMessagesInternal(sessionId, userMessage, agent, request, agentConfigMap, ctx);
+        } finally {
+            if (ctx != null) {
+                ctx.setMessagesBuildStartMs(t0);
+                ctx.setMessagesBuildDurationMs(System.currentTimeMillis() - t0);
+            }
+        }
+    }
+
+    private List<Msg> buildMessagesInternal(
             Long sessionId, String userMessage, Agent agent, ChatRequestDTO request,
             Map<String, Object> agentConfigMap, ChatContext ctx) {
         List<Msg> messages = new ArrayList<>();
@@ -541,7 +568,7 @@ public class MessageMiddleware implements ChatMiddleware {
 
         // 5. 上下文摘要：在压缩前后向 SSE 通道推送 context_compression 事件，
         // 让前端展示"正在压缩上下文…"占位（避免长会话首次响应延迟被误判为卡死）
-        history = summarizeIfNeeded(history, agentConfigMap, agent, ctx);
+        history = contextSummaryService.summarizeIfNeeded(sessionId, history, agentConfigMap, ctx);
 
         // 5.1 处理孤立 USER 消息：AI 回复失败或用户主动停止后，DB 会留下没有 ASSISTANT 配对的 USER 消息
         // 连续 USER 消息会导致 LLM 误判为需要回答多条，在孤立 USER 后插入占位 ASSISTANT 消息
@@ -845,128 +872,6 @@ public class MessageMiddleware implements ChatMiddleware {
             return objectMapper.writeValueAsString(params);
         } catch (Exception ignored) {
             return "";
-        }
-    }
-
-    /**
-     * 上下文摘要
-     * <p>压缩开始/完成/失败时通过 ctx.preStreamStatusEvents 推送 SSE 事件，
-     * 让前端展示占位提示；事件由 execute() 取出并 prepend 到主 Flux</p>
-     */
-    private List<Message> summarizeIfNeeded(List<Message> history, Map<String, Object> configMap, Agent agent, ChatContext ctx) {
-        if (!Boolean.TRUE.equals(configMap.get(ConfigKeys.Agent.ENABLE_SUMMARY))) {
-            return history;
-        }
-
-        // 体积统计须覆盖 content + metadata + tool_events 三个落库字段，否则大工具结果（open_kb_document 等）
-        // 或大型 tool_events JSON 会被漏算，导致真实上下文体积远超阈值却未触发摘要压缩。
-        long totalChars = history.stream().mapToLong(m -> {
-            long len = 0;
-            if (m.getContent() != null) len += m.getContent().length();
-            if (m.getMetadata() != null) len += m.getMetadata().length();
-            if (m.getToolEvents() != null) len += m.getToolEvents().length();
-            return len;
-        }).sum();
-        double totalKb = totalChars / 1024.0;
-
-        double thresholdKb = 100.0;
-        Object thresholdVal = configMap.get(ConfigKeys.Agent.SUMMARY_THRESHOLD_KB);
-        if (thresholdVal instanceof Number n) {
-            thresholdKb = n.doubleValue();
-        }
-
-        if (totalKb <= thresholdKb) {
-            return history;
-        }
-
-        // 从配置读取摘要后保留消息数，默认 6
-        int keepRecent = 6;
-        Object keepVal = configMap.get(ConfigKeys.Agent.SUMMARY_KEEP_MESSAGES);
-        if (keepVal instanceof Number kn) {
-            keepRecent = Math.clamp(kn.intValue(), 1, 50);
-        }
-
-        if (history.size() <= keepRecent + 2) {
-            return history;
-        }
-
-        List<Message> olderMessages = history.subList(0, history.size() - keepRecent);
-        List<Message> recentMessages = history.subList(history.size() - keepRecent, history.size());
-
-        // 推送 started 事件：附原始条数与体积，让前端展示"正在压缩 N 条 / M KB"
-        emitPreStreamEvent(ctx, toolEventGenerator.contextCompressionEvent("started",
-                "压缩 " + history.size() + " 条 / " + String.format("%.1f", totalKb) + "KB"));
-
-        try {
-            Long providerId = providerResolver.resolveFromConfig(configMap);
-            Model model = modelFactory.getModel(providerId);
-
-            // 从配置读取工具结果预览 Token 上限，默认 500
-            int toolResultTokenLimit = 500;
-            Object tokenLimitVal = configMap.get(ConfigKeys.Agent.SUMMARY_TOOL_RESULT_TOKEN_LIMIT);
-            if (tokenLimitVal instanceof Number tln) {
-                toolResultTokenLimit = Math.clamp(tln.intValue(), 50, 5000);
-            }
-            int toolResultCharLimit = toolResultTokenLimit * 4;
-
-            StringBuilder conversationText = new StringBuilder();
-            for (Message msg : olderMessages) {
-                String role = msg.getRole() == MessageRole.USER ? "用户" : "助手";
-                String content = msg.getContent() != null ? msg.getContent() : "";
-                // 工具结果截断预览
-                if (msg.getRole() == MessageRole.TOOL && content.length() > toolResultCharLimit) {
-                    content = content.substring(0, toolResultCharLimit) + "\n[已截断，共" + content.length() + "字符]";
-                }
-                conversationText.append(role).append("：").append(content).append("\n");
-            }
-
-            // 从配置读取摘要提示词，默认使用内置 prompt
-            String summaryPromptText = "你是一个对话摘要助手。请将以下对话内容压缩为简明摘要，保留关键信息、决策和上下文要点。只输出摘要，不要添加额外说明。";
-            Object customPrompt = configMap.get(ConfigKeys.Agent.SUMMARY_PROMPT);
-            if (customPrompt instanceof String cp && !cp.isBlank()) {
-                summaryPromptText = cp;
-            }
-
-            List<Msg> summaryMessages = new ArrayList<>();
-            summaryMessages.add(Msgs.system(summaryPromptText));
-            summaryMessages.add(Msgs.user("请对以下对话进行摘要：\n\n" + conversationText));
-
-            ChatResponse response = LlmTraceContext.callWithoutTrace(() -> ModelCalls.call(model, summaryMessages));
-            String summary = Msgs.extractText(response).trim();
-
-            if (summary.isBlank()) {
-                emitPreStreamEvent(ctx, toolEventGenerator.contextCompressionEvent("failed", "摘要内容为空，使用原始上下文"));
-                return history;
-            }
-
-            List<Message> result = new ArrayList<>();
-            Message summaryMsg = new Message();
-            summaryMsg.setRole(MessageRole.SYSTEM);
-            summaryMsg.setContent("以下是之前对话的摘要：\n" + summary);
-            result.add(summaryMsg);
-            result.addAll(recentMessages);
-
-            log.info("[Chat][Summary] 上下文摘要完成: 原始{}条({}KB) → 摘要+最近{}条",
-                    history.size(), String.format("%.1f", totalKb), keepRecent);
-            // 推送 completed 事件：附压缩后条数，让前端停止占位动画
-            emitPreStreamEvent(ctx, toolEventGenerator.contextCompressionEvent("completed",
-                    "压缩完成，保留 " + result.size() + " 条"));
-            return result;
-        } catch (Exception e) {
-            log.warn("[Chat][Summary] 摘要生成失败，使用原始上下文: {}", e.getMessage());
-            emitPreStreamEvent(ctx, toolEventGenerator.contextCompressionEvent("failed",
-                    "摘要生成失败：" + e.getMessage()));
-            return history;
-        }
-    }
-
-    /**
-     * 把 SSE 状态事件追加到 ctx.preStreamStatusEvents，
-     * 由 execute() 在 next.proceed 之前 prepend 到主 Flux 下发
-     */
-    private void emitPreStreamEvent(ChatContext ctx, String statusJson) {
-        if (ctx != null && statusJson != null && !statusJson.isBlank()) {
-            ctx.getPreStreamStatusEvents().add(ToolEventGenerator.STATUS_PREFIX + statusJson);
         }
     }
 

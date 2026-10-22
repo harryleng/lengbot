@@ -19,7 +19,7 @@ import java.util.Set;
  * 调用结束不持久化--历史归属完全由 LengBot 侧掌控，与现有 legacy 分支行为一致。</p>
  *
  * <p><b>注意</b>：这放弃了 HarnessAgent 的跨调用记忆压缩、记忆工具长期记忆等能力。
- * LengBot 已有等价机制（{@code MessageMiddleware.summarizeIfNeeded} 上下文压缩、
+ * LengBot 已有等价机制（{@code ContextSummaryService} 上下文压缩、
  * {@code UserMemoryService} 长期记忆），故可接受。Phase 1 接入后需验证 ReActAgent
  * 在空 store 下能正确从传入消息构建单次上下文。</p>
  *

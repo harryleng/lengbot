@@ -21,6 +21,7 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 对话管道上下文，承载整个中间件链的共享状态
@@ -115,6 +116,26 @@ public class ChatContext {
     private List<Map<String, Object>> workflowEventsList;
     private List<LlmTraceSpanDTO> spans;
     private long startTime;
+
+    /**
+     * 首字延迟（毫秒）：请求进入对话内核（streamCore）到首个可见内容增量的耗时。
+     *
+     * <p>用 AtomicLong 而非 volatile long：流式链条涉及多个 Reactor 线程（boundedElastic /
+     * IO 线程 / 工具回调线程），必须保证只有"第一个"增量写入成功，后续丢掉，否则会被
+     * 工具循环的第二轮 overwrite 成一个更大的值。0 表示尚未产生可见内容。</p>
+     */
+    private final AtomicLong firstTokenMs = new AtomicLong(0);
+
+    /**
+     * 消息组装（buildMessages）开始时刻。
+     *
+     * <p>buildMessages 是首字之前最重的一段：记忆向量检索、todos 快照、上下文摘要、
+     * 历史消息加载都在里面。原先 TraceMiddleware 用硬编码 0 构造 span，导致这一段
+     * 完全没有可观测数据。这里由 MessageMiddleware 回填真实值。</p>
+     */
+    private long messagesBuildStartMs;
+    /** 消息组装实际耗时（毫秒），同样由 MessageMiddleware 回填 */
+    private long messagesBuildDurationMs;
 
     /** 流式模型调用是否最终失败 */
     private boolean streamFailed;

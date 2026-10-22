@@ -85,6 +85,10 @@ public class LlmTrace {
     @Schema(description = "总耗时（毫秒）")
     private Long totalDurationMs;
 
+    @TableField("first_token_ms")
+    @Schema(description = "首字延迟（毫秒）：请求进入对话内核到首个可见内容增量的耗时；0 表示本轮无可见内容")
+    private Long firstTokenMs = 0L;
+
     @TableField(value = "spans", typeHandler = JsonbTypeHandler.class, jdbcType = JdbcType.OTHER)
     @Schema(description = "调用链Span列表（JSONB）")
     private String spans;

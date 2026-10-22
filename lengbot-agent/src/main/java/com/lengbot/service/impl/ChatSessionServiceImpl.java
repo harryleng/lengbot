@@ -14,6 +14,7 @@ import com.lengbot.service.ChatAttachmentParsedService;
 import com.lengbot.service.ChatSessionService;
 import com.lengbot.service.LlmTraceService;
 import com.lengbot.service.MessageService;
+import com.lengbot.service.chat.ContextSummaryService;
 import com.lengbot.vo.SessionAttachmentVO;
 import com.lengbot.enums.SessionAttachmentSource;
 import com.lengbot.util.MinioUtil;
@@ -57,6 +58,8 @@ public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatS
     private final RedisUtil redisUtil;
     private final MinioUtil minioUtil;
     private final ChatAttachmentParsedService chatAttachmentParsedService;
+    /** 上下文摘要缓存（删会话时需一并清理，否则成为孤儿数据） */
+    private final ContextSummaryService contextSummaryService;
     @Qualifier("lengBotExecutor")
     private final ThreadPoolTaskExecutor lengBotExecutor;
 
@@ -271,6 +274,8 @@ public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatS
         llmTraceService.deleteBySessionId(sessionId);
         // 3. 物理删除会话
         removeById(sessionId);
+        // 3.1 删除该会话的上下文摘要缓存（与会话同事务，回滚则一起回滚）
+        contextSummaryService.evict(sessionId);
         evictSessionCache(sessionId);
         evictListCache(session.getUserId());
         // 4. MinIO 文件清理放在事务提交后，避免事务回滚后文件已删除

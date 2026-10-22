@@ -100,8 +100,14 @@ public class TraceMiddleware implements ChatMiddleware {
                             llmInputAttrs.put("tools", toolDefs);
                         }
 
+                        // 真实耗时由 MessageMiddleware.buildMessages 回填；
+                        // 未经过该中间件的分支（如 Workflow 短路、DispatcherMQ demodernAgent 路径）退化为 0，保持旧行为
+                        long buildStart = ctx.getMessagesBuildStartMs() > 0
+                                ? ctx.getMessagesBuildStartMs() : ctx.getStartTime();
+                        long buildDurationMs = ctx.getMessagesBuildDurationMs();
+
                         ctx.getSpans().add(LlmTraceSpanDTO.of("llm_input", null, "messages_to_llm",
-                                ctx.getStartTime(), 0, "OK", llmInputAttrs));
+                                buildStart, buildDurationMs, "OK", llmInputAttrs));
                     }
 
                     // 4. 追加AI思考内容到spans
@@ -233,6 +239,7 @@ public class TraceMiddleware implements ChatMiddleware {
         trace.setTotalTokens(ctx.getInputTokenHolder()[0] + ctx.getOutputTokenHolder()[0]);
         trace.setToolCallCount(ctx.getToolCallCountHolder()[0]);
         trace.setTotalDurationMs(durationMs);
+        trace.setFirstTokenMs(ctx.getFirstTokenMs().get());
         ctx.finalizeInlineThinking();
         // 完整回复：模型原始输出，仅做数据库非法字符清理
         String completeReply = ctx.buildTraceCompleteReply();

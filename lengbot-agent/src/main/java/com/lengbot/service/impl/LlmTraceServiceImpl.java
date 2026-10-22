@@ -166,6 +166,11 @@ public class LlmTraceServiceImpl extends ServiceImpl<LlmTraceMapper, LlmTrace>
         result.put("avgDurationMs", totalCount > 0
                 ? ((Number) aggregate.getOrDefault("avg_duration_ms", 0)).longValue() : 0);
         result.put("totalToolCalls", aggregate.getOrDefault("total_tool_calls", 0));
+        // 首字延迟（TTFT）：仅在有记录且确实产生过可见内容时才返回，避免 0 被误读成"0ms 响应"
+        if (totalCount > 0) {
+            result.put("avgFirstTokenMs", ((Number) aggregate.getOrDefault("avg_first_token_ms", 0)).longValue());
+            result.put("maxFirstTokenMs", ((Number) aggregate.getOrDefault("max_first_token_ms", 0)).longValue());
+        }
         return result;
     }
 

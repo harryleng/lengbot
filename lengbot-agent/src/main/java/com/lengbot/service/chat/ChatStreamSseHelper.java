@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ChatStreamSseHelper {
 
     /** SSE 超时时间：5 分钟（长文本生成可能较慢） */
-    public static final long SSE_TIMEOUT = 20 * 60 * 1000L;
+    public static final long SSE_TIMEOUT = 50 * 60 * 1000L;
 
     /** SSE 心跳前缀（协议注释行） */
     private static final String HEARTBEAT_PREFIX = ":heartbeat";

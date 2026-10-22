@@ -63,6 +63,10 @@ public class LlmTraceDetailVO {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long totalDurationMs;
 
+    @Schema(description = "首字延迟（毫秒）：请求进入对话内核到首个可见内容增量的耗时；0 表示本轮无可见内容")
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long firstTokenMs;
+
     @Schema(description = "调用链Span列表（已解析为对象）")
     private List<LlmTraceSpanDTO> spans;
 

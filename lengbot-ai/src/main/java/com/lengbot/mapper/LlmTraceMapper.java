@@ -23,16 +23,22 @@ public interface LlmTraceMapper extends BaseMapper<LlmTrace> {
     /**
      * SQL 聚合统计（替代全量加载到内存的 Java Stream 聚合）
      *
+     * <p>首字延迟只对 {@code first_token_ms > 0} 的记录求均值：0 表示本轮没有可见内容，
+     * 典型如用户输入被敏感词拦截、Workflow 短路、正文为空，若混入会把均值往下拉。<br>
+     * 注意 SQL 本体内不写 {@code --} 行注释 —— 一旦上层把语句压成单行，行注释会吞掉后续 SQL。</p>
+     *
      * @param traceSource 来源类型（chat/workflow/null 表示全部）
-     * @param startTime   起始时间
-     * @return 聚合结果（total_count, total_tokens, avg_duration_ms, total_tool_calls）
+     * @return 聚合结果（total_count, total_tokens, avg_duration_ms, total_tool_calls,
+     *         avg_first_token_ms, max_first_token_ms）
      */
     @Select("""
             SELECT
                 COUNT(*) AS total_count,
                 COALESCE(SUM(total_tokens), 0) AS total_tokens,
                 COALESCE(AVG(total_duration_ms), 0) AS avg_duration_ms,
-                COALESCE(SUM(tool_call_count), 0) AS total_tool_calls
+                COALESCE(SUM(tool_call_count), 0) AS total_tool_calls,
+                COALESCE(AVG(first_token_ms) FILTER (WHERE first_token_ms > 0), 0) AS avg_first_token_ms,
+                COALESCE(MAX(first_token_ms), 0) AS max_first_token_ms
             FROM llm_trace
             WHERE (#{traceSource} IS NULL AND (trace_source = 'chat' OR trace_source = 'workflow' OR trace_source IS NULL))
                OR (#{traceSource} IS NOT NULL AND trace_source = #{traceSource})
