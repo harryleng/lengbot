@@ -80,7 +80,16 @@ public class ContextSummaryService {
 
         long totalChars = history.stream().mapToLong(this::charsOf).sum();
         double totalKb = totalChars / 1024.0;
-        if (totalKb <= thresholdKb || history.size() <= keepRecent + 2) {
+        if (totalKb <= thresholdKb) {
+            return history;
+        }
+
+        // 体积已超阈值：keepRecent 按实际条数收敛，保证「被压缩部分」至少 2 条。
+        // 原判定 `history.size() > keepRecent + 2` 是按聊天轮次设计的，会漏掉
+        // 「条数少但单条极胖」的工具型会话 —— 实测 6 条 / 203KB 的会话被它拦下，
+        // 结果是 203KB 每轮原样进上下文，既不压缩也不摘要。压缩的真实需求是体积，不是轮次。
+        int effectiveKeep = effectiveKeepRecent(keepRecent, history.size());
+        if (effectiveKeep < 1) {
             return history;
         }
 
@@ -89,7 +98,7 @@ public class ContextSummaryService {
             int idx = indexOfMessageId(history, cache.getUptoMessageId());
             List<Message> tail = idx >= 0
                     ? new ArrayList<>(history.subList(idx + 1, history.size()))
-                    : tailByKeepRecent(history, keepRecent);
+                    : tailByKeepRecent(history, effectiveKeep);
 
             double tailKb = tail.stream().mapToLong(this::charsOf).sum() / 1024.0;
             if (idx >= 0 && tailKb <= thresholdKb) {
@@ -107,7 +116,7 @@ public class ContextSummaryService {
         }
 
         // 无缓存（首次）：只能同步生成一次，保留占位事件提示前端
-        return generateSync(sessionId, history, configMap, ctx, keepRecent, totalKb);
+        return generateSync(sessionId, history, configMap, ctx, effectiveKeep, totalKb);
     }
 
     // ------------------------------------------------------------------
@@ -161,11 +170,12 @@ public class ContextSummaryService {
                 long t0 = System.currentTimeMillis();
                 try {
                     int keepRecent = resolveKeepRecent(configMap);
-                    if (historySnapshot.size() <= keepRecent + 2) {
+                    int effectiveKeep = effectiveKeepRecent(keepRecent, historySnapshot.size());
+                    if (effectiveKeep < 1) {
                         return;
                     }
                     List<Message> older = new ArrayList<>(
-                            historySnapshot.subList(0, historySnapshot.size() - keepRecent));
+                            historySnapshot.subList(0, historySnapshot.size() - effectiveKeep));
                     String summary = callSummaryModel(older, configMap);
                     if (summary != null && !summary.isBlank()) {
                         saveCache(sessionId, older, summary, configMap);
@@ -321,6 +331,16 @@ public class ContextSummaryService {
     private int resolveKeepRecent(Map<String, Object> configMap) {
         Object v = configMap.get(ConfigKeys.Agent.SUMMARY_KEEP_MESSAGES);
         return v instanceof Number n ? Math.clamp(n.intValue(), 1, 50) : 6;
+    }
+
+    /**
+     * 体积超阈值后，把 keepRecent 收敛到实际条数允许的范围内，保证被压缩部分至少 2 条。
+     *
+     * <p>条数不足（≤2 条）时返回 0，表示无法压缩 —— 此时 older 会是空集，
+     * 摘要没有内容可压，直接保留原始上下文。</p>
+     */
+    private int effectiveKeepRecent(int keepRecent, int historySize) {
+        return Math.min(keepRecent, historySize - 2);
     }
 
     private int resolveToolResultCharLimit(Map<String, Object> configMap) {
