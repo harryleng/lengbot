@@ -59,6 +59,22 @@ public class EvalRagResultDetail {
     @Schema(description = "评分理由")
     private String answerReasoning;
 
+    @TableField("faithfulness_score")
+    @Schema(description = "Faithfulness 接地性得分（0~1，越高越无幻觉）")
+    private Double faithfulnessScore;
+
+    @TableField("faithfulness_reasoning")
+    @Schema(description = "Faithfulness 判定摘要")
+    private String faithfulnessReasoning;
+
+    @TableField("answer_relevancy_score")
+    @Schema(description = "Answer-Relevancy 答案相关性得分（0~1，越高越切题，抓跑题/答非所问）")
+    private Double answerRelevancyScore;
+
+    @TableField("answer_relevancy_reasoning")
+    @Schema(description = "Answer-Relevancy 判定摘要")
+    private String answerRelevancyReasoning;
+
     @TableField("sort_order")
     @Schema(description = "排序")
     private Integer sortOrder;

@@ -1,1 +1,0 @@
-import{b as n}from"./index-Bg5SiUEh.js";function e(){return n.get("/landing/config")}function o(t){return n.put("/landing/config",t,{headers:{"Content-Type":"application/json"}})}export{e as g,o as u};

@@ -239,6 +239,28 @@ public class RagEvaluationEngine {
                 detail.setAnswerScore(((Number) judgeResult.getOrDefault("score", 0.0)).doubleValue());
                 detail.setAnswerReasoning((String) judgeResult.getOrDefault("reasoning", ""));
             }
+
+            // 5. Faithfulness（接地性/幻觉检测，仅需 judgeProviderId，与 gold_answer 无关）
+            if (judgeProviderId != null && generatedAnswer != null && !generatedAnswer.isBlank()) {
+                Map<String, Object> faithResult = evaluateFaithfulness(
+                        generatedAnswer, searchResults, judgeProviderId, judgeModelId);
+                if (faithResult != null) {
+                    detail.setFaithfulnessScore(((Number) faithResult.getOrDefault("score", 0.0)).doubleValue());
+                    detail.setFaithfulnessReasoning((String) faithResult.getOrDefault("reasoning", ""));
+                }
+            }
+
+            // 6. Answer-Relevancy（答案相关性/跑题检测，基于生成答案反推问题 + 与原问题做余弦相似度）
+            if (answerProviderId != null && generatedAnswer != null && !generatedAnswer.isBlank()) {
+                Map<String, Object> relevancyResult = evaluateAnswerRelevancy(
+                        item.getQuery(), generatedAnswer, answerProviderId, answerModelId);
+                if (relevancyResult != null && relevancyResult.containsKey("score")) {
+                    detail.setAnswerRelevancyScore(((Number) relevancyResult.get("score")).doubleValue());
+                    detail.setAnswerRelevancyReasoning((String) relevancyResult.getOrDefault("reasoning", ""));
+                } else if (relevancyResult != null) {
+                    detail.setAnswerRelevancyReasoning((String) relevancyResult.getOrDefault("reasoning", "未计算"));
+                }
+            }
         }
 
         return detail;
@@ -250,6 +272,7 @@ public class RagEvaluationEngine {
     public Map<String, Object> aggregateMetrics(List<EvalRagResultDetail> details) {
         Map<String, Double> retrievalAgg = new LinkedHashMap<>();
         for (int k : K_VALUES) {
+            retrievalAgg.put("precision@" + k, 0.0);
             retrievalAgg.put("recall@" + k, 0.0);
             retrievalAgg.put("f1@" + k, 0.0);
         }
@@ -257,6 +280,10 @@ public class RagEvaluationEngine {
         int retrievalCount = 0;
         double totalAnswerScore = 0;
         int answerCount = 0;
+        double totalFaithfulness = 0;
+        int faithfulnessCount = 0;
+        double totalRelevancy = 0;
+        int relevancyCount = 0;
 
         for (EvalRagResultDetail d : details) {
             // 聚合检索指标
@@ -265,6 +292,7 @@ public class RagEvaluationEngine {
                     Map<String, Double> scores = objectMapper.readValue(d.getRetrievalScores(),
                             new TypeReference<>() {});
                     for (int k : K_VALUES) {
+                        retrievalAgg.merge("precision@" + k, scores.getOrDefault("precision@" + k, 0.0), Double::sum);
                         retrievalAgg.merge("recall@" + k, scores.getOrDefault("recall@" + k, 0.0), Double::sum);
                         retrievalAgg.merge("f1@" + k, scores.getOrDefault("f1@" + k, 0.0), Double::sum);
                     }
@@ -278,6 +306,18 @@ public class RagEvaluationEngine {
                 totalAnswerScore += d.getAnswerScore();
                 answerCount++;
             }
+
+            // 聚合 Faithfulness（接地性）
+            if (d.getFaithfulnessScore() != null) {
+                totalFaithfulness += d.getFaithfulnessScore();
+                faithfulnessCount++;
+            }
+
+            // 聚合 Answer-Relevancy（答案相关性）
+            if (d.getAnswerRelevancyScore() != null) {
+                totalRelevancy += d.getAnswerRelevancyScore();
+                relevancyCount++;
+            }
         }
 
         // 取平均
@@ -290,11 +330,19 @@ public class RagEvaluationEngine {
         }
         result.put("retrieval", avgRetrieval);
 
-        if (answerCount > 0) {
+        if (answerCount > 0 || faithfulnessCount > 0 || relevancyCount > 0) {
             Map<String, Object> answerAgg = new LinkedHashMap<>();
-            answerAgg.put("accuracy", Math.round(totalAnswerScore / answerCount * 10000.0) / 10000.0);
-            answerAgg.put("total", answerCount);
-            answerAgg.put("correct", (int) totalAnswerScore);
+            if (answerCount > 0) {
+                answerAgg.put("accuracy", Math.round(totalAnswerScore / answerCount * 10000.0) / 10000.0);
+                answerAgg.put("total", answerCount);
+                answerAgg.put("correct", (int) totalAnswerScore);
+            }
+            if (faithfulnessCount > 0) {
+                answerAgg.put("faithfulness", Math.round(totalFaithfulness / faithfulnessCount * 10000.0) / 10000.0);
+            }
+            if (relevancyCount > 0) {
+                answerAgg.put("answerRelevancy", Math.round(totalRelevancy / relevancyCount * 10000.0) / 10000.0);
+            }
             result.put("answer", answerAgg);
         }
 
@@ -369,6 +417,53 @@ public class RagEvaluationEngine {
             用户问题：%s
             """;
 
+    /**
+     * Faithfulness（接地性 / 幻觉检测）提示词。
+     * 将答案拆为事实性声明，逐条判断能否从【实际召回的参考文档】推导，统计接地比例。
+     * 与 Context Recall（基于 gold_chunk_ids）正交：本指标衡量"答案有没有编造"。
+     */
+    private static final String FAITHFULNESS_PROMPT = """
+            你是一个严格的幻觉检测者。判断【AI生成的答案】中的每一句事实性声明是否能从【参考文档】中推导出来（即是否"接地"）。
+
+            参考文档：
+            %s
+
+            AI生成的答案：
+            %s
+
+            要求：
+            1. 将答案拆解为独立的事实性声明（剔除客套话、以及"根据文档""综上"这类元陈述）。
+            2. 逐条判定该声明能否从参考文档推导：
+               - "supported"：声明事实可由参考文档直接得出或合理推断
+               - "contradicted"：声明与参考文档矛盾
+               - "unanswered"：参考文档未提及该内容（无法证实，视为未接地）
+            3. 若答案整体表示"无法回答"或不含任何事实性声明，返回空数组 []。
+
+            仅返回 JSON 数组（不要包含其他文字/Markdown）：
+            [{"claim":"<原声明>","verdict":"supported","reason":"<10字内理由>"}]
+            """;
+
+    /**
+     * Answer-Relevancy（答案相关性）提示词。
+     * 从【AI生成的答案】反向推断该答案最可能回答的若干问题，用于与原始问题做语义相似度比对。
+     * 与 Faithfulness 正交：Faithfulness 测"答案有没有编造"（接地性），本指标测"答案有没有跑题"（相关性）。
+     * 低分 = 答非所问、废话多、或答了和原始问题无关的内容。
+     */
+    private static final String ANSWER_RELEVANCY_PROMPT = """
+            给定【AI生成的答案】，反向推断该答案最可能回答的 %d 个用户问题。
+
+            要求：
+            1. 推断的问题必须聚焦于答案的核心主题与意图，而不是字面复述答案原文。
+            2. 每个问题用自然语言表达，不超过30字。
+            3. 若答案为"无法回答"或不含任何实质内容，返回空数组 []。
+
+            AI生成的答案：
+            %s
+
+            仅返回 JSON 数组（不要包含其他文字/Markdown）：
+            ["<问题1>", "<问题2>", "<问题3>"]
+            """;
+
     private String generateAnswer(String query, List<Map<String, Object>> searchResults,
                                     Long providerId, String modelId) {
         StringBuilder docs = new StringBuilder();
@@ -396,6 +491,112 @@ public class RagEvaluationEngine {
         } catch (Exception e) {
             return Map.of("score", 0.0, "reasoning", "评分结果解析失败: " + result);
         }
+    }
+
+    /**
+     * 计算 Faithfulness（接地性 / 幻觉检测）。
+     * 将答案拆为事实性声明，逐条判断能否从【实际召回的参考文档】推导，统计接地比例。
+     *
+     * @return {score: 0~1 (supported 占比), reasoning: 摘要}
+     */
+    private Map<String, Object> evaluateFaithfulness(String generatedAnswer,
+                                                      List<Map<String, Object>> searchResults,
+                                                      Long providerId, String modelId) {
+        StringBuilder docs = new StringBuilder();
+        int rank = 0;
+        for (Map<String, Object> row : searchResults) {
+            docs.append("[").append(++rank).append("] ")
+                    .append(row.get("content")).append("\n\n");
+        }
+        String prompt = String.format(FAITHFULNESS_PROMPT, docs, generatedAnswer);
+        String result = callLlm(providerId, prompt, modelId);
+        if (result == null || result.isBlank()) {
+            return Map.of("score", 0.0, "reasoning", "LLM 调用失败");
+        }
+        try {
+            JsonNode arr = objectMapper.readTree(extractJson(result));
+            if (!arr.isArray() || arr.size() == 0) {
+                // 无可判定声明（如"无法回答"）→ 视作空真，无幻觉
+                return Map.of("score", 1.0, "reasoning", "无事实性声明（视为接地）");
+            }
+            int supported = 0;
+            for (JsonNode node : arr) {
+                String verdict = node.has("verdict") ? node.get("verdict").asText("").toLowerCase() : "";
+                if ("supported".equals(verdict)) {
+                    supported++;
+                }
+            }
+            double score = (double) supported / arr.size();
+            return Map.of("score", Math.round(score * 10000.0) / 10000.0,
+                    "reasoning", "接地声明 " + supported + "/" + arr.size());
+        } catch (Exception e) {
+            return Map.of("score", 0.0, "reasoning", "解析失败: " + result);
+        }
+    }
+
+    /**
+     * 计算 Answer-Relevancy（答案相关性 / 跑题检测）。
+     * RAGAS 原生算法：让 LLM 从【AI生成的答案】反向推断 N 个问题，对原问题与这些"反推问题"做 embedding
+     * 余弦相似度，取平均。分数低 = 答案跑题、答非所问、或与原始问题无关。
+     *
+     * @return {score: 0~1（平均余弦，embedding 不可用时缺省不含 score 键）, reasoning: 摘要}
+     *         若 embedding 服务不可用导致无法计算，则不放入 score 键（聚合时跳过）。
+     */
+    private Map<String, Object> evaluateAnswerRelevancy(String query, String generatedAnswer,
+                                                       Long providerId, String modelId) {
+        // 1. LLM 从答案反推若干问题
+        String prompt = String.format(ANSWER_RELEVANCY_PROMPT, 3, generatedAnswer);
+        String result = callLlm(providerId, prompt, modelId);
+        if (result == null || result.isBlank()) {
+            return Map.of("reasoning", "LLM 调用失败");
+        }
+        List<String> inferredQuestions;
+        try {
+            JsonNode arr = objectMapper.readTree(extractJson(result));
+            if (!arr.isArray() || arr.size() == 0) {
+                // 无实质内容（如"无法回答"）→ 视作相关
+                return Map.of("score", 1.0, "reasoning", "无实质内容（视为相关）");
+            }
+            inferredQuestions = new ArrayList<>();
+            for (JsonNode n : arr) {
+                inferredQuestions.add(n.asText());
+            }
+        } catch (Exception e) {
+            return Map.of("reasoning", "解析失败: " + result);
+        }
+
+        // 2. 原问题向量化（embedding 不可用时无法计算相关性）
+        double[] queryVec = embedText(query);
+        if (queryVec == null) {
+            return Map.of("reasoning", "问题向量化失败");
+        }
+
+        // 3. 逐条反推问题向量化 + 余弦，取有效平均
+        double sum = 0.0;
+        int valid = 0;
+        for (String q : inferredQuestions) {
+            double[] v = embedText(q);
+            if (v == null) continue;
+            sum += cosineSimilarity(queryVec, v);
+            valid++;
+        }
+        if (valid == 0) {
+            return Map.of("reasoning", "反推问题向量化失败");
+        }
+        double score = sum / valid;
+        return Map.of("score", Math.round(score * 10000.0) / 10000.0,
+                "reasoning", "基于 " + valid + " 个反推问题的平均余弦");
+    }
+
+    private static double cosineSimilarity(double[] a, double[] b) {
+        double dot = 0.0, na = 0.0, nb = 0.0;
+        for (int i = 0; i < Math.min(a.length, b.length); i++) {
+            dot += a[i] * b[i];
+            na += a[i] * a[i];
+            nb += b[i] * b[i];
+        }
+        if (na == 0.0 || nb == 0.0) return 0.0;
+        return dot / (Math.sqrt(na) * Math.sqrt(nb));
     }
 
     private String callLlm(Long providerId, String userPrompt, String modelId) {

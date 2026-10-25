@@ -38,6 +38,24 @@
               <span v-if="answerMetrics">{{ answerMetrics.correct || 0 }} / {{ answerMetrics.total || 0 }}</span>
               <span v-else>-</span>
             </a-descriptions-item>
+            <a-descriptions-item label="接地性 (Faithfulness)">
+              <a-progress
+                v-if="answerMetrics && answerMetrics.faithfulness != null"
+                :percent="Math.round(answerMetrics.faithfulness * 100)"
+                size="small"
+                :stroke-color="scoreColor(answerMetrics.faithfulness)"
+              />
+              <span v-else>-</span>
+            </a-descriptions-item>
+            <a-descriptions-item label="相关性 (Answer Relevancy)">
+              <a-progress
+                v-if="answerMetrics && answerMetrics.answerRelevancy != null"
+                :percent="Math.round(answerMetrics.answerRelevancy * 100)"
+                size="small"
+                :stroke-color="scoreColor(answerMetrics.answerRelevancy)"
+              />
+              <span v-else>-</span>
+            </a-descriptions-item>
             <a-descriptions-item label="耗时">{{ formatDuration(result.durationMs) }}</a-descriptions-item>
             <a-descriptions-item label="创建时间">{{ formatTime(result.createTime) }}</a-descriptions-item>
             <a-descriptions-item v-if="result.status === 'FAILED' && result.error" label="错误信息" :span="2">
@@ -118,6 +136,24 @@
                 </span>
                 <span v-else>-</span>
               </template>
+              <template v-if="column.key === 'faithfulnessScore'">
+                <span
+                  v-if="record.faithfulnessScore != null"
+                  :style="{ color: scoreColor(record.faithfulnessScore), fontWeight: 500 }"
+                >
+                  {{ record.faithfulnessScore.toFixed(1) }}
+                </span>
+                <span v-else>-</span>
+              </template>
+              <template v-if="column.key === 'answerRelevancyScore'">
+                <span
+                  v-if="record.answerRelevancyScore != null"
+                  :style="{ color: scoreColor(record.answerRelevancyScore), fontWeight: 500 }"
+                >
+                  {{ record.answerRelevancyScore.toFixed(1) }}
+                </span>
+                <span v-else>-</span>
+              </template>
               <template v-if="column.key === 'retrievalScores'">
                 <span>{{ formatRecallScore(record.retrievalScores) }}</span>
               </template>
@@ -192,6 +228,21 @@
           </div>
           <p class="metric-example">评判时忽略措辞、格式差异，只关注核心事实是否准确。</p>
         </div>
+
+        <a-divider style="margin: 8px 0" />
+
+        <div class="metric-help-item">
+          <h4>Faithfulness（接地性 / 幻觉检测）</h4>
+          <p>衡量 AI 答案中的事实性声明能否从检索到的参考文档推导出来，越低说明越可能"编造"。</p>
+          <p class="metric-formula">Faithfulness = 接地声明数 / 总声明数</p>
+          <p class="metric-example">1.0 = 全部有据可查；&lt;1.0 表示存在无法从文档证实的内容（疑似幻觉）。</p>
+        </div>
+        <div class="metric-help-item">
+          <h4>Answer Relevancy（答案相关性 / 跑题检测）</h4>
+          <p>衡量 AI 答案是否真正回答了原问题，越低说明越可能"答非所问"或废话过多。</p>
+          <p class="metric-formula">Answer Relevancy = 原问题与反推问题的平均余弦相似度</p>
+          <p class="metric-example">由 LLM 从答案反推若干问题，与原问题做语义相似度，取均值。</p>
+        </div>
       </div>
     </a-modal>
   </a-modal>
@@ -232,6 +283,8 @@ const detailColumns = [
   { title: 'AI 答案', dataIndex: 'generatedAnswer', key: 'generatedAnswer', width: 260, minWidth: 120, ellipsis: true },
   { title: '检索指标', key: 'retrievalScores', width: 120, minWidth: 80 },
   { title: '答案评分', key: 'answerScore', width: 90, minWidth: 70 },
+  { title: '接地性', key: 'faithfulnessScore', width: 90, minWidth: 70 },
+  { title: '相关性', key: 'answerRelevancyScore', width: 90, minWidth: 70 },
   { title: '评分理由', dataIndex: 'answerReasoning', key: 'answerReasoning', minWidth: 120, ellipsis: true },
 ]
 

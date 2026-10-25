@@ -1,1 +1,0 @@
-import{b as t}from"./index-Bg5SiUEh.js";function a(e){return t.get("/observability/traces",{params:e})}function i(e){return t.get(`/observability/traces/${e}`)}function s(e){return t.get("/observability/overview",{params:{traceSource:e}})}function n(e){return t.delete("/observability/traces",{data:e})}export{s as a,a as b,n as d,i as g};
