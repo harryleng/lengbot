@@ -6,7 +6,13 @@ import com.lengbot.dto.GraphTripleDTO;
 import com.lengbot.model.ModelFactory;
 import com.lengbot.util.ModelErrorClassifier;
 import com.lengbot.util.Msgs;
+import io.agentscope.core.message.ContentBlock;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.ThinkingBlock;
+import io.agentscope.core.model.ChatResponse;
+import io.agentscope.core.model.ChatUsage;
+import io.agentscope.core.model.GenerateOptions;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -102,9 +108,16 @@ public class GraphExtractor {
             messages.add(Msgs.user("请从以下文本中抽取实体和关系三元组：\n\n" + truncated
                     + "\n\n要求：紧凑 JSON 输出，不要换行、不要缩进、不要 markdown 代码块。"));
 
+            long callStart = System.currentTimeMillis();
+            log.info("[图谱抽取] 单块调用发起: providerId={}, modelId={}, options={}, inputChars={}, thread={}",
+                    actualProviderId, modelId, describeOptions(ctx.options()), truncated.length(), Thread.currentThread().getName());
             var response = ctx.call(messages);
+            long cost = System.currentTimeMillis() - callStart;
+            logModelResponse("单块", response, cost, truncated.length());
             String text = Msgs.extractText(response);
-            return parseTriples(text);
+            List<GraphTripleDTO> triples = parseTriples(text);
+            log.info("[图谱抽取] 单块解析结果: triples={}, textChars={}, elapsedMs={}", triples.size(), text.length(), cost);
+            return triples;
         } catch (Exception e) {
             if (ModelErrorClassifier.isFatal(e)) {
                 throw ModelErrorClassifier.toRuntimeException(e);
@@ -196,9 +209,16 @@ public class GraphExtractor {
             messages.add(Msgs.user("请从以下文本中抽取实体和关系三元组（文本包含多个段落，请分别抽取）：\n\n" + finalText
                     + "\n\n要求：紧凑 JSON 输出，不要换行、不要缩进、不要 markdown 代码块。"));
 
+            long callStart = System.currentTimeMillis();
+            log.info("[图谱抽取] 批量调用发起: providerId={}, modelId={}, options={}, segments={}, inputChars={}, thread={}",
+                    actualProviderId, modelId, describeOptions(ctx.options()), contents.size(), finalText.length(), Thread.currentThread().getName());
             var response = ctx.call(messages);
+            long cost = System.currentTimeMillis() - callStart;
+            logModelResponse("批量", response, cost, finalText.length());
             String text = Msgs.extractText(response);
-            return parseTriples(text);
+            List<GraphTripleDTO> triples = parseTriples(text);
+            log.info("[图谱抽取] 批量解析结果: triples={}, textChars={}, elapsedMs={}", triples.size(), text.length(), cost);
+            return triples;
         } catch (Exception e) {
             if (ModelErrorClassifier.isFatal(e)) {
                 throw ModelErrorClassifier.toRuntimeException(e);
@@ -228,16 +248,71 @@ public class GraphExtractor {
     }
 
     /**
+     * 打印本次调用真正生效的生成参数，用于确认 maxTokens / temperature 是否下发。
+     */
+    private String describeOptions(GenerateOptions options) {
+        if (options == null) {
+            return "null(未显式设置模型参数)";
+        }
+        return "model=%s, maxTokens=%s, temperature=%s, topP=%s, stream=%s".formatted(
+                options.getModelName(), options.getMaxTokens(), options.getTemperature(),
+                options.getTopP(), options.getStream());
+    }
+
+    /**
+     * 打印模型响应的关键指标，用于定位“无异常但零产出”的场景。
+     */
+    private void logModelResponse(String scene, ChatResponse response, long costMs, int inputChars) {
+        StringBuilder textBuf = new StringBuilder();
+        int thinkingChars = 0;
+        int blockCount = 0;
+        if (response != null && response.getContent() != null) {
+            blockCount = response.getContent().size();
+            for (ContentBlock block : response.getContent()) {
+                if (block instanceof TextBlock tb && tb.getText() != null) {
+                    textBuf.append(tb.getText());
+                } else if (block instanceof ThinkingBlock thb && thb.getThinking() != null) {
+                    thinkingChars += thb.getThinking().length();
+                }
+            }
+        }
+        String text = textBuf.toString();
+        ChatUsage usage = response != null ? response.getUsage() : null;
+        String finishReason = response != null ? response.getFinishReason() : null;
+        String usageDesc = usage == null ? "null"
+                : "in=%d,out=%d,total=%d".formatted(usage.getInputTokens(), usage.getOutputTokens(), usage.getTotalTokens());
+        String preview = text.length() > 200 ? text.substring(0, 200) : text;
+        log.info("[图谱抽取] {} 响应: inputChars={}, elapsedMs={}, blocks={}, textChars={}, thinkingChars={}, finishReason={}, usage={}, preview={}",
+                scene, inputChars, costMs, blockCount, text.length(), thinkingChars, finishReason, usageDesc,
+                preview.replace("\n", "\\n"));
+        if (text.isBlank()) {
+            log.warn("[图谱抽取] {} 响应文本为空: thinkingChars={}, finishReason={}, usage={} —— 该批必然产出 0 条三元组",
+                    scene, thinkingChars, finishReason, usageDesc);
+        }
+    }
+
+    /**
      * 解析 LLM 返回的三元组 JSON
      */
     private List<GraphTripleDTO> parseTriples(String text) {
         if (text == null || text.isBlank()) {
+            log.warn("[图谱抽取] 待解析文本为空，本次产出 0 条三元组（模型可能只输出思考内容，或输出被 maxTokens 截断）");
             return Collections.emptyList();
         }
-        // 去除可能的 markdown 代码块标记
-        String json = text.strip();
+        // 1) 剥离推理模型可能输出的 <think>...</think> / <thinking>...</thinking> 推理块（与 QA/评估抽取保持一致）
+        String cleaned = text;
+        cleaned = cleaned.replaceAll("(?is)<think>.*?</think>", "");
+        cleaned = cleaned.replaceAll("(?is)<thinking>.*?</thinking>", "");
+        // 2) 去除 markdown 代码块围栏
+        String json = cleaned.strip();
         if (json.startsWith("```")) {
             json = json.replaceAll("^```(json)?\\s*", "").replaceAll("\\s*```$", "");
+        }
+        // 3) 截取首个 '[' 到最后一个 ']' 之间的内容，兼容模型在 JSON 前后输出的引导语/收尾语
+        int startBracket = json.indexOf('[');
+        int endBracket = json.lastIndexOf(']');
+        if (startBracket >= 0 && endBracket > startBracket) {
+            json = json.substring(startBracket, endBracket + 1);
         }
         List<GraphTripleDTO> triples = new ArrayList<>();
         boolean truncated = false;
@@ -251,9 +326,11 @@ public class GraphExtractor {
                 Map<String, Object> raw;
                 try {
                     raw = parser.readValueAs(Map.class);
-                } catch (JsonParseException eof) {
-                    // 模型输出被 maxTokens 截断（Unexpected end-of-input），停在最后完整对象处
+                } catch (JsonProcessingException eof) {
+                    // 单个元素结构异常（maxTokens 截断 EOF 或非对象元素）均停在此处，
+                    // 保留已解析的完整三元组，避免一个脏元素导致整批归零
                     truncated = true;
+                    log.info("[图谱抽取] 三元组解析在元素处中断，已抢救前序完整三元组: {}", eof.toString());
                     break;
                 }
                 GraphTripleDTO dto = toTripleDto(raw);
@@ -266,15 +343,15 @@ public class GraphExtractor {
                     text.length() > 200 ? text.substring(0, 200) : text, e);
             return Collections.emptyList();
         } catch (IOException e) {
-            log.warn("[图谱抽取] 三元组解析 IO 异常: {}", e.toString());
+            log.info("[图谱抽取] 三元组解析 IO 异常: {}", e.toString());
             return Collections.emptyList();
         }
         if (truncated) {
             if (triples.isEmpty()) {
-                log.warn("[图谱抽取] 三元组输出被截断，且无完整三元组可抢救: text={}",
+                log.warn("[图谱抽取] 三元组输出被截断，且无完整三元组可抢救（疑似 maxTokens 不足）: text={}",
                         text.length() > 200 ? text.substring(0, 200) : text);
             } else {
-                log.info("[图谱抽取] 三元组输出被截断，已抢救 {} 条完整三元组", triples.size());
+                log.warn("[图谱抽取] 三元组输出被截断，已抢救 {} 条完整三元组（疑似 maxTokens 不足）", triples.size());
             }
         }
         return triples;
@@ -293,10 +370,16 @@ public class GraphExtractor {
         dto.setTail(getString(raw, "tail"));
         dto.setTailType(getString(raw, "tailType"));
         dto.setTailDesc(getString(raw, "tailDesc"));
-        if (dto.getHead() != null && dto.getRelation() != null && dto.getTail() != null) {
-            return dto;
+        if (isBlank(dto.getHead()) || isBlank(dto.getRelation()) || isBlank(dto.getTail())) {
+            log.info("[图谱抽取] 丢弃实体名或关系为空的三元组: head=[{}], relation=[{}], tail=[{}]",
+                    dto.getHead(), dto.getRelation(), dto.getTail());
+            return null;
         }
-        return null;
+        return dto;
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 
     /**
@@ -313,7 +396,7 @@ public class GraphExtractor {
             }
             return objectMapper.readValue(json, new TypeReference<>() {});
         } catch (Exception e) {
-            log.warn("[图谱抽取] 实体名解析失败: text={}", text, e);
+            log.info("[图谱抽取] 实体名解析失败: text={}", text, e);
             return Collections.emptyList();
         }
     }

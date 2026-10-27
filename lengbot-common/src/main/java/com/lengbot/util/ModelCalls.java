@@ -38,6 +38,8 @@ import java.util.Map;
  */
 public final class ModelCalls {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ModelCalls.class);
+
     private ModelCalls() {
     }
 
@@ -215,6 +217,11 @@ public final class ModelCalls {
                     textBuf.append(chunkText);
                 }
             }
+        }
+
+        if (textBuf.length() == 0 && toolUses.isEmpty()) {
+            log.warn("[ModelCalls] 流式聚合后无文本内容: chunks={}, thinkingChars={}, finishReason={}",
+                    chunks.size(), thinkingBuf.length(), finishReason);
         }
 
         List<ContentBlock> merged = new ArrayList<>();

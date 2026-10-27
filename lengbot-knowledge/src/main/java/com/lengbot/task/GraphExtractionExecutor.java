@@ -181,6 +181,7 @@ public class GraphExtractionExecutor implements TaskExecutor {
                     log.info("[图谱抽取执行器] 文档 {}/{}: docId={}, chunks={}", docIdx + 1, documents.size(), doc.getId(), docChunks.size());
 
                     List<GraphTripleDTO> docTriples = extractTriples(task, docChunks, providerId, modelId, schema, modelParams, concurrency);
+                    log.info("[图谱抽取执行器] 文档返回: docId={}, chunks={}, triples={}", doc.getId(), docChunks.size(), docTriples.size());
 
                     int[] counts = writeTriplesToNeo4j(label, docTriples, doc.getId(), knowledgeId, "auto", graphSource);
                     totalNodes += counts[0];
@@ -199,7 +200,7 @@ public class GraphExtractionExecutor implements TaskExecutor {
 
                 } catch (Exception e) {
                     String errorMsg = ModelErrorClassifier.formatDetail(e);
-                    log.warn("[图谱抽取执行器] 文档 {} 抽取失败: {}", doc.getId(), errorMsg);
+                    log.info("[图谱抽取执行器] 文档 {} 抽取失败: {}", doc.getId(), errorMsg);
                     if (docGraphDoc != null) {
                         docGraphDoc.setStatus(GraphTaskStatus.FAILED);
                         docGraphDoc.setErrorMessage(errorMsg);
@@ -223,7 +224,8 @@ public class GraphExtractionExecutor implements TaskExecutor {
                 throw new RuntimeException("图谱抽取失败：所有文档均未成功抽取实体关系");
             }
             if (successDocCount > 0 && totalChunkCount > 0 && totalNodes == 0 && totalEdges == 0) {
-                throw new RuntimeException("图谱抽取失败：未能从文档中抽取到任何实体关系（文档可能不包含可识别的实体关系）");
+                throw new RuntimeException("图谱抽取失败：未能从文档中抽取到任何实体关系（文档可能不包含可识别的实体关系）, chunks=%d, successDocs=%d"
+                        .formatted(totalChunkCount, successDocCount));
             }
 
             // 8. 写入 Entity/Triple 向量到 Milvus（仅本次抽取有产出时）
@@ -232,7 +234,7 @@ public class GraphExtractionExecutor implements TaskExecutor {
                 try {
                     writeGraphVectors(knowledgeId, label);
                 } catch (Exception e) {
-                    log.warn("[图谱抽取执行器] 写入图谱向量失败（不影响图谱抽取结果）: {}", e.getMessage());
+                    log.info("[图谱抽取执行器] 写入图谱向量失败（不影响图谱抽取结果）: {}", e.getMessage());
                 }
             }
 
@@ -292,33 +294,71 @@ public class GraphExtractionExecutor implements TaskExecutor {
             batches.add(new ArrayList<>(chunks.subList(i, end)));
         }
 
-        ExecutorService executor = Executors.newFixedThreadPool(concurrency);
+        long startedAt = System.currentTimeMillis();
         AtomicInteger completedChunks = new AtomicInteger(0);
+        AtomicInteger okBatches = new AtomicInteger(0);
+        AtomicInteger emptyBatches = new AtomicInteger(0);
+        AtomicInteger failedBatches = new AtomicInteger(0);
+        AtomicInteger emptyChunks = new AtomicInteger(0);
+        log.info("[图谱抽取执行器] 批次切分: taskId={}, chunks={}, batchSize={}, batches={}, concurrency={}, providerId={}, modelId={}, modelParams={}, hasSchema={}",
+                task.getId(), chunks.size(), batchSize, batches.size(), concurrency, providerId, modelId, modelParams, schema != null);
+
+        ExecutorService executor = Executors.newFixedThreadPool(concurrency);
         List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-        for (List<Chunk> batch : batches) {
+        for (int batchIdx = 0; batchIdx < batches.size(); batchIdx++) {
+            final int batchNo = batchIdx + 1;
+            final List<Chunk> batch = batches.get(batchIdx);
             CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                 if (redisUtil.hasCancelSignal(task.getId())) {
                     throw new CompletionException(new TaskCancelledException());
                 }
 
+                long batchStart = System.currentTimeMillis();
+                int inputChars = batch.stream()
+                        .map(Chunk::getContent)
+                        .mapToInt(c -> c == null ? 0 : c.length())
+                        .sum();
+                log.info("[图谱抽取执行器] 批次 {}/{} 发起: taskId={}, chunks={}, inputChars={}, thread={}",
+                        batchNo, batches.size(), task.getId(), batch.size(), inputChars, Thread.currentThread().getName());
+
                 try {
                     List<String> contents = batch.stream().map(Chunk::getContent).collect(Collectors.toList());
                     List<GraphTripleDTO> triples = graphExtractor.extractBatch(contents, providerId, modelId, schema, modelParams);
+                    if (triples.isEmpty()) {
+                        emptyBatches.incrementAndGet();
+                    } else {
+                        okBatches.incrementAndGet();
+                    }
                     allTriples.addAll(triples);
+                    log.info("[图谱抽取执行器] 批次 {}/{} 返回: taskId={}, triples={}, elapsedMs={}",
+                            batchNo, batches.size(), task.getId(), triples.size(), System.currentTimeMillis() - batchStart);
                 } catch (Exception e) {
+                    failedBatches.incrementAndGet();
                     if (ModelErrorClassifier.isFatal(e)) {
                         throw new CompletionException(ModelErrorClassifier.toRuntimeException(e));
                     }
-                    log.warn("[图谱抽取执行器] 批次抽取失败, 降级为逐个抽取: {}", e.getMessage());
+                    log.warn("[图谱抽取执行器] 批次 {}/{} 异常, 降级为逐个抽取: taskId={}, elapsedMs={}, error={}",
+                            batchNo, batches.size(), task.getId(), System.currentTimeMillis() - batchStart,
+                            ModelErrorClassifier.formatDetail(e));
                     for (Chunk chunk : batch) {
+                        long oneStart = System.currentTimeMillis();
                         try {
-                            allTriples.addAll(graphExtractor.extract(chunk.getContent(), providerId, modelId, schema, modelParams));
+                            List<GraphTripleDTO> single = graphExtractor.extract(chunk.getContent(), providerId, modelId, schema, modelParams);
+                            allTriples.addAll(single);
+                            if (single.isEmpty()) {
+                                emptyChunks.incrementAndGet();
+                            }
+                            log.info("[图谱抽取执行器] 降级单块返回: taskId={}, chunkId={}, triples={}, elapsedMs={}",
+                                    task.getId(), chunk.getId(), single.size(), System.currentTimeMillis() - oneStart);
                         } catch (Exception ex) {
                             if (ModelErrorClassifier.isFatal(ex)) {
                                 throw new CompletionException(ModelErrorClassifier.toRuntimeException(ex));
                             }
-                            log.warn("[图谱抽取执行器] Chunk {} 抽取失败: {}", chunk.getId(), ex.getMessage());
+                            emptyChunks.incrementAndGet();
+                            log.warn("[图谱抽取执行器] 降级单块异常: taskId={}, chunkId={}, elapsedMs={}, error={}",
+                                    task.getId(), chunk.getId(), System.currentTimeMillis() - oneStart,
+                                    ModelErrorClassifier.formatDetail(ex));
                         }
                     }
                 }
@@ -344,6 +384,10 @@ public class GraphExtractionExecutor implements TaskExecutor {
             executor.shutdown();
         }
 
+        log.info("[图谱抽取执行器] 抽取汇总: taskId={}, chunks={}, batches={}, okBatches={}, emptyBatches={}, failedBatches={}, emptyChunks={}, triples={}, elapsedMs={}",
+                task.getId(), chunks.size(), batches.size(), okBatches.get(), emptyBatches.get(),
+                failedBatches.get(), emptyChunks.get(), allTriples.size(), System.currentTimeMillis() - startedAt);
+
         return allTriples;
     }
 
@@ -360,8 +404,12 @@ public class GraphExtractionExecutor implements TaskExecutor {
         java.util.Set<String> nodes = new java.util.HashSet<>();
         int edgeCount = 0;
 
+        int skipped = 0;
         for (GraphTripleDTO triple : triples) {
-            if (triple.getHead() == null || triple.getTail() == null || triple.getRelation() == null) {
+            if (triple.getHead() == null || triple.getHead().isBlank()
+                    || triple.getTail() == null || triple.getTail().isBlank()
+                    || triple.getRelation() == null || triple.getRelation().isBlank()) {
+                skipped++;
                 continue;
             }
 
@@ -371,7 +419,9 @@ public class GraphExtractionExecutor implements TaskExecutor {
                               n.source = $source, n.document_id = $documentId, n.knowledge_id = $knowledgeId,
                               n.graph_source = $graphSource,
                               n.created_at = datetime(), n.updated_at = datetime()
-                ON MATCH SET n.updated_at = datetime()
+                ON MATCH SET n.entity_type = $entityType, n.description = $description,
+                              n.document_id = $documentId, n.graph_source = $graphSource,
+                              n.updated_at = datetime()
                 """.formatted(label);
 
             java.util.Map<String, Object> nodeParams = new java.util.LinkedHashMap<>();
@@ -422,6 +472,9 @@ public class GraphExtractionExecutor implements TaskExecutor {
             edgeCount++;
         }
 
+        if (skipped > 0) {
+            log.warn("[图谱抽取执行器] 写入 Neo4j 时跳过 {} 条实体名/关系为空的脏三元组", skipped);
+        }
         return new int[]{nodes.size(), edgeCount};
     }
 
@@ -445,7 +498,8 @@ public class GraphExtractionExecutor implements TaskExecutor {
         // 删除该文档节点的所有关系（仅单文档图谱）
         String deleteRels = """
             MATCH (n:Entity:`%s`)-[r:RELATION]-(m:Entity:`%s`)
-            WHERE n.document_id = $docId AND n.graph_source = 'single_doc'
+            WHERE r.graph_source = 'single_doc'
+              AND (n.document_id = $docId OR m.document_id = $docId)
             DELETE r
             """.formatted(label, label);
         neo4jUtil.run(deleteRels, java.util.Map.of("docId", docIdStr));
@@ -453,21 +507,33 @@ public class GraphExtractionExecutor implements TaskExecutor {
         // 删除该文档的节点（仅单文档图谱）
         String deleteNodes = """
             MATCH (n:Entity:`%s`)
-            WHERE n.document_id = $docId AND n.graph_source = 'single_doc'
+            WHERE n.document_id = $docId AND n.graph_source = 'single_doc' AND NOT (n)--()
             DELETE n
             """.formatted(label);
         neo4jUtil.run(deleteNodes, java.util.Map.of("docId", docIdStr));
     }
 
+    /**
+     * 统计口径与图查询口径（GraphServiceImpl#getStatsFromNeo4j）保持一致：
+     * 存在 merged（全库合并产物）时只统计 merged，否则统计全部来源（含 single_doc）。
+     * 否则会出现“抽取成功但前端查不到”的展示不一致。
+     */
     private GraphStatsVO getStatsFromNeo4j(String label) {
+        boolean mergedOnly = hasMergedNodes(label);
+        String nFilter = mergedOnly
+                ? "(n.graph_source = 'merged' OR n.graph_source IS NULL)"
+                : "(n.graph_source IN ['merged', 'single_doc'] OR n.graph_source IS NULL)";
+        String rFilter = mergedOnly
+                ? "(r.graph_source = 'merged' OR r.graph_source IS NULL)"
+                : "(r.graph_source IN ['merged', 'single_doc'] OR r.graph_source IS NULL)";
         String cypher = """
             MATCH (n:Entity:`%s`)
-            WHERE n.graph_source = 'merged' OR n.graph_source IS NULL
+            WHERE %s
             WITH count(n) AS nodeCount
             OPTIONAL MATCH (:Entity:`%s`)-[r:RELATION]->(:Entity:`%s`)
-            WHERE r.graph_source = 'merged' OR r.graph_source IS NULL
+            WHERE %s
             RETURN nodeCount, count(r) AS edgeCount
-            """.formatted(label, label, label);
+            """.formatted(label, nFilter, label, label, rFilter);
 
         var records = neo4jUtil.query(cypher, java.util.Map.of());
         int nodeCount = 0, edgeCount = 0;
@@ -480,13 +546,27 @@ public class GraphExtractionExecutor implements TaskExecutor {
     }
 
     /**
+     * 判断该知识库是否已存在全库合并图谱数据。
+     */
+    private boolean hasMergedNodes(String label) {
+        try {
+            String cypher = "MATCH (n:Entity:`%s`) WHERE n.graph_source = 'merged' RETURN count(n) AS cnt".formatted(label);
+            var records = neo4jUtil.query(cypher, java.util.Map.of());
+            return !records.isEmpty() && records.get(0).get("cnt").asLong() > 0;
+        } catch (Exception e) {
+            log.warn("[图谱抽取执行器] 检测合并图谱数据失败，回退为全部来源: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * 从 Neo4j 读取 Entity/Triple，生成 Embedding 后写入 Milvus
      */
     private void writeGraphVectors(Long knowledgeId, String label) {
         // 1. 从 Neo4j 查询所有 Entity
         String entityCypher = """
             MATCH (n:Entity:`%s`)
-            WHERE n.graph_source = 'merged' OR n.graph_source IS NULL
+            WHERE n.graph_source = 'merged' OR n.graph_source = 'single_doc' OR n.graph_source IS NULL
             RETURN n.id AS id, n.name AS name, n.description AS description
             """.formatted(label);
 
@@ -511,7 +591,7 @@ public class GraphExtractionExecutor implements TaskExecutor {
         if (!milvusUtil.hasEntityCollection(knowledgeId)) {
             float[] sampleVec = firstNonNullVector(batchEmbed(entityContents.subList(0, Math.min(1, entityContents.size()))));
             if (sampleVec == null) {
-                log.warn("[图谱向量] Entity 向量采样全部失败, 跳过 Entity 向量写入: knowledgeId={}", knowledgeId);
+                log.info("[图谱向量] Entity 向量采样全部失败, 跳过 Entity 向量写入: knowledgeId={}", knowledgeId);
             } else {
                 milvusUtil.createEntityCollection(knowledgeId, sampleVec.length);
             }
@@ -525,7 +605,7 @@ public class GraphExtractionExecutor implements TaskExecutor {
         for (int k = 0; k < entityVectorsRaw.size(); k++) {
             float[] v = entityVectorsRaw.get(k);
             if (v == null) {
-                log.warn("[图谱向量] Entity 向量嵌入失败, 跳过: {}", entityContents.get(k));
+                log.info("[图谱向量] Entity 向量嵌入失败, 跳过: {}", entityContents.get(k));
                 continue;
             }
             okEntityIds.add(entityIds.get(k));
@@ -536,13 +616,13 @@ public class GraphExtractionExecutor implements TaskExecutor {
             milvusUtil.insertEntityVectors(knowledgeId, okEntityIds, okEntityContents, okEntityVectors);
             log.info("[图谱向量] Entity 向量写入完成: knowledgeId={}, count={}", knowledgeId, okEntityIds.size());
         } else if (!okEntityVectors.isEmpty()) {
-            log.warn("[图谱向量] Entity Collection 不存在, 跳过 Entity 向量写入: knowledgeId={}", knowledgeId);
+            log.info("[图谱向量] Entity Collection 不存在, 跳过 Entity 向量写入: knowledgeId={}", knowledgeId);
         }
 
         // 4. 从 Neo4j 查询所有 Triple
         String tripleCypher = """
             MATCH (h:Entity:`%s`)-[r:RELATION]->(t:Entity:`%s`)
-            WHERE r.graph_source = 'merged' OR r.graph_source IS NULL
+            WHERE r.graph_source = 'merged' OR r.graph_source = 'single_doc' OR r.graph_source IS NULL
             RETURN r.id AS id, h.id AS sourceId, t.id AS targetId,
                    h.name AS headName, r.relation_type AS relType, t.name AS tailName
             """.formatted(label, label);
@@ -575,7 +655,7 @@ public class GraphExtractionExecutor implements TaskExecutor {
         if (!milvusUtil.hasTripleCollection(knowledgeId)) {
             float[] sampleVec = firstNonNullVector(batchEmbed(tripleContents.subList(0, Math.min(1, tripleContents.size()))));
             if (sampleVec == null) {
-                log.warn("[图谱向量] Triple 向量采样全部失败, 跳过 Triple 向量写入: knowledgeId={}", knowledgeId);
+                log.info("[图谱向量] Triple 向量采样全部失败, 跳过 Triple 向量写入: knowledgeId={}", knowledgeId);
             } else {
                 milvusUtil.createTripleCollection(knowledgeId, sampleVec.length);
             }
@@ -591,7 +671,7 @@ public class GraphExtractionExecutor implements TaskExecutor {
         for (int k = 0; k < tripleVectorsRaw.size(); k++) {
             float[] v = tripleVectorsRaw.get(k);
             if (v == null) {
-                log.warn("[图谱向量] Triple 向量嵌入失败, 跳过: {}", tripleContents.get(k));
+                log.info("[图谱向量] Triple 向量嵌入失败, 跳过: {}", tripleContents.get(k));
                 continue;
             }
             okTripleIds.add(tripleIds.get(k));
@@ -604,7 +684,7 @@ public class GraphExtractionExecutor implements TaskExecutor {
             milvusUtil.insertTripleVectors(knowledgeId, okTripleIds, okTripleContents, okSourceIds, okTargetIds, okTripleVectors);
             log.info("[图谱向量] Triple 向量写入完成: knowledgeId={}, count={}", knowledgeId, okTripleIds.size());
         } else if (!okTripleVectors.isEmpty()) {
-            log.warn("[图谱向量] Triple Collection 不存在, 跳过 Triple 向量写入: knowledgeId={}", knowledgeId);
+            log.info("[图谱向量] Triple Collection 不存在, 跳过 Triple 向量写入: knowledgeId={}", knowledgeId);
         }
     }
 
@@ -636,7 +716,7 @@ public class GraphExtractionExecutor implements TaskExecutor {
                     allVectors.add(fVec);
                 }
             } catch (Exception e) {
-                log.warn("[图谱向量] 整批 Embedding 生成失败(已隔离, 不写零向量): batch=[{}, {}), error={}", i, end, e.getMessage());
+                log.info("[图谱向量] 整批 Embedding 生成失败(已隔离, 不写零向量): batch=[{}, {}), error={}", i, end, e.getMessage());
                 // 失败时以 null 占位维持对齐，避免脏零向量入库
                 for (int j = 0; j < batch.size(); j++) {
                     allVectors.add(null);

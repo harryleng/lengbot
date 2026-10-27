@@ -300,6 +300,10 @@ public class GraphServiceImpl implements GraphService {
             if (request.getModelParams() != null && !request.getModelParams().isEmpty()) {
                 payload.put("modelParams", request.getModelParams());
             }
+            log.info("[图谱] 抽取参数: knowledgeId={}, providerId={}, modelId={}, concurrency={}, modelParams={}, schemaLen={}, documentIds={}",
+                    knowledgeId, providerId, modelId, request.getConcurrency(), request.getModelParams(),
+                    request.getSchema() == null ? 0 : request.getSchema().length(), documentIds);
+
             var task = taskService.createTask(com.lengbot.enums.TaskType.GRAPH_EXTRACTION,
                     "图谱抽取", knowledge.getUserId(), knowledgeId,
                     objectMapper.writeValueAsString(payload));
@@ -381,18 +385,22 @@ public class GraphServiceImpl implements GraphService {
         }
 
         // 合并为单条 Cypher 查询（WHERE n.name IN $names），避免 N 次往返
+        boolean mergedOnly = hasMergedNodes(label);
+        String nSrc = sourceFilter(mergedOnly, "n");
+        String r1Src = sourceFilter(mergedOnly, "r1");
+        String m2Src = sourceFilter(mergedOnly, "m2");
         String cypher = """
             MATCH (n:Entity:`%s`)
-            WHERE n.name IN $names AND (n.graph_source = 'merged' OR n.graph_source IS NULL)
+            WHERE n.name IN $names AND %s
             OPTIONAL MATCH (n)-[r1]-(m1:Entity:`%s`)
-            WHERE r1 IS NOT NULL AND (r1.graph_source = 'merged' OR r1.graph_source IS NULL)
+            WHERE r1 IS NOT NULL AND %s
             WITH n, r1, m1
             WHERE r1 IS NOT NULL
             OPTIONAL MATCH (m1)-[r2]-(m2:Entity:`%s`)
-            WHERE m2 <> n AND m2 IS NOT NULL AND (r2.graph_source = 'merged' OR r2.graph_source IS NULL)
+            WHERE m2 <> n AND m2 IS NOT NULL AND %s
             RETURN n.name AS h1, type(r1) AS r1Type, r1.relation_type AS r1Rel, m1.name AS t1,
                    m1.name AS h2, type(r2) AS r2Type, r2.relation_type AS r2Rel, m2.name AS t2
-            """.formatted(label, label, label);
+            """.formatted(label, nSrc, label, r1Src, label, m2Src);
 
         List<org.neo4j.driver.Record> records = neo4jUtil.query(cypher, Map.of("names", entityNames));
         List<String> results = new ArrayList<>();
@@ -858,26 +866,28 @@ public class GraphServiceImpl implements GraphService {
     }
 
     private List<org.neo4j.driver.Record> queryByKeyword(String label, String keyword, int maxNodes) {
+        boolean mergedOnly = hasMergedNodes(label);
         String cypher = """
             MATCH (n:Entity:`%s`)
             WHERE toLower(n.name) CONTAINS toLower($keyword)
-              AND (n.graph_source = 'merged' OR n.graph_source IS NULL)
+              AND %s
             WITH n LIMIT $maxNodes
             OPTIONAL MATCH (n)-[r]-(m:Entity:`%s`)
-            WHERE r.graph_source = 'merged' OR r.graph_source IS NULL
+            WHERE %s
             RETURN n, r, m
-            """.formatted(label, label);
+            """.formatted(label, sourceFilter(mergedOnly, "n"), label, sourceFilter(mergedOnly, "r"));
 
         return neo4jUtil.query(cypher, Map.of("keyword", keyword, "maxNodes", maxNodes));
     }
 
     private List<org.neo4j.driver.Record> querySampleSubgraph(String label, int maxNodes) {
+        boolean mergedOnly = hasMergedNodes(label);
         String cypher = """
             MATCH (n:Entity:`%s`)-[r:RELATION]-(m:Entity:`%s`)
-            WHERE n.graph_source = 'merged' OR n.graph_source IS NULL
+            WHERE %s
             RETURN n, r, m
             LIMIT $maxNodes
-            """.formatted(label, label);
+            """.formatted(label, label, sourceFilter(mergedOnly, "n"));
 
         return neo4jUtil.query(cypher, Map.of("maxNodes", maxNodes));
     }
@@ -968,15 +978,48 @@ public class GraphServiceImpl implements GraphService {
         return vo;
     }
 
+    /**
+     * 图数据来源过滤条件。
+     *
+     * <p>存在 merged（全库合并抽取产物）时只取 merged，避免与单文档图重复计数；
+     * 否则回退到全部来源（含 single_doc），保证只做过单文档抽取时全库视图可见。</p>
+     *
+     * @param mergedOnly 是否已存在合并图谱数据
+     * @param alias      Cypher 中的变量名（节点或关系）
+     */
+    private String sourceFilter(boolean mergedOnly, String alias) {
+        if (mergedOnly) {
+            return "(%s.graph_source = 'merged' OR %s.graph_source IS NULL)".formatted(alias, alias);
+        }
+        return "(%s.graph_source IN ['merged', 'single_doc'] OR %s.graph_source IS NULL)".formatted(alias, alias);
+    }
+
+    /**
+     * 判断该知识库是否已存在全库合并图谱数据。
+     */
+    private boolean hasMergedNodes(String label) {
+        try {
+            String cypher = "MATCH (n:Entity:`%s`) WHERE n.graph_source = 'merged' RETURN count(n) AS cnt".formatted(label);
+            List<org.neo4j.driver.Record> records = neo4jUtil.query(cypher, Map.of());
+            return !records.isEmpty() && records.get(0).get("cnt").asLong() > 0;
+        } catch (Exception e) {
+            log.warn("[图谱] 检测合并图谱数据失败，回退为全部来源: {}", e.getMessage());
+            return false;
+        }
+    }
+
     private GraphStatsVO getStatsFromNeo4j(String label) {
+        boolean mergedOnly = hasMergedNodes(label);
+        String nSrc = sourceFilter(mergedOnly, "n");
+        String rSrc = sourceFilter(mergedOnly, "r");
         String cypher = """
             MATCH (n:Entity:`%s`)
-            WHERE n.graph_source = 'merged' OR n.graph_source IS NULL
+            WHERE %s
             WITH count(n) AS nodeCount
             OPTIONAL MATCH (:Entity:`%s`)-[r:RELATION]->(:Entity:`%s`)
-            WHERE r.graph_source = 'merged' OR r.graph_source IS NULL
+            WHERE %s
             RETURN nodeCount, count(r) AS edgeCount
-            """.formatted(label, label, label);
+            """.formatted(label, nSrc, label, label, rSrc);
 
         List<org.neo4j.driver.Record> records = neo4jUtil.query(cypher, Map.of());
         int nodeCount = 0, edgeCount = 0;
@@ -988,10 +1031,10 @@ public class GraphServiceImpl implements GraphService {
 
         String distCypher = """
             MATCH (n:Entity:`%s`)
-            WHERE n.graph_source = 'merged' OR n.graph_source IS NULL
+            WHERE %s
             RETURN n.entity_type AS type, count(*) AS cnt
             ORDER BY cnt DESC
-            """.formatted(label);
+            """.formatted(label, nSrc);
 
         Map<String, Integer> typeDist = new LinkedHashMap<>();
         List<org.neo4j.driver.Record> distRecords = neo4jUtil.query(distCypher, Map.of());
@@ -1077,6 +1120,7 @@ public class GraphServiceImpl implements GraphService {
      */
     private GraphNodeVO lookupEntityForSemanticSearch(String label, long entityId, String entityName, Long documentId) {
         String cypher;
+        String nSrc = null;
         Map<String, Object> params = new HashMap<>();
         if (documentId != null) {
             cypher = """
@@ -1088,12 +1132,13 @@ public class GraphServiceImpl implements GraphService {
             params.put("name", entityName);
             params.put("docId", String.valueOf(documentId));
         } else {
+            nSrc = sourceFilter(hasMergedNodes(label), "n");
             cypher = """
                 MATCH (n:Entity:`%s`)
-                WHERE n.id = $entityId AND (n.graph_source = 'merged' OR n.graph_source IS NULL)
+                WHERE n.id = $entityId AND %s
                 RETURN n
                 LIMIT 1
-                """.formatted(label);
+                """.formatted(label, nSrc);
             params.put("entityId", String.valueOf(entityId));
         }
 
@@ -1102,10 +1147,10 @@ public class GraphServiceImpl implements GraphService {
             // 全库模式下 id 未命中时，回退按名称匹配 merged 节点
             String fallbackCypher = """
                 MATCH (n:Entity:`%s`)
-                WHERE n.name = $name AND (n.graph_source = 'merged' OR n.graph_source IS NULL)
+                WHERE n.name = $name AND %s
                 RETURN n
                 LIMIT 1
-                """.formatted(label);
+                """.formatted(label, nSrc);
             records = neo4jUtil.query(fallbackCypher, Map.of("name", entityName));
         }
         if (records.isEmpty()) {

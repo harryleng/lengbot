@@ -97,6 +97,23 @@ public class OpenAIModelHandler implements ModelProviderHandler {
             builder.frequencyPenalty(toDouble(config.get("frequencyPenalty")));
         }
 
+        // 思考控制：reasoning 模型（如混元 Hy4 preview）默认开启深度思考，会把 maxTokens
+        // 全部消耗在 thinking 上导致正文为空（finishReason=length、textChars=0）。
+        // 支持 modelParams.thinking 传 {"type":"disabled"} / false / "disabled"，
+        // 经 GenerateOptions.additionalBodyParams -> OpenAIRequest.extraParams 落到请求体顶层。
+        Object thinking = config.get("thinking");
+        if (thinking instanceof Map<?, ?> thinkingMap) {
+            builder.additionalBodyParam("thinking", thinkingMap);
+        } else if (thinking instanceof Boolean thinkingFlag) {
+            builder.additionalBodyParam("thinking", Map.of("type", thinkingFlag ? "enabled" : "disabled"));
+        } else if (thinking instanceof String thinkingType && !thinkingType.isBlank()) {
+            builder.additionalBodyParam("thinking", Map.of("type", thinkingType));
+        }
+        // OpenAI 原生 reasoning_effort（high / low / none 等）
+        if (config.containsKey("reasoningEffort")) {
+            builder.reasoningEffort(config.get("reasoningEffort").toString());
+        }
+
         return builder.build();
     }
 
