@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lengbot.agent.harness.AgentEventSseBridge;
 import com.lengbot.agent.harness.HarnessAgentFactory;
+import com.lengbot.agent.harness.HarnessContextTrimMiddleware;
 import com.lengbot.agent.harness.SubAgentEventBridge;
 import com.lengbot.agent.tool.knowledge.QueryKnowledgeTool;
 import com.lengbot.agent.tool.memory.UserMemoryToolCallbackFactory;
@@ -13,21 +14,14 @@ import com.lengbot.constant.ToolResultPrefixes;
 import com.lengbot.dto.ChatRequestDTO;
 import com.lengbot.dto.LlmTraceSpanDTO;
 import com.lengbot.dto.MemoryExtractDTO;
-import com.lengbot.entity.Agent;
-import com.lengbot.entity.Knowledge;
-import com.lengbot.entity.ModelProvider;
-import com.lengbot.entity.ToolCall;
+import com.lengbot.entity.*;
 import com.lengbot.enums.MessageRole;
 import com.lengbot.enums.MessageType;
 import com.lengbot.enums.ModelProviderType;
 import com.lengbot.model.MimoChatClient;
 import com.lengbot.service.*;
 import com.lengbot.service.chat.*;
-import com.lengbot.entity.RoundCheckpoint;
-import com.lengbot.service.Checkpointer;
-import com.lengbot.util.MsgCheckpointUtil;
 import com.lengbot.subagent.DelegateSubAgentTool;
-import com.lengbot.agent.harness.HarnessContextTrimMiddleware;
 import com.lengbot.subagent.spi.SubAgentDefinition;
 import com.lengbot.subagent.spi.SubAgentDefinitionResolver;
 import com.lengbot.tool.ToolEventEmitter;
@@ -37,10 +31,10 @@ import com.lengbot.vo.RagReferenceVO;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.*;
 import io.agentscope.core.message.*;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.ChatUsage;
 import io.agentscope.core.model.GenerateOptions;
-import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.ToolBase;
 import io.agentscope.core.tool.ToolCallParam;
@@ -78,7 +72,9 @@ public class ChatServiceImpl implements ChatService {
 
     // ==================== AgentScope 消息/工具参数辅助方法 ====================
 
-    /** AgentScope 工具入参为 Map<String,Object>，序列化为 JSON 字符串供后续业务使用 */
+    /**
+     * AgentScope 工具入参为 Map<String,Object>，序列化为 JSON 字符串供后续业务使用
+     */
     private String toolInputToString(Map<String, Object> input) {
         if (input == null) {
             return "";
@@ -106,16 +102,18 @@ public class ChatServiceImpl implements ChatService {
             b.userId(String.valueOf(chatContext.getUserId()));
         }
         b.put("agentId", agentId)
-         .put("sessionId", sessionId != null ? sessionId.toString() : "default")
-         .put("requestId", requestId)
-         .put("userId", chatContext != null ? chatContext.getUserId() : null)
-         .put("chatContext", chatContext)
-         .put("currentTodos", chatContext != null ? chatContext.getCurrentTodosSnapshot() : null)
-         .put("toolInput", callArgs);
+                .put("sessionId", sessionId != null ? sessionId.toString() : "default")
+                .put("requestId", requestId)
+                .put("userId", chatContext != null ? chatContext.getUserId() : null)
+                .put("chatContext", chatContext)
+                .put("currentTodos", chatContext != null ? chatContext.getCurrentTodosSnapshot() : null)
+                .put("toolInput", callArgs);
         return b.build();
     }
 
-    /** 从 ToolResultBlock 的 output 中提取首个文本块内容 */
+    /**
+     * 从 ToolResultBlock 的 output 中提取首个文本块内容
+     */
     private String toolResultToText(ToolResultBlock block) {
         if (block == null || block.getOutput() == null) {
             return "";
@@ -126,7 +124,9 @@ public class ChatServiceImpl implements ChatService {
                 .collect(java.util.stream.Collectors.joining());
     }
 
-    /** 将工具参数 JSON 字符串解析为 Map（用于构造 ToolCallParam.input） */
+    /**
+     * 将工具参数 JSON 字符串解析为 Map（用于构造 ToolCallParam.input）
+     */
     @SuppressWarnings("unchecked")
     private Map<String, Object> parseToolArgsToMap(String argsJson) {
         if (argsJson == null || argsJson.isBlank()) {
@@ -140,26 +140,38 @@ public class ChatServiceImpl implements ChatService {
     }
 
     private final AgentService agentService;
-    /** 向量存储与相似度检索服务 */
+    /**
+     * 向量存储与相似度检索服务
+     */
     private final EmbeddingService embeddingService;
 
-    /** 文本向量生成服务（AgentScope 引擎） */
+    /**
+     * 文本向量生成服务（AgentScope 引擎）
+     */
     private final TextEmbeddingService textEmbeddingService;
     private final KnowledgeService knowledgeService;
     @Qualifier("lengBotExecutor")
     private final ThreadPoolTaskExecutor taskExecutor;
     private final ToolCallService toolCallService;
 
-    /** 生产级 HarnessAgent 工厂（Phase 1：按 agent 配置构建带工具的 HarnessAgent）。 */
+    /**
+     * 生产级 HarnessAgent 工厂（Phase 1：按 agent 配置构建带工具的 HarnessAgent）。
+     */
     private final HarnessAgentFactory harnessAgentFactory;
 
-    /** v2 AgentEvent -> 主链路 SSE 协议桥接器。 */
+    /**
+     * v2 AgentEvent -> 主链路 SSE 协议桥接器。
+     */
     private final AgentEventSseBridge agentEventSseBridge;
 
-    /** Harness 原生子 agent（agent_spawn）事件 -> subagent_* SSE 协议桥接器（C3 Phase 2）。 */
+    /**
+     * Harness 原生子 agent（agent_spawn）事件 -> subagent_* SSE 协议桥接器（C3 Phase 2）。
+     */
     private final SubAgentEventBridge subAgentEventBridge;
 
-    /** Agent 绑定子 agent 定义的解析器（C3 Phase 1：harness agent_spawn 注册用）。 */
+    /**
+     * Agent 绑定子 agent 定义的解析器（C3 Phase 1：harness agent_spawn 注册用）。
+     */
     private final SubAgentDefinitionResolver subAgentDefinitionResolver;
 
     /**
@@ -195,15 +207,23 @@ public class ChatServiceImpl implements ChatService {
     private final com.lengbot.subagent.service.SubAgentTaskService subAgentTaskService;
     private final Checkpointer checkpointer;
 
-    /** SSE 心跳注释行（SSE 协议：以冒号开头的行是注释，客户端应忽略） */
+    /**
+     * SSE 心跳注释行（SSE 协议：以冒号开头的行是注释，客户端应忽略）
+     */
     private static final String HEARTBEAT_PREFIX = ":heartbeat";
 
-    /** 工具执行超时时间（秒），与 {@link com.lengbot.constant.ChatConstants#TOOL_EXECUTION_TIMEOUT_SECONDS} 一致 */
+    /**
+     * 工具执行超时时间（秒），与 {@link com.lengbot.constant.ChatConstants#TOOL_EXECUTION_TIMEOUT_SECONDS} 一致
+     */
     private static final long TOOL_EXECUTION_TIMEOUT_SECONDS = com.lengbot.constant.ChatConstants.TOOL_EXECUTION_TIMEOUT_SECONDS;
 
-    /** 工具调用上下文裁剪阈值（字符数），超出时压缩早期工具调用轮次，约 15K tokens */
+    /**
+     * 工具调用上下文裁剪阈值（字符数），超出时压缩早期工具调用轮次，约 15K tokens
+     */
     private static final int MAX_TOOL_CONTEXT_CHARS = 60000;
-    /** 裁剪时保留最近 N 轮工具调用，确保 LLM 有足够上下文 */
+    /**
+     * 裁剪时保留最近 N 轮工具调用，确保 LLM 有足够上下文
+     */
     private static final int TOOL_ROUNDS_TO_KEEP = 2;
 
     @Autowired
@@ -414,7 +434,12 @@ public class ChatServiceImpl implements ChatService {
                 if (attempt < retryTimes) {
                     long delayMs = (long) Math.pow(2, attempt) * 1000;
                     log.warn("[Chat] 模型调用失败，第{}次重试，等待{}ms: {}", attempt + 1, delayMs, e.getMessage());
-                    try { Thread.sleep(delayMs); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                    try {
+                        Thread.sleep(delayMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
                 }
             }
         }
@@ -846,7 +871,9 @@ public class ChatServiceImpl implements ChatService {
         return incomplete;
     }
 
-    /** SSE 心跳间隔（秒） */
+    /**
+     * SSE 心跳间隔（秒）
+     */
     private static final int HEARTBEAT_INTERVAL_SECONDS = 15;
 
     /**
@@ -1062,7 +1089,7 @@ public class ChatServiceImpl implements ChatService {
         // 上下文压缩由本中间件接管：时机 = 每次模型推理前（对齐 legacy 每轮工具调用后裁剪）。
         // 不原地修改引擎 memory，只压缩本轮真正发给模型的 prompt，故落库与前端回显不受影响。
         List<MiddlewareBase> harnessMiddlewares = List.of(
-                new     HarnessContextTrimMiddleware(MAX_TOOL_CONTEXT_CHARS, TOOL_ROUNDS_TO_KEEP));
+                new HarnessContextTrimMiddleware(MAX_TOOL_CONTEXT_CHARS, TOOL_ROUNDS_TO_KEEP));
         HarnessAgent ha = harnessAgentFactory.build(
                 ctx.getChatModel(), sysPrompt, wrappedTools,
                 resolveMaxExecutionSteps(ctx.getConfigMap()), harnessMiddlewares,
@@ -1140,7 +1167,9 @@ public class ChatServiceImpl implements ChatService {
         });
     }
 
-    /** 解析当前 Agent 绑定的可委派子 agent 定义（C3 Phase 1：注册 harness agent_spawn）。 */
+    /**
+     * 解析当前 Agent 绑定的可委派子 agent 定义（C3 Phase 1：注册 harness agent_spawn）。
+     */
     private Map<String, SubAgentDefinition> resolveSubAgentDefinitions(ChatContext ctx) {
         List<Long> ids = ctx.getBoundSubAgentIds();
         if (ids == null || ids.isEmpty()) {
@@ -1150,7 +1179,9 @@ public class ChatServiceImpl implements ChatService {
         return defs != null ? defs : Map.of();
     }
 
-    /** harness 正文增量：敏感词过滤（StreamState）+ fullReply 回填 + 命中 block 发 sensitive_block。 */
+    /**
+     * harness 正文增量：敏感词过滤（StreamState）+ fullReply 回填 + 命中 block 发 sensitive_block。
+     */
     private List<String> onHarnessContentDelta(ChatContext ctx, String delta) {
         if (ctx.isSensitiveAiBlocked() || ctx.isAborted()) {
             return List.of();
@@ -1170,9 +1201,11 @@ public class ChatServiceImpl implements ChatService {
         return List.of(filtered);
     }
 
-    /** harness 思考流增量：回填 ctx.reasoningContent，返回待下发增量（null/空不下发）。
-     *  enableReasoning=false 时不流式思考--对齐 legacy：legacy 仅解析 <think> 标签内的思考，
-     *  非 <think> 的独立 reasoning（如 deepseek THINKING_BLOCK）legacy 抓不到即不下发，harness 同样抑制。 */
+    /**
+     * harness 思考流增量：回填 ctx.reasoningContent，返回待下发增量（null/空不下发）。
+     * enableReasoning=false 时不流式思考--对齐 legacy：legacy 仅解析 <think> 标签内的思考，
+     * 非 <think> 的独立 reasoning（如 deepseek THINKING_BLOCK）legacy 抓不到即不下发，harness 同样抑制。
+     */
     private String onHarnessReasoningDelta(ChatContext ctx, String delta) {
         if (ctx.isSensitiveAiBlocked() || ctx.isAborted()) {
             return null;
@@ -1190,7 +1223,8 @@ public class ChatServiceImpl implements ChatService {
      * 调试：把 AgentEvent 类型作为 [STATUS]agent_event_debug 帧推到 SSE（经 eventSink）。
      * <p>前端 processSseLines 白名单无此 type，故不渲染到消息气泡--仅在浏览器 devtools ->
      * Network -> /api/chat/stream 请求的「EventStream/消息」面板可见原始帧。
-     * 若要 UI 可见：改用 tool_status（状态栏）或裸文本（会进正文）。 */
+     * 若要 UI 可见：改用 tool_status（状态栏）或裸文本（会进正文）。
+     */
     private void emitAgentEventDebug(ChatContext ctx, AgentEvent e) {
         if (ctx == null || ctx.getRealtimeStatusEmitter() == null || e == null) {
             return;
@@ -1229,14 +1263,18 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
-    /** 构造纯文本 ToolResultBlock（统一结果回填用；id/name 传 null，符合「工具返回值」约定，由 Toolkit 回填）。 */
+    /**
+     * 构造纯文本 ToolResultBlock（统一结果回填用；id/name 传 null，符合「工具返回值」约定，由 Toolkit 回填）。
+     */
     private ToolResultBlock textToolResultBlock(String text, ToolResultState state) {
         return new ToolResultBlock(null, null, List.of(TextBlock.builder().text(text).build()), null, state);
     }
 
-    /** 把 appendToolCallStart/Result 收集到 statusFluxes 的附属事件（skill_active/file-writing/todos_updated）
-     *  转发到 eventSink。harness 分支没有 legacy 的 statusFluxes 拼接管线（legacy 用 Flux.concat 把它并入主输出），
-     *  这里手动 drain。appendToolCallStart/Result 内部对 statusFluxes 直接 .add，故不能传 null。 */
+    /**
+     * 把 appendToolCallStart/Result 收集到 statusFluxes 的附属事件（skill_active/file-writing/todos_updated）
+     * 转发到 eventSink。harness 分支没有 legacy 的 statusFluxes 拼接管线（legacy 用 Flux.concat 把它并入主输出），
+     * 这里手动 drain。appendToolCallStart/Result 内部对 statusFluxes 直接 .add，故不能传 null。
+     */
     private void flushStatusFluxes(List<Flux<String>> statusFluxes, Sinks.Many<String> eventSink) {
         if (statusFluxes == null || statusFluxes.isEmpty() || eventSink == null) {
             return;
@@ -1253,7 +1291,9 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
-    /** harness 分支：appendToolCallResult + 把附属事件 flush 到 eventSink。 */
+    /**
+     * harness 分支：appendToolCallResult + 把附属事件 flush 到 eventSink。
+     */
     private void emitToolResultHarness(ChatContext ctx, List<Map<String, Object>> toolEventsList,
                                        Sinks.Many<String> eventSink, String toolName, String args,
                                        String result, int contentOffset, long toolCallId) {
@@ -1428,7 +1468,9 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
-    /** 把同步产出的 Flux（fluxFromInlineThinking 内部始终是即时集合流）收敛为 List，供 handler 返回。 */
+    /**
+     * 把同步产出的 Flux（fluxFromInlineThinking 内部始终是即时集合流）收敛为 List，供 handler 返回。
+     */
     private List<String> collectFlux(Flux<String> flux) {
         List<String> items = flux.collectList().block();
         return items == null ? List.of() : items;
@@ -1444,7 +1486,7 @@ public class ChatServiceImpl implements ChatService {
      * @return Flux<String> 流式输出片段
      */
     private Flux<String> processToolCallsRecursively(ChatContext ctx, int depth, long llmCallStart,
-                                                      Sinks.Many<String> eventSink) {
+                                                     Sinks.Many<String> eventSink) {
         if (ctx.isAborted()) {
             return Flux.empty();
         }
@@ -1513,7 +1555,7 @@ public class ChatServiceImpl implements ChatService {
                     // 2. 无工具调用 → 直接输出文本（结束递归）
                     if (assistantMsg == null || !Msgs.hasToolCalls(response)) {
                         // 先累加 Token（usage 常在最后一个空文本 chunk，不能因 stripped 为空而跳过）
-                accumulateStreamUsage(response, inputTokenHolder, outputTokenHolder, ctx.getCachedTokenHolder());
+                        accumulateStreamUsage(response, inputTokenHolder, outputTokenHolder, ctx.getCachedTokenHolder());
 
                         String text = Msgs.extractText(response);
                         if (text == null) text = "";
@@ -1543,7 +1585,7 @@ public class ChatServiceImpl implements ChatService {
                     // 3. 有工具调用 → 执行工具
                     messages.add(assistantMsg);
 
-                accumulateStreamUsage(response, inputTokenHolder, outputTokenHolder, ctx.getCachedTokenHolder());
+                    accumulateStreamUsage(response, inputTokenHolder, outputTokenHolder, ctx.getCachedTokenHolder());
 
                     // 3.0 先消费本 chunk 携带的正文（部分模型将正文与工具调用放在同一 chunk）。
                     //     必须在计算 toolContentOffset 之前完成，使 offset 精确反映"组件前已产出的正文长度"，
@@ -1571,11 +1613,11 @@ public class ChatServiceImpl implements ChatService {
 
                     List<Flux<String>> statusFluxes = new ArrayList<>();
                     List<Map<String, Object>> kbResultsHolder = new ArrayList<>();
-            List<ToolResultBlock> toolResponses = new ArrayList<>();
-            if (!leadingContentAppended) {
-                appendAssistantLeadingTextBeforeToolCall(ctx, agent, Msgs.extractText(response));
-            }
-            int toolContentOffset = resolveToolBlockOffset(ctx);
+                    List<ToolResultBlock> toolResponses = new ArrayList<>();
+                    if (!leadingContentAppended) {
+                        appendAssistantLeadingTextBeforeToolCall(ctx, agent, Msgs.extractText(response));
+                    }
+                    int toolContentOffset = resolveToolBlockOffset(ctx);
 
                     if (asyncEnabled && toolCalls.size() > 1) {
                         // 并行执行所有工具
@@ -1612,7 +1654,9 @@ public class ChatServiceImpl implements ChatService {
                                 appendSubAgentTraceSpans(spans, "tool_" + toolCallCountHolder[0], tcName, result, tStart);
                                 if ("query_knowledge".equals(tcName)) {
                                     List<Map<String, Object>> kbResults = QueryKnowledgeTool.getSearchResults(requestId);
-                                    synchronized (kbResultsHolder) { kbResultsHolder.addAll(kbResults); }
+                                    synchronized (kbResultsHolder) {
+                                        kbResultsHolder.addAll(kbResults);
+                                    }
                                 }
                                 // 暂存工具调用记录（复用 tcIdFinal 作为主键，前端按 id 拉取完整结果）
                                 ToolCall toolCallLog = new ToolCall();
@@ -1693,7 +1737,7 @@ public class ChatServiceImpl implements ChatService {
                     }
 
                     messages.add(ToolResultMessage.builder()
-                    .results(toolResponses)
+                            .results(toolResponses)
                             .build());
 
                     List<Map<String, Object>> kbResultsRef = kbResultsHolder;
@@ -1753,16 +1797,16 @@ public class ChatServiceImpl implements ChatService {
      * @return 模型流式响应
      */
     private Flux<ChatResponse> streamModelWithRetry(ChatContext ctx, Model chatModel,
-                                                     GenerateOptions toolOptions, List<Msg> messages,
-                                                     int depth, Sinks.Many<String> eventSink) {
+                                                    GenerateOptions toolOptions, List<Msg> messages,
+                                                    int depth, Sinks.Many<String> eventSink) {
         int retryTimes = resolveModelRetryTimes(ctx.getConfigMap());
         return streamModelAttempt(ctx, chatModel, toolOptions, messages, depth, eventSink, 0, retryTimes);
     }
 
     private Flux<ChatResponse> streamModelAttempt(ChatContext ctx, Model chatModel,
-                                                   GenerateOptions toolOptions, List<Msg> messages,
-                                                   int depth, Sinks.Many<String> eventSink,
-                                                   int attempt, int retryTimes) {
+                                                  GenerateOptions toolOptions, List<Msg> messages,
+                                                  int depth, Sinks.Many<String> eventSink,
+                                                  int attempt, int retryTimes) {
         // 记录本轮尝试前 fullReply 的长度，用于失败时回滚
         int fullReplyLengthBefore = ctx.getFullReply().length();
         boolean[] receivedResponse = {false};
@@ -1812,7 +1856,7 @@ public class ChatServiceImpl implements ChatService {
      * 非流式 LLM 轮次：call() 获取完整回复后一次性输出
      */
     private Flux<String> processBlockingRound(ChatContext ctx, int depth, long llmCallStart,
-                                               Sinks.Many<String> eventSink) {
+                                              Sinks.Many<String> eventSink) {
         // 中断信号（客户端断开 / 用户停止 / 预算已耗尽）已置位 → 立即终止本轮回合，杜绝僵尸循环
         if (ctx.isAborted()) {
             log.warn("[Chat][Trace] 请求已中断，停止工具循环: depth={}", depth);
@@ -1867,7 +1911,12 @@ public class ChatServiceImpl implements ChatService {
                     eventSink.tryEmitNext(STATUS_PREFIX + toolEventGenerator.errorRetryEvent(
                             "AI连接异常，正在重试中 " + retryNo + "/" + retryTimes,
                             classifyErrorCode(e), retryNo, retryTimes));
-                    try { Thread.sleep(delayMs); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                    try {
+                        Thread.sleep(delayMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
                 }
             }
         }
@@ -1876,7 +1925,7 @@ public class ChatServiceImpl implements ChatService {
             return Flux.just(STATUS_PREFIX + toolEventGenerator.errorEvent(
                     ctx.getStreamErrorMessage(), ctx.getStreamErrorCode()));
         }
-                accumulateStreamUsage(response, inputTokenHolder, outputTokenHolder, ctx.getCachedTokenHolder());
+        accumulateStreamUsage(response, inputTokenHolder, outputTokenHolder, ctx.getCachedTokenHolder());
 
         Msg assistantMsg = Msg.builderForRole(MsgRole.ASSISTANT).content(response.getContent()).build();
 
@@ -2056,7 +2105,7 @@ public class ChatServiceImpl implements ChatService {
         }
 
         messages.add(ToolResultMessage.builder()
-                    .results(toolResponses)
+                .results(toolResponses)
                 .build());
 
         List<Map<String, Object>> kbResultsRef = kbResultsHolder;
@@ -2194,8 +2243,8 @@ public class ChatServiceImpl implements ChatService {
     }
 
     private String doExecuteToolCallback(Map<String, ToolBase> toolCallbackMap, String toolName,
-                                       String callArgs, Long agentId, Long sessionId, String requestId,
-                                       Sinks.Many<String> eventSink, ChatContext chatContext) {
+                                         String callArgs, Long agentId, Long sessionId, String requestId,
+                                         Sinks.Many<String> eventSink, ChatContext chatContext) {
         ToolBase callback = toolCallbackMap.get(toolName);
         if (callback != null) {
             try {
@@ -2327,7 +2376,9 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
-    /** 粗判 JSON 是否因截断而不完整（无法 parse 或括号/引号不平衡） */
+    /**
+     * 粗判 JSON 是否因截断而不完整（无法 parse 或括号/引号不平衡）
+     */
     private static boolean isLikelyTruncatedJson(String args) {
         if (args == null || args.isBlank()) {
             return false;
@@ -2463,7 +2514,10 @@ public class ChatServiceImpl implements ChatService {
         Object val = configMap.get(ConfigKeys.Agent.MAX_EXECUTION_STEPS);
         if (val instanceof Number n) return Math.clamp(n.intValue(), 1, 200);
         if (val != null) {
-            try { return Math.clamp(Integer.parseInt(val.toString()), 1, 200); } catch (Exception ignored) {}
+            try {
+                return Math.clamp(Integer.parseInt(val.toString()), 1, 200);
+            } catch (Exception ignored) {
+            }
         }
         return 20;
     }
@@ -2493,7 +2547,9 @@ public class ChatServiceImpl implements ChatService {
         return Math.min(val, ConfigKeys.Agent.HARD_MAX_EXECUTION_TIME_MS);
     }
 
-    /** 完全相同参数连续调用判定阈值 */
+    /**
+     * 完全相同参数连续调用判定阈值
+     */
     private int resolveToolLoopRepeatThreshold(Map<String, Object> configMap) {
         int def = ConfigKeys.Agent.DEFAULT_TOOL_LOOP_REPEAT_THRESHOLD;
         if (configMap == null) return def;
@@ -2509,7 +2565,9 @@ public class ChatServiceImpl implements ChatService {
         return def;
     }
 
-    /** 滑动窗口内同一工具软告警阈值 */
+    /**
+     * 滑动窗口内同一工具软告警阈值
+     */
     private int resolveToolLoopWindowThreshold(Map<String, Object> configMap) {
         int def = ConfigKeys.Agent.DEFAULT_TOOL_LOOP_WINDOW_THRESHOLD;
         if (configMap == null) return def;
@@ -2525,7 +2583,9 @@ public class ChatServiceImpl implements ChatService {
         return def;
     }
 
-    /** 同一工具连续失败熔断阈值 */
+    /**
+     * 同一工具连续失败熔断阈值
+     */
     private int resolveToolFailureThreshold(Map<String, Object> configMap) {
         int def = ConfigKeys.Agent.DEFAULT_TOOL_FAILURE_THRESHOLD;
         if (configMap == null) return def;
@@ -2546,7 +2606,10 @@ public class ChatServiceImpl implements ChatService {
         Object val = configMap.get(ConfigKeys.Agent.MODEL_RETRY_TIMES);
         if (val instanceof Number n) return Math.max(0, Math.min(10, n.intValue()));
         if (val != null) {
-            try { return Math.max(0, Math.min(10, Integer.parseInt(val.toString()))); } catch (Exception ignored) {}
+            try {
+                return Math.max(0, Math.min(10, Integer.parseInt(val.toString())));
+            } catch (Exception ignored) {
+            }
         }
         return 2;
     }
@@ -2631,7 +2694,9 @@ public class ChatServiceImpl implements ChatService {
         return items.isEmpty() ? Flux.empty() : Flux.fromIterable(items);
     }
 
-    /** 同步写入 leading 正文（用于工具 offset 计算，避免与后续 Flux 重复 append） */
+    /**
+     * 同步写入 leading 正文（用于工具 offset 计算，避免与后续 Flux 重复 append）
+     */
     private boolean appendInlineThinkingContentDelta(ChatContext ctx, Agent agent,
                                                      InlineThinkingStreamParser.ParseResult parsed) {
         if (parsed == null || parsed.isEmpty() || parsed.contentDelta().isEmpty()) {
@@ -2706,7 +2771,7 @@ public class ChatServiceImpl implements ChatService {
      * 同一 Skill 只推送一次。
      */
     private Flux<String> emitSkillActiveIfNeeded(ChatContext ctx, String toolName,
-                                                  List<Map<String, Object>> toolEventsList, int contentOffset) {
+                                                 List<Map<String, Object>> toolEventsList, int contentOffset) {
         Map<String, Map<String, Object>> mapping = ctx.getToolNameToSkillDetail();
         if (mapping == null || mapping.isEmpty()) {
             return Flux.empty();
@@ -2763,7 +2828,9 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
-    /** 按句末标点对齐工具块切分点 */
+    /**
+     * 按句末标点对齐工具块切分点
+     */
     private int resolveToolBlockOffset(ChatContext ctx) {
         String reply = ctx.getFullReply().toString();
         return ToolEventCompactUtil.resolveToolBlockSplitOffset(reply, null, reply.length());
@@ -2799,7 +2866,9 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
-    /** SSE/落库展示用：写文件大参数改为短摘要，避免前端与 metadata 膨胀 */
+    /**
+     * SSE/落库展示用：写文件大参数改为短摘要，避免前端与 metadata 膨胀
+     */
     private String compactArgsForEvent(String toolName, String args) {
         return toolArgsSanitizer.compactForHistory(toolName, args);
     }
@@ -2914,10 +2983,10 @@ public class ChatServiceImpl implements ChatService {
      * <p>替代原先工具执行期间前端只能看到裸 spinner 的体验，让用户立刻知道 AI 正在写哪个文件</p>
      * <p>仅在工具属于文件写入类时推送，其他工具直接跳过</p>
      *
-     * @param ctx 对话上下文（提供实时推送通道）
+     * @param ctx          对话上下文（提供实时推送通道）
      * @param statusFluxes 非流式模式下的批量状态收集容器
-     * @param toolName 工具名称
-     * @param args 工具入参 JSON（含 path 字段）
+     * @param toolName     工具名称
+     * @param args         工具入参 JSON（含 path 字段）
      */
     private void emitFileWritingStatus(ChatContext ctx, List<Flux<String>> statusFluxes,
                                        String toolName, String args) {
@@ -2967,7 +3036,7 @@ public class ChatServiceImpl implements ChatService {
     }
 
     private void appendToolCallResult(ChatContext ctx, List<Map<String, Object>> toolEventsList, List<Flux<String>> statusFluxes,
-                                    String toolName, String args, String result, int contentOffset, long toolCallId) {
+                                      String toolName, String args, String result, int contentOffset, long toolCallId) {
         String truncated = toolEventGenerator.truncateForSse(result);
         if (DelegateSubAgentTool.TOOL_NAME.equals(toolName)
                 || DelegateSubAgentTool.RESULT_TOOL_NAME.equals(toolName)
@@ -3022,7 +3091,7 @@ public class ChatServiceImpl implements ChatService {
      * <p>不进 toolEventsList（避免在消息气泡里二次展示）；仅作为运行时事件给状态栏消费。</p>
      */
     private void emitTodosUpdated(ChatContext ctx, List<Flux<String>> statusFluxes,
-                                   String toolResult, int contentOffset) {
+                                  String toolResult, int contentOffset) {
         try {
             JsonNode resultNode = objectMapper.readTree(toolResult);
             if (!resultNode.path("success").asBoolean(false)) {
@@ -3363,7 +3432,9 @@ public class ChatServiceImpl implements ChatService {
                 + "\n[工具结果已截断，原文共 " + result.length() + " 字符]";
     }
 
-    /** 累加一次模型用量（ChatUsage）到 token holder；usage 为 null 时安全跳过。供流式/非流式/Harness 多链路复用。 */
+    /**
+     * 累加一次模型用量（ChatUsage）到 token holder；usage 为 null 时安全跳过。供流式/非流式/Harness 多链路复用。
+     */
     private void accumulateUsage(ChatUsage usage, int[] inputTokenHolder, int[] outputTokenHolder, int[] cachedTokenHolder) {
         if (usage == null) {
             return;
@@ -3382,11 +3453,17 @@ public class ChatServiceImpl implements ChatService {
         accumulateUsage(response.getUsage(), inputTokenHolder, outputTokenHolder, cachedTokenHolder);
     }
 
-    /** 安全地将 Object 转为 Long（兼容 Number 和 String 类型） */
+    /**
+     * 安全地将 Object 转为 Long（兼容 Number 和 String 类型）
+     */
     private static Long parseLongObj(Object value) {
         if (value == null) return null;
         if (value instanceof Number n) return n.longValue();
-        try { return Long.parseLong(value.toString()); } catch (NumberFormatException e) { return null; }
+        try {
+            return Long.parseLong(value.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**
