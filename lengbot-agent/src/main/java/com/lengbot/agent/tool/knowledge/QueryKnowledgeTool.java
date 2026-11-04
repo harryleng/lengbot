@@ -4,6 +4,7 @@ import com.lengbot.constant.RagResultType;
 import com.lengbot.vo.QaPairSearchResultVO;
 import com.lengbot.entity.Knowledge;
 import com.lengbot.service.AgentService;
+import com.lengbot.service.MessageService;
 import com.lengbot.service.TextEmbeddingService;
 import com.lengbot.service.KnowledgeService;
 import com.lengbot.service.KnowledgeRetrievalService;
@@ -29,6 +30,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -60,6 +62,7 @@ public class QueryKnowledgeTool {
     private final RagParamResolver ragParamResolver;
     private final ObjectMapper objectMapper;
     private final com.lengbot.service.QueryRewriteService queryRewriteService;
+    private final MessageService messageService;
 
     @Autowired
     @Qualifier("lengBotExecutor")
@@ -72,6 +75,15 @@ public class QueryKnowledgeTool {
      */
     private static final Cache<String, List<Map<String, Object>>> SEARCH_RESULTS_CACHE =
             Caffeine.newBuilder().maximumSize(1000).expireAfterWrite(5, TimeUnit.MINUTES).build();
+
+    /** 查询改写参考的对话轮数（一轮=一问一答） */
+    private static final int REWRITE_HISTORY_TURNS = 3;
+    /** 单条历史消息参与改写时的字符上限 */
+    private static final int MAX_HISTORY_ONE_MSG_CHARS = 300;
+    /** RRF 平滑常数，抑制头部名次权重过大 */
+    private static final int RRF_K = 60;
+    /** 双路召回融合后默认保留条数（topK 异常时兜底） */
+    private static final int DEFAULT_DUAL_RECALL_TOP_K = 10;
 
     @Tool(name = "query_knowledge",
           description = "搜索当前对话智能体绑定的知识库，获取与问题相关的文档内容。当用户问题涉及特定领域知识、需要查找文档资料时调用此工具。只需传入 question，不要传入 agentId。")
@@ -103,16 +115,29 @@ public class QueryKnowledgeTool {
 
         try {
             // 2. 查询改写（可选）：将模糊/短查询改写为更适合检索的形式
+            // 带上对话历史，使「它多少钱」「那第二条呢」这类省略/指代可被消解；
+            // 历史缺失时自动退化为无上下文改写。
             String effectiveQuery = question;
             if (isQueryRewriteEnabled(knowledgeIds)) {
                 ToolEventEmitter.emit("正在改写查询...");
-                String rewritten = queryRewriteService.rewrite(question);
+                Long rewriteSessionId = resolveSessionId(context);
+                String rewritten = queryRewriteService.rewrite(
+                        question, buildHistoryContext(rewriteSessionId));
                 if (!rewritten.equals(question)) {
                     log.info("[Tool:query_knowledge] 查询已改写: {} → {}", question, rewritten);
+                    ToolEventEmitter.emit("查询改写：" + rewritten);
                     effectiveQuery = rewritten;
                 }
             }
             final String searchQuery = effectiveQuery;
+            // 双路召回：改写生效时，同时保留原句与改写句两条检索式。
+            // 改写可能偏移原意，原句是安全底线；两者融合可兼顾召回率与准确性。
+            final boolean dualRecall = !searchQuery.equals(question)
+                    && isDualRecallEnabled(knowledgeIds);
+            final String originalQuery = dualRecall ? question : null;
+            if (dualRecall) {
+                ToolEventEmitter.emit("双路召回：原句 + 改写句并行检索");
+            }
 
             // 3. 并行检索多个知识库（由统一入口路由本地向量库或 Dify Dataset）。
             List<CompletableFuture<List<Map<String, Object>>>> futures = knowledgeIds.stream()
@@ -149,6 +174,22 @@ public class QueryKnowledgeTool {
                                 }
                             }, lengBotExecutor);
 
+                            // 第二路：用原始问句再检索一次，与改写路结果融合后去重。
+                            CompletableFuture<List<Map<String, Object>>> originalFuture;
+                            if (dualRecall) {
+                                originalFuture = CompletableFuture.supplyAsync(() -> {
+                                    try {
+                                        Map<String, Object> params = buildSearchParams(knowledge, originalQuery);
+                                        return knowledgeRetrievalService.retrieve(knowledge, originalQuery, topK, threshold, params);
+                                    } catch (Exception e) {
+                                        log.warn("[Tool:query_knowledge] 原句召回失败: knowledgeId={}", knowledgeId);
+                                        return List.<Map<String, Object>>of();
+                                    }
+                                }, lengBotExecutor);
+                            } else {
+                                originalFuture = CompletableFuture.completedFuture(List.of());
+                            }
+
                             CompletableFuture<List<Map<String, Object>>> qaFuture;
                             if (qaEnabled && knowledge.getType() != com.lengbot.enums.KnowledgeType.DIFY) {
                                 ToolEventEmitter.emit("正在检索知识库「" + kbName + "」的问答对...");
@@ -179,13 +220,20 @@ public class QueryKnowledgeTool {
 
                             // 合并结果
                             List<Map<String, Object>> chunkResults = chunkFuture.join();
+                            if (dualRecall) {
+                                List<Map<String, Object>> originalResults = originalFuture.join();
+                                int rewrittenCount = chunkResults.size();
+                                chunkResults = mergeRecallPaths(chunkResults, originalResults, topK);
+                                log.info("[Tool:query_knowledge] 双路RRF融合: name={}, rewritten={}, original={}, fused={}",
+                                        kbName, rewrittenCount, originalResults.size(), chunkResults.size());
+                            }
                             List<Map<String, Object>> qaResults = qaFuture.join();
 
                             // 标记 chunk 结果类型
                             chunkResults.forEach(row -> row.putIfAbsent("result_type", RagResultType.CHUNK));
 
-                            log.info("[Tool:query_knowledge] 知识库检索结果: name={}, chunkCount={}, qaCount={}",
-                                    kbName, chunkResults.size(), qaResults.size());
+                            log.info("[Tool:query_knowledge] 知识库检索结果: name={}, chunkCount={}, qaCount={}, dualRecall={}",
+                                    kbName, chunkResults.size(), qaResults.size(), dualRecall);
                             ToolEventEmitter.emit("知识库「" + kbName + "」: 文档块 " + chunkResults.size() + " 条" + (qaEnabled ? ", 问答对 " + qaResults.size() + " 条" : ""));
 
                             // QA 优先返回：高分 QA 标记特殊字段，外层统一处理
@@ -313,6 +361,160 @@ public class QueryKnowledgeTool {
 
     private double[] embedText(String text) {
         return textEmbeddingService.embed(text);
+    }
+
+    /**
+     * 从工具上下文解析 sessionId。缺失时返回 null，改写退化为无上下文模式。
+     */
+    private static Long resolveSessionId(ToolCallParam context) {
+        if (context == null || context.getRuntimeContext() == null) {
+            return null;
+        }
+        Object sid = context.getRuntimeContext().get("sessionId");
+        if (sid instanceof Number num) {
+            long id = num.longValue();
+            return id > 0 ? id : null;
+        }
+        if (sid instanceof String str && !str.isBlank() && !"default".equals(str)) {
+            try {
+                long id = Long.parseLong(str.trim());
+                return id > 0 ? id : null;
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 构建供改写使用的对话历史（最近若干轮用户/助手正文）。
+     * <p>只取纯文本消息，跳过工具事件与空内容；失败时返回 null，不影响主流程。</p>
+     */
+    private String buildHistoryContext(Long sessionId) {
+        if (sessionId == null) {
+            return null;
+        }
+        try {
+            List<com.lengbot.entity.Message> messages = messageService.listBySessionId(sessionId);
+            if (messages == null || messages.isEmpty()) {
+                return null;
+            }
+            // 仅保留最近若干条，倒序取再还原顺序
+            int keep = Math.min(messages.size(), REWRITE_HISTORY_TURNS * 2);
+            List<com.lengbot.entity.Message> recent = new ArrayList<>(
+                    messages.subList(messages.size() - keep, messages.size()));
+
+            StringBuilder sb = new StringBuilder();
+            for (com.lengbot.entity.Message m : recent) {
+                if (m.getRole() == null || m.getContent() == null) continue;
+                String role = m.getRole().getCode();
+                if (!"user".equals(role) && !"assistant".equals(role)) continue;
+                String text = m.getContent().trim();
+                if (text.isEmpty()) continue;
+                if (text.length() > MAX_HISTORY_ONE_MSG_CHARS) {
+                    text = text.substring(0, MAX_HISTORY_ONE_MSG_CHARS) + "…";
+                }
+                sb.append("user".equals(role) ? "用户：" : "助手：").append(text).append('\n');
+            }
+            String ctx = sb.toString().trim();
+            return ctx.isEmpty() ? null : ctx;
+        } catch (Exception e) {
+            log.warn("[Tool:query_knowledge] 构建改写上下文失败，退化为无上下文改写: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 双路召回融合：对改写路与原句路结果按 RRF（倒数排名融合）打分后去重。
+     * <p>RRF 只依赖名次、不依赖分数量纲，适合合并两次独立向量检索；
+     * 同一 chunk 命中两路时得分叠加自然靠前。融合分单独写入 _rrf_score
+     * 仅用于排序，score 保留原始向量相似度——下游的前端相似度展示与
+     * metadata 持久化都按 0~1 量级解读 score，不能被 RRF 的 0.01 量级污染。</p>
+     *
+     * @param rewrittenPath 改写句召回结果（有序，越靠前越相关）
+     * @param originalPath  原句召回结果（有序）
+     * @param topK          最终保留条数
+     * @return 融合去重后的结果
+     */
+    private List<Map<String, Object>> mergeRecallPaths(List<Map<String, Object>> rewrittenPath,
+                                                       List<Map<String, Object>> originalPath,
+                                                       int topK) {
+        // 单路为空时直接回退另一路：保留原始 score 语义，不标记 _dual_recall
+        if (rewrittenPath == null || rewrittenPath.isEmpty()) {
+            return originalPath == null ? List.of() : new ArrayList<>(originalPath);
+        }
+        if (originalPath == null || originalPath.isEmpty()) {
+            return new ArrayList<>(rewrittenPath);
+        }
+
+        Map<String, Map<String, Object>> best = new LinkedHashMap<>();
+        Map<String, Double> fused = new LinkedHashMap<>();
+
+        accumulateRrf(rewrittenPath, best, fused);
+        accumulateRrf(originalPath, best, fused);
+
+        return fused.entrySet().stream()
+                .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
+                .limit(topK > 0 ? topK : DEFAULT_DUAL_RECALL_TOP_K)
+                .map(e -> {
+                    Map<String, Object> row = new java.util.HashMap<>(best.get(e.getKey()));
+                    row.put("_rrf_score", e.getValue());
+                    row.put("_dual_recall", true);
+                    return row;
+                })
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+    }
+
+    /** 累积单路 RRF 得分：score += 1 / (k + rank)，k 平滑常数取 60。 */
+    private void accumulateRrf(List<Map<String, Object>> path,
+                               Map<String, Map<String, Object>> best,
+                               Map<String, Double> fused) {
+        int rank = 0;
+        for (Map<String, Object> row : path) {
+            if (row == null) continue;
+            String key = recallKey(row);
+            if (key == null) continue;
+            rank++;
+            fused.merge(key, 1.0 / (RRF_K + rank), Double::sum);
+            // 保留该 key 下向量分更高的一条作为内容来源
+            Map<String, Object> prev = best.get(key);
+            if (prev == null || scoreOf(row) > scoreOf(prev)) {
+                best.put(key, row);
+            }
+        }
+    }
+
+    /** 结果去重键：chunk 用 chunk_id，QA 用 id+question，均无则退回内容指纹。 */
+    private String recallKey(Map<String, Object> row) {
+        Object chunkId = row.get("chunk_id");
+        if (chunkId != null) {
+            return "c:" + chunkId;
+        }
+        Object id = row.get("id");
+        if (id != null) {
+            return "q:" + id + ":" + row.get("question");
+        }
+        Object content = row.get("content");
+        return content != null ? "t:" + content.hashCode() : null;
+    }
+
+    private double scoreOf(Map<String, Object> row) {
+        Object s = row.get("score");
+        return s instanceof Number n ? n.doubleValue() : 0.0;
+    }
+
+    /**
+     * 双路召回开关：任一绑定知识库显式开启即启用。
+     * <p>默认关闭——未配置时行为与历史一致，避免改变既有检索效果。</p>
+     */
+    private boolean isDualRecallEnabled(List<Long> knowledgeIds) {
+        for (Long knowledgeId : knowledgeIds) {
+            Knowledge knowledge = knowledgeService.getById(knowledgeId);
+            if (knowledge == null) continue;
+            Map<String, Object> qp = parseQueryParams(knowledge);
+            if (Boolean.TRUE.equals(qp.get("dual_recall"))) return true;
+        }
+        return false;
     }
 
     private int resolveTopK(Knowledge knowledge) {

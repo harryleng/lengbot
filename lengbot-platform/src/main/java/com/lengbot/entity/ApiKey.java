@@ -1,10 +1,10 @@
 package com.lengbot.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
-import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import com.lengbot.enums.ApiKeyPermission;
+import com.lengbot.handler.JsonbListTypeHandler;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import org.apache.ibatis.type.JdbcType;
@@ -50,7 +50,12 @@ public class ApiKey {
     @Schema(description = "权限范围")
     private ApiKeyPermission permissions;
 
-    @TableField(value = "agent_ids", typeHandler = JacksonTypeHandler.class)
+    /**
+     * 绑定的 Agent ID 列表，null 表示全部。
+     * <p>列为 jsonb，必须经 {@link JsonbListTypeHandler} 以 PGobject 显式声明类型；
+     * 若用 JacksonTypeHandler，PostgreSQL 会把参数识别为 varchar 而与 jsonb 列冲突。</p>
+     */
+    @TableField(value = "agent_ids", typeHandler = JsonbListTypeHandler.class, jdbcType = JdbcType.OTHER)
     @Schema(description = "绑定的Agent ID列表，null表示全部")
     private List<String> agentIds;
 

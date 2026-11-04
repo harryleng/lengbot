@@ -96,6 +96,19 @@
           <a-switch v-model:checked="form.query_rewrite" />
         </a-form-item>
 
+        <!-- 双路召回 -->
+        <a-form-item>
+          <template #label>
+            <span>双路召回</span>
+            <a-tooltip
+              title="需配合「查询改写」使用。改写生效时，额外用原始问句再检索一次，两路结果按 RRF 融合去重。改写可能偏移原意时能提高召回稳定性，但检索耗时与资源开销约翻倍"
+            >
+              <QuestionCircleOutlined class="field-tip-icon" />
+            </a-tooltip>
+          </template>
+          <a-switch v-model:checked="form.dual_recall" />
+        </a-form-item>
+
         <!-- Milvus hybrid 模式专属参数 -->
         <template v-if="isMilvus && form.search_mode === 'hybrid'">
           <a-form-item>
@@ -470,6 +483,7 @@ const pgDefaults = {
   final_top_k: 5,
   similarity_threshold: 0.5,
   query_rewrite: false,
+  dual_recall: false,
   vector_weight: 0.7,
   keyword_weight: 0.3,
   use_reranker: false,
@@ -495,6 +509,7 @@ const milvusDefaults = {
   final_top_k: 10,
   similarity_threshold: 0.0,
   query_rewrite: false,
+  dual_recall: false,
   vector_weight: 0.7,
   bm25_weight: 0.3,
   bm25_top_k: 30,

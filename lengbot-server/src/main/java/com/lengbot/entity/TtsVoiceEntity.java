@@ -6,14 +6,14 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import com.lengbot.handler.JsonbTypeHandler;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
+import org.apache.ibatis.type.JdbcType;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 
 /**
  * TTS 音色管理表。
@@ -72,9 +72,15 @@ public class TtsVoiceEntity {
     @Schema(description = "手动排序权重，越小越靠前")
     private Integer sortOrder;
 
-    @TableField(value = "extra_json", typeHandler = JacksonTypeHandler.class)
-    @Schema(description = "扩展信息（JSON，预留）")
-    private Map<String, Object> extraJson;
+    /**
+     * 扩展信息（JSON，预留）。
+     * <p>列为 jsonb，必须经 {@link JsonbTypeHandler} 以 PGobject 显式声明类型；
+     * 若用 JacksonTypeHandler，PostgreSQL 会把参数识别为 varchar 而与 jsonb 列冲突。
+     * 写法与 {@code ModelProvider.extraJson} 保持一致。</p>
+     */
+    @TableField(value = "extra_json", typeHandler = JsonbTypeHandler.class, jdbcType = JdbcType.OTHER)
+    @Schema(description = "扩展信息（JSON格式，预留）")
+    private String extraJson;
 
     @TableField(value = "create_time", fill = FieldFill.INSERT)
     @Schema(description = "创建时间")

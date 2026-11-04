@@ -872,6 +872,8 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeMapper, Knowledge
         normalized.put("final_top_k", intParam(source, "final_top_k", milvus ? 10 : 5, 1, 100));
         normalized.put("similarity_threshold", doubleParam(source, "similarity_threshold", milvus ? 0.0 : 0.5, 0.0, 1.0));
         normalized.put("query_rewrite", boolParam(source, "query_rewrite", false));
+        // 双路召回：改写句 + 原句并行检索后 RRF 融合。仅在改写开启且生效时才有意义，默认关闭。
+        normalized.put("dual_recall", boolParam(source, "dual_recall", false));
         normalized.put("vector_weight", doubleParam(source, "vector_weight", 0.7, 0.0, 1.0));
 
         if (milvus) {
