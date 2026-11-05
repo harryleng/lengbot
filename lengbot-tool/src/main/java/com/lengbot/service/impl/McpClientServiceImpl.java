@@ -107,11 +107,77 @@ public class McpClientServiceImpl implements McpClientService {
             List<McpSchema.Tool> tools = client.listTools().tools();
             log.info("[MCP] 测试连接成功: server={}, 工具数={}", server.getName(), tools.size());
             return tools;
+        } catch (BizException e) {
+            // 配置类错误（地址为空、命令非法等）已有明确文案，原样透传
+            throw e;
+        } catch (Exception e) {
+            // MCP SDK 初始化失败只会抛 "Client failed to initialize by explicit API call"，
+            // 真正的 DNS/连接/超时原因埋在 cause 链里；直接外抛会被全局处理器打成 500 + 满屏堆栈，
+            // 前端只能看到「系统内部错误」。此处翻译成可读的业务错误（400 + 具体原因）。
+            String reason = describeConnectionFailure(server, e);
+            log.warn("[MCP] 测试连接失败: serverId={}, name={}, host={}, reason={}",
+                    mcpServerId, server.getName(), server.getHost(), reason);
+            throw new BizException(ErrorCode.MCP_CONNECTION_FAILED, reason);
         } finally {
             if (client != null) {
                 try { client.close(); } catch (Exception ignored) {}
             }
         }
+    }
+
+    /**
+     * 把 MCP 传输层异常翻译成可读的失败原因。
+     *
+     * <p>遍历整条 cause 链收集类别后再按优先级判定：DNS 解析失败常伴随
+     * {@code ConnectException}，若边遍历边返回会被误判成「连接被拒绝」。</p>
+     */
+    private String describeConnectionFailure(McpServer server, Throwable error) {
+        String target = (server.getHost() == null || server.getHost().isBlank())
+                ? "本地 stdio 进程" : server.getHost();
+        boolean dnsFailure = false;
+        boolean connectRefused = false;
+        boolean timeout = false;
+        boolean sslFailure = false;
+        String fallbackMessage = null;
+
+        // 深度上限：异常 cause 自引用（个别框架会出现）时避免死循环
+        Throwable cursor = error;
+        for (int depth = 0; cursor != null && depth < 32; depth++) {
+            if (cursor instanceof java.nio.channels.UnresolvedAddressException
+                    || cursor instanceof java.net.UnknownHostException) {
+                dnsFailure = true;
+            } else if (cursor instanceof java.net.ConnectException) {
+                connectRefused = true;
+            } else if (cursor instanceof java.net.http.HttpConnectTimeoutException
+                    || cursor instanceof java.net.http.HttpTimeoutException
+                    || cursor instanceof java.net.SocketTimeoutException
+                    || cursor instanceof java.util.concurrent.TimeoutException) {
+                timeout = true;
+            } else if (cursor instanceof javax.net.ssl.SSLHandshakeException) {
+                sslFailure = true;
+            }
+            String msg = cursor.getMessage();
+            if (fallbackMessage == null && msg != null && !msg.isBlank()
+                    && !msg.contains("Client failed to initialize")) {
+                fallbackMessage = msg;
+            }
+            cursor = cursor.getCause();
+        }
+
+        if (dnsFailure) {
+            return "服务地址的域名无法解析（DNS 查询失败）：" + target
+                    + "。请确认域名仍然有效、本机 DNS/网络可用，或改成本地/内网 MCP 地址";
+        }
+        if (connectRefused) {
+            return "无法连接到 " + target + "：连接被拒绝或网络不可达，请确认服务已启动、端口与防火墙配置正确";
+        }
+        if (timeout) {
+            return "连接或响应超时：" + target + "，请检查网络连通性与服务响应时间";
+        }
+        if (sslFailure) {
+            return "TLS 握手失败：" + target + "，请检查证书与协议配置";
+        }
+        return "连接 " + target + " 失败" + (fallbackMessage == null ? "" : "：" + fallbackMessage);
     }
 
     /**
@@ -343,9 +409,13 @@ public class McpClientServiceImpl implements McpClientService {
                 McpSyncClient client = createAndInitClient(server);
                 log.info("[MCP] 创建MCP客户端: serverId={}, name={}", id, server.getName());
                 return client;
+            } catch (BizException e) {
+                throw e;
             } catch (Exception e) {
-                log.info("[MCP] 创建MCP客户端失败: serverId={}, name={}, error={}", id, server.getName(), e.getMessage(), e);
-                throw new BizException(ErrorCode.MCP_CONNECTION_FAILED, e);
+                String reason = describeConnectionFailure(server, e);
+                log.warn("[MCP] 创建MCP客户端失败: serverId={}, name={}, host={}, reason={}",
+                        id, server.getName(), server.getHost(), reason);
+                throw new BizException(ErrorCode.MCP_CONNECTION_FAILED, reason);
             }
         });
     }
