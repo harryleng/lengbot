@@ -64,6 +64,7 @@ export async function chatStream(
         token,
         body: data,
         signal,
+        throwOnAbort: true,
         onLines: (text) => {
           processSseLines(text, { ...trackingCallbacks, onDone: fireDone })
         },
@@ -244,6 +245,7 @@ export async function resumeStreamOnReturn(requestId, lastEventId, callbacks, to
         token,
         body: { requestId },
         signal,
+        throwOnAbort: true,
         onLines: (text) => processSseLines(text, callbacks),
       })
     } catch (err) {

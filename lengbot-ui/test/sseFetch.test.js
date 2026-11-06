@@ -120,6 +120,14 @@ describe('streamFetch', () => {
     // 不应抛出
     await expect(streamFetch('/api/x')).resolves.toBeUndefined()
   })
+
+  it('can rethrow AbortError for resumable streams', async () => {
+    const abortErr = new Error('aborted')
+    abortErr.name = 'AbortError'
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abortErr))
+
+    await expect(streamFetch('/api/x', { throwOnAbort: true })).rejects.toMatchObject({ name: 'AbortError' })
+  })
 })
 
 describe('sseFetch', () => {

@@ -17,6 +17,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import jakarta.servlet.http.HttpServletRequest;
 
 @Slf4j
@@ -34,8 +35,24 @@ public class GlobalExceptionHandler {
         if (request == null) return false;
         String accept = request.getHeader("Accept");
         String contentType = request.getContentType();
-        return (accept != null && accept.contains("text/event-stream"))
+        String uri = request.getRequestURI();
+        boolean ssePath = uri != null && (
+                uri.equals("/api/chat/stream")
+                        || uri.equals("/api/chat/stream/reconnect")
+                        || uri.endsWith("/workflow/test/stream"));
+        return ssePath
+                || (accept != null && accept.contains("text/event-stream"))
                 || (contentType != null && contentType.contains("text/event-stream"));
+    }
+
+    private ResponseEntity<String> sseError(HttpStatus status, String type, String message) {
+        String safeMessage = message == null ? "服务异常" : message
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"");
+        String body = "data:[STATUS]{\"type\":\"" + type + "\",\"message\":\"" + safeMessage + "\"}\n\n";
+        return ResponseEntity.status(status)
+                .contentType(org.springframework.http.MediaType.TEXT_EVENT_STREAM)
+                .body(body);
     }
 
     @ExceptionHandler(NotLoginException.class)
@@ -66,11 +83,14 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Result<Void>> handleValidation(MethodArgumentNotValidException e) {
+    public Object handleValidation(MethodArgumentNotValidException e, HttpServletRequest request) {
         String message = e.getBindingResult().getFieldErrors().stream()
                 .map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
                 .findFirst().orElse("参数校验失败");
         log.info("参数校验失败: {}", message);
+        if (isSseRequest(request)) {
+            return sseError(HttpStatus.BAD_REQUEST, "validation_error", message);
+        }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Result.fail(400, message));
     }
@@ -100,8 +120,12 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
-    public ResponseEntity<Result<Void>> handleNotReadable(
-            org.springframework.http.converter.HttpMessageNotReadableException e) {
+    public Object handleNotReadable(
+            org.springframework.http.converter.HttpMessageNotReadableException e,
+            HttpServletRequest request) {
+        if (isSseRequest(request)) {
+            return sseError(HttpStatus.BAD_REQUEST, "request_error", "request body format error");
+        }
         log.info("请求体解析失败: {}", e.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Result.fail(400, "请求体格式错误"));
@@ -156,6 +180,16 @@ public class GlobalExceptionHandler {
         log.info("请求参数格式错误: name={}, value={}", e.getName(), e.getValue());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Result.fail(400, "请求参数格式错误"));
+    }
+
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public Object handleAsyncRequestNotUsable(
+            AsyncRequestNotUsableException e, HttpServletRequest request) {
+        if (isSseRequest(request)) {
+            log.debug("[SSE] client disconnected: {}", e.getMessage());
+            return null;
+        }
+        return handleException(e, request);
     }
 
     @ExceptionHandler(Exception.class)

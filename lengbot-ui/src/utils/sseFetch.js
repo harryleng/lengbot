@@ -91,9 +91,13 @@ export function sseFetch(
  * @param {function} [options.onLines] 收到一段完整行（按 \n 切）回调，参数为完整文本
  * @returns {Promise<void>} 流结束时 resolve
  */
-export async function streamFetch(url, { token, method = 'GET', body, signal, onLines } = {}) {
+export async function streamFetch(
+  url,
+  { token, method = 'GET', body, signal, onLines, throwOnAbort = false } = {}
+) {
   const headers = {}
   if (token) headers['Authorization'] = token
+  headers.Accept = 'text/event-stream'
   if (body) headers['Content-Type'] = 'application/json'
   const fetchOptions = { method, headers, signal }
   if (body) fetchOptions.body = JSON.stringify(body)
@@ -131,7 +135,10 @@ export async function streamFetch(url, { token, method = 'GET', body, signal, on
     }
   } catch (err) {
     // 用户主动中止：fetch 阶段或 reader 阶段都可能抛 AbortError，统一静默
-    if (err.name === 'AbortError') return
+    if (err.name === 'AbortError') {
+      if (throwOnAbort) throw err
+      return
+    }
     throw err
   }
 }
