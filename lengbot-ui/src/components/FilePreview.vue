@@ -33,11 +33,11 @@
     <!-- HTML 预览：优先用已拉取的正文 srcdoc 内联渲染，绕开 MinIO 预签名 URL 的 attachment/Content-Type 头导致的空白页；无正文时才回退到 :src -->
     <iframe
       v-else-if="isHtml && !forceText && htmlRenderable"
-      :srcdoc="resolvedContent || undefined"
-      :src="!resolvedContent && fileUrl ? fileUrl : undefined"
+      :src="fileUrl || undefined"
+      :srcdoc="!fileUrl ? resolvedContent || undefined : undefined"
       class="preview-iframe"
       frameborder="0"
-      sandbox="allow-same-origin"
+      sandbox="allow-scripts allow-forms allow-modals"
       @error="htmlLoadError = true"
     ></iframe>
 

@@ -107,9 +107,15 @@ public class SessionFileServiceImpl implements SessionFileService {
         return localFileRootPath().resolve(rel).normalize();
     }
 
-    /** 主机根文件访问 URL（由 HostFileController 提供，受 local-file 白名单校验） */
+    /** 主机根文件访问 URL（outputs 是会话文件树的虚拟分区，不属于主机根路径） */
     private String hostFileUrl(String relativeTreePath) {
-        return "/api/host/files/" + relativeTreePath;
+        String hostPath = relativeTreePath;
+        if (hostPath.equals(SessionStoragePath.OUTPUTS_DIR)) {
+            hostPath = "";
+        } else if (hostPath.startsWith(SessionStoragePath.OUTPUTS_DIR + "/")) {
+            hostPath = hostPath.substring(SessionStoragePath.OUTPUTS_DIR.length() + 1);
+        }
+        return "/api/host/files/" + hostPath;
     }
 
     /** 本地文件访问 URL（与 LocalDiskSandboxFs.resolveFileAccess / SandboxFileController 映射一致） */
@@ -211,6 +217,9 @@ public class SessionFileServiceImpl implements SessionFileService {
                 vo.setSupported(true);
                 vo.setPreviewType(previewType);
                 vo.setContent(content);
+                if (isHtmlFile(normalized)) {
+                    vo.setPreviewUrl(minioUtil.getPresignedUrl(objectKey, mime));
+                }
                 return vo;
             } catch (Exception e) {
                 vo.setSupported(false);
@@ -268,6 +277,9 @@ public class SessionFileServiceImpl implements SessionFileService {
                 vo.setSupported(true);
                 vo.setPreviewType(previewType);
                 vo.setContent(content);
+                if (isHtmlFile(normalized)) {
+                    vo.setPreviewUrl(localFileUrl(objectKey));
+                }
                 return vo;
             } catch (IOException e) {
                 vo.setSupported(false);
@@ -355,6 +367,9 @@ public class SessionFileServiceImpl implements SessionFileService {
                 vo.setSupported(true);
                 vo.setPreviewType(previewType);
                 vo.setContent(content);
+                if (isHtmlFile(normalized)) {
+                    vo.setPreviewUrl(hostFileUrl(normalized));
+                }
                 return vo;
             } catch (IOException e) {
                 vo.setSupported(false);
@@ -724,6 +739,11 @@ public class SessionFileServiceImpl implements SessionFileService {
             }
         }
         return "unsupported";
+    }
+
+    private boolean isHtmlFile(String name) {
+        String lower = name == null ? "" : name.toLowerCase();
+        return lower.endsWith(".html") || lower.endsWith(".htm");
     }
 
     /** 优先使用有效 MIME；octet-stream 或空值时按文件名推断 */
